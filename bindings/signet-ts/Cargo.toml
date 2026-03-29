@@ -1,9 +1,18 @@
 [package]
-name = "signet-ts"
+name = "signet-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "TypeScript/WASM bindings for signet-core"
+description = "WASM bindings for signet-core"
 license = "Apache-2.0 OR MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 signet-core = { path = "../../crates/signet-core" }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+serde_json = "1"
+getrandom = { version = "0.2", features = ["js"] }
+base64 = "0.22"
+ed25519-dalek = "2"

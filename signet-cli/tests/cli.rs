@@ -371,6 +371,186 @@ fn test_params_at_file() {
         .stdout(predicate::str::contains("sig"));
 }
 
+// ─── audit log ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_sign_creates_audit_log() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "auditkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key", "auditkey",
+            "--tool", "bash",
+            "--params", r#"{"cmd":"ls"}"#,
+            "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    let audit_dir = dir.path().join("audit");
+    assert!(audit_dir.exists(), "audit/ directory must exist");
+    let entries: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(entries.len(), 1, "audit/ must have exactly 1 file");
+}
+
+#[test]
+fn test_sign_no_log() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "nologkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key", "nologkey",
+            "--tool", "bash",
+            "--params", r#"{"cmd":"ls"}"#,
+            "--target", "mcp://local",
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    let audit_dir = dir.path().join("audit");
+    assert!(!audit_dir.exists(), "audit/ directory must NOT exist when --no-log is used");
+}
+
+#[test]
+fn test_audit_list() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "listkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    for i in 0..3 {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "sign",
+                "--key", "listkey",
+                "--tool", "bash",
+                "--params", &format!(r#"{{"cmd":"cmd{i}"}}"#),
+                "--target", "mcp://local",
+            ])
+            .assert()
+            .success();
+    }
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3 records"));
+}
+
+#[test]
+fn test_audit_since() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "sincekey", "--unencrypted"])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key", "sincekey",
+            "--tool", "bash",
+            "--params", r#"{"cmd":"date"}"#,
+            "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--since", "1h"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 records"));
+}
+
+#[test]
+fn test_audit_verify() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "verifyauditkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    for i in 0..3 {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "sign",
+                "--key", "verifyauditkey",
+                "--tool", "bash",
+                "--params", &format!(r#"{{"cmd":"run{i}"}}"#),
+                "--target", "mcp://local",
+            ])
+            .assert()
+            .success();
+    }
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--verify"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3/3 signatures valid"));
+}
+
+#[test]
+fn test_verify_chain() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "chainkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    for i in 0..3 {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "sign",
+                "--key", "chainkey",
+                "--tool", "bash",
+                "--params", &format!(r#"{{"cmd":"step{i}"}}"#),
+                "--target", "mcp://local",
+            ])
+            .assert()
+            .success();
+    }
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["verify", "--chain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Chain intact: 3 records verified"));
+}
+
 #[test]
 fn test_params_at_nonexistent() {
     let dir = tempdir().unwrap();

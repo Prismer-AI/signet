@@ -1,0 +1,9 @@
+[package]
+name = "signet-ts"
+version = "0.1.0"
+edition = "2021"
+description = "TypeScript/WASM bindings for signet-core"
+license = "Apache-2.0 OR MIT"
+
+[dependencies]
+signet-core = { path = "../../crates/signet-core" }

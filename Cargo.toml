@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/signet-core", "bindings/signet-ts"]
+resolver = "2"

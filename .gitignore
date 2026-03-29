@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+*.tgz
+
+# WASM
+pkg/
+*.wasm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Signet local data (never commit keys)
+.signet/
+
+# Environment
+.env
+.env.*

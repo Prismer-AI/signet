@@ -19,6 +19,9 @@ pub struct SignArgs {
     pub hash_only: bool,
     #[arg(long)]
     pub output: Option<String>,
+    /// Skip writing to audit log
+    #[arg(long)]
+    pub no_log: bool,
 }
 
 pub fn sign(args: SignArgs) -> Result<()> {
@@ -66,6 +69,10 @@ pub fn sign(args: SignArgs) -> Result<()> {
     let owner = info.owner.as_deref().unwrap_or("");
     let receipt = signet_core::sign(&sk, &action, &info.name, owner)?;
     let json = serde_json::to_string(&receipt)?;
+
+    if !args.no_log {
+        signet_core::audit::append(&dir, &receipt)?;
+    }
 
     match args.output {
         Some(ref path) => {

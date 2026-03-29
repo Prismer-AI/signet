@@ -1,12 +1,150 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use chrono::Utc;
+use ed25519_dalek::{Signer as _, SigningKey};
+use rand::RngCore;
+use sha2::{Digest, Sha256};
+
+use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::{Action, Receipt};
-use ed25519_dalek::SigningKey;
+use crate::receipt::{Action, Receipt, Signer};
 
 pub fn sign(
-    _key: &SigningKey,
-    _action: &Action,
-    _signer_name: &str,
-    _signer_owner: &str,
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
 ) -> Result<Receipt, SignetError> {
-    todo!()
+    // 1. Compute params_hash from params
+    let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
+        action.params_hash.clone()
+    } else {
+        let canonical_params = canonical::canonicalize(&action.params)?;
+        let hash = Sha256::digest(canonical_params.as_bytes());
+        format!("sha256:{}", hex::encode(hash))
+    };
+
+    // 2. Build action with computed hash
+    let signed_action = Action {
+        tool: action.tool.clone(),
+        params: action.params.clone(),
+        params_hash,
+        target: action.target.clone(),
+        transport: action.transport.clone(),
+    };
+
+    // 3. Build signer
+    let pubkey_bytes = key.verifying_key().to_bytes();
+    let signer = Signer {
+        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        name: signer_name.to_string(),
+        owner: signer_owner.to_string(),
+    };
+
+    // 4. Generate nonce
+    let mut nonce_bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
+
+    // 5. Get timestamp
+    let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+    // 6. Build signable JSON
+    let signable = serde_json::json!({
+        "v": 1u8,
+        "action": signed_action,
+        "signer": signer,
+        "ts": ts,
+        "nonce": nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+
+    // 7. Sign
+    let signature = key.sign(canonical_bytes.as_bytes());
+    let sig_b64 = BASE64.encode(signature.to_bytes());
+    let sig = format!("ed25519:{}", sig_b64);
+
+    // 8. Derive receipt ID
+    let sig_hash = Sha256::digest(signature.to_bytes());
+    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+
+    Ok(Receipt {
+        v: 1,
+        id,
+        action: signed_action,
+        signer,
+        ts,
+        nonce,
+        sig,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::generate_keypair;
+    use crate::test_helpers::test_action;
+
+    #[test]
+    fn test_sign_produces_receipt() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "test-agent", "willamhou").unwrap();
+
+        assert_eq!(receipt.v, 1);
+        assert!(receipt.id.starts_with("rec_"));
+        assert!(receipt.sig.starts_with("ed25519:"));
+        assert!(receipt.nonce.starts_with("rnd_"));
+        assert!(receipt.signer.pubkey.starts_with("ed25519:"));
+        assert_eq!(receipt.signer.name, "test-agent");
+        assert_eq!(receipt.signer.owner, "willamhou");
+        assert_eq!(receipt.action.tool, "github_create_issue");
+    }
+
+    #[test]
+    fn test_params_hash_computed() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "test-agent", "owner").unwrap();
+
+        let canonical_params = canonical::canonicalize(&action.params).unwrap();
+        let expected_hash = format!("sha256:{}", hex::encode(Sha256::digest(canonical_params.as_bytes())));
+        assert_eq!(receipt.action.params_hash, expected_hash);
+    }
+
+    #[test]
+    fn test_params_hash_only_mode() {
+        let (key, _) = generate_keypair();
+        let action = Action {
+            tool: "test".to_string(),
+            params: serde_json::Value::Null,
+            params_hash: "sha256:abc123".to_string(),
+            target: "mcp://test".to_string(),
+            transport: "stdio".to_string(),
+        };
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert_eq!(receipt.action.params_hash, "sha256:abc123");
+    }
+
+    #[test]
+    fn test_nonce_uniqueness() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let r1 = sign(&key, &action, "agent", "owner").unwrap();
+        let r2 = sign(&key, &action, "agent", "owner").unwrap();
+        assert_ne!(r1.nonce, r2.nonce);
+    }
+
+    #[test]
+    fn test_receipt_id_from_sig() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+
+        let sig_b64 = receipt.sig.strip_prefix("ed25519:").unwrap();
+        let sig_bytes = BASE64.decode(sig_b64).unwrap();
+        let sig_hash = Sha256::digest(&sig_bytes);
+        let expected_id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+        assert_eq!(receipt.id, expected_id);
+    }
 }

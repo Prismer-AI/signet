@@ -3,10 +3,8 @@ import { wasm_generate_keypair, wasm_sign, wasm_verify } from '../../bindings/si
 
 // Test 1: Generate keypair
 console.log('Test 1: Generate keypair...');
-const keypair = wasm_generate_keypair();
-// serde_wasm_bindgen serializes JSON objects as JS Map
-const secret_key = keypair instanceof Map ? keypair.get('secret_key') : keypair.secret_key;
-const public_key = keypair instanceof Map ? keypair.get('public_key') : keypair.public_key;
+const keypair = JSON.parse(wasm_generate_keypair());
+const { secret_key, public_key } = keypair;
 assert(secret_key && public_key, 'keypair should have both keys');
 console.log('  PASS');
 
@@ -41,9 +39,8 @@ console.log('  PASS');
 
 // Test 5: Wrong key should fail
 console.log('Test 5: Wrong key should fail...');
-const other_keypair = wasm_generate_keypair();
-const other_key = other_keypair instanceof Map ? other_keypair.get('public_key') : other_keypair.public_key;
-assert.strictEqual(wasm_verify(receipt_json, other_key), false, 'wrong key should fail');
+const other_keypair = JSON.parse(wasm_generate_keypair());
+assert.strictEqual(wasm_verify(receipt_json, other_keypair.public_key), false, 'wrong key should fail');
 console.log('  PASS');
 
 // Test 6: Tampered signer should fail

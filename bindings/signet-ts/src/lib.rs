@@ -6,7 +6,7 @@ use signet_core::receipt::Action;
 use signet_core::{generate_keypair, sign, verify};
 
 #[wasm_bindgen]
-pub fn wasm_generate_keypair() -> Result<JsValue, JsError> {
+pub fn wasm_generate_keypair() -> Result<String, JsError> {
     let (signing_key, verifying_key) = generate_keypair();
     let secret_b64 = BASE64.encode(signing_key.to_keypair_bytes());
     let public_b64 = BASE64.encode(verifying_key.to_bytes());
@@ -16,7 +16,7 @@ pub fn wasm_generate_keypair() -> Result<JsValue, JsError> {
         "public_key": public_b64,
     });
 
-    serde_wasm_bindgen::to_value(&result).map_err(|e| JsError::new(&e.to_string()))
+    serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
 #[wasm_bindgen]

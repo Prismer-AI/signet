@@ -8,6 +8,9 @@ pub mod verify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod keystore;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod audit;
+
 pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use receipt::{Action, Receipt, Signer};

@@ -4,6 +4,7 @@ use std::process;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
+mod cmd_audit;
 mod cmd_identity;
 mod cmd_sign;
 mod cmd_verify;
@@ -26,6 +27,8 @@ enum Commands {
     Sign(cmd_sign::SignArgs),
     /// Verify an action receipt
     Verify(cmd_verify::VerifyArgs),
+    /// Query and verify the audit log
+    Audit(cmd_audit::AuditArgs),
 }
 
 #[derive(Subcommand)]
@@ -74,6 +77,7 @@ fn run() -> Result<()> {
         },
         Commands::Sign(args) => cmd_sign::sign(args)?,
         Commands::Verify(args) => cmd_verify::verify(args)?,
+        Commands::Audit(args) => cmd_audit::audit(args)?,
     }
     Ok(())
 }

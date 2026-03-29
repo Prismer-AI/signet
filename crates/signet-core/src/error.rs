@@ -36,6 +36,10 @@ pub enum SignetError {
     CorruptedFile(String),
 
     #[cfg(not(target_arch = "wasm32"))]
+    #[error("corrupted audit record: {0}")]
+    CorruptedRecord(String),
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 

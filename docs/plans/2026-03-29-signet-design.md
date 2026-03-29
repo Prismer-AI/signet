@@ -6,7 +6,7 @@
 
 ## Overview
 
-Signet is an open-source SDK that gives AI agents cryptographic identity and action-level signing. Every tool call gets signed — who did it, who authorized it, when, verifiable and tamper-proof.
+Signet is an open-source SDK that gives AI agents cryptographic identity and action-level signing. Every tool call gets signed — which agent key signed it, what was requested, when — producing a verifiable, tamper-evident local audit trail.
 
 **One-liner:** Cryptographic action receipts for AI agents — sign, audit, verify.
 
@@ -22,7 +22,7 @@ AI agents are executing high-value actions (API calls, database writes, contract
 
 Real incidents: Amazon Kiro deleted a production environment (13h outage), Replit agent deleted a live database, Supabase MCP leaked secret tokens via prompt injection, $47K agent infinite loop.
 
-No existing solution provides **action-level signing** — a cryptographic proof that a specific agent performed a specific action at a specific time, authorized by a specific owner.
+No existing SDK provides **action-level signing as a client-side library** — a cryptographic attestation that a specific agent key signed a specific tool-call intent at a specific time. This is signed intent, not proof of execution: the receipt proves the agent requested an action, not that the server executed it. Server-side execution receipts are a v2+ goal.
 
 ## Target User (MVP)
 
@@ -48,6 +48,11 @@ Developer's Agent
 
 Key principle: **agent-side only integration**. MVP does not require MCP servers to change. Signing is opt-in at the client side. Value is delivered through local audit.
 
+**What Signet proves vs. what it doesn't:**
+- Proves: agent key X signed intent to call tool Y with params Z at time T
+- Does NOT prove (MVP): that the MCP server received or executed the action
+- Does NOT prove (MVP): that signer.owner actually controls the key (requires identity registry, v2+)
+
 ## Core Modules
 
 ### 1. Identity
@@ -56,6 +61,7 @@ Each agent gets an Ed25519 keypair.
 
 - **Generation:** `signet identity generate --name deploy-bot`
 - **Storage:** Private key encrypted with XChaCha20-Poly1305, passphrase derived via Argon2id
+- **Passphrase:** Interactive TTY prompt by default; `SIGNET_PASSPHRASE` env var for CI/automation
 - **Metadata:** name, owner, created_at, capabilities[]
 - **Export:** `signet identity export --public` outputs the public key for sharing
 
@@ -74,14 +80,15 @@ Signs an action and produces an **Action Receipt**.
 
 ```rust
 let receipt = signet::sign(&agent_key, &Action {
-    tool_name: "github_create_issue",
-    params_hash: sha256(&canonical_json(params)),
+    tool: "github_create_issue",
+    params: json!({"title": "fix bug"}),   // plaintext by default
+    params_hash: String::new(),             // auto-computed: sha256(JCS(params))
     target: "mcp://github.local",
     transport: "stdio",
-})?;
+}, &signer)?;
 ```
 
-Signature covers: canonical JSON of `action` + `ts` + `nonce`.
+Signature covers: canonical JSON (RFC 8785 JCS) of the entire receipt body minus `sig` and `id` fields — specifically `v` + `action` + `signer` + `ts` + `nonce`. This ensures all meaningful fields (including `signer.name` and `signer.owner`) are tamper-evident.
 
 ### 3. Verify
 
@@ -109,7 +116,9 @@ Append-only JSONL log of all Action Receipts.
 - One receipt per line, append-only
 - Split by day (no single file bloat)
 - No database dependency
-- Optional encrypted param storage: `signet sign --store-params`
+- Params stored in plaintext by default (human-readable audit)
+- `signet sign --hash-only` omits raw params, stores only hash
+- Optional encrypted param storage: `signet sign --encrypt-params` (v2+)
 
 CLI:
 ```bash
@@ -142,6 +151,7 @@ const transport = new SigningTransport(innerTransport, agentKey);
   "id": "rec_a8f3e...",
   "action": {
     "tool": "github_create_issue",
+    "params": {"title": "fix bug"},
     "params_hash": "sha256:e3b0c44...",
     "target": "mcp://github.local",
     "transport": "stdio"
@@ -161,12 +171,13 @@ Design decisions:
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Params | Hash only, not raw | Params may contain secrets; original can be rehashed for verification |
+| Params | Plaintext by default, hash-only opt-in | Human-readable audit requires original params; `--hash-only` for sensitive data |
 | Serialization | JSON (MVP) | Developer-readable; CBOR as optional v2 compact format |
-| Signature scope | canonical(action + ts + nonce) | Deterministic serialization prevents field-order ambiguity |
+| Canonicalization | RFC 8785 (JCS) | Standard deterministic JSON; `json-canonicalization` crate |
+| Signature scope | canonical(v + action + signer + ts + nonce) | All meaningful fields are tamper-evident; `sig` and `id` excluded (derived) |
 | Receipt ID | SHA-256(sig) truncated 16 bytes | Globally unique, recomputable from signature |
 | Target field | MCP server URI | Audit trail shows which server received the action |
-| Replay protection | nonce + timestamp | Unique nonce per action, timestamp for time-window validation |
+| Uniqueness guarantee | nonce + timestamp | Unique nonce per action, timestamp for ordering; true replay protection requires server-side nonce tracking (v2+) |
 
 ## Tech Stack
 
@@ -182,16 +193,17 @@ Design decisions:
 | Time | `chrono` | Timestamps |
 | Random | `rand` | Nonce generation |
 | Hashing | `sha2` | SHA-256 for params_hash and receipt ID |
+| Canonicalization | `json-canonicalization` | RFC 8785 (JCS) deterministic JSON |
 
 ### TypeScript Binding (`signet-ts`)
 
-Built from `signet-core` via `wasm-bindgen` + `wasm-pack`. Targets:
+Built from `signet-core` via `wasm-bindgen` + `wasm-pack`.
 
-- Node.js
-- Bun
-- Deno
-- Cloudflare Workers
-- Browser
+MVP target: **Node.js only** (`wasm-pack build --target nodejs`).
+
+Browser, Bun, Deno, and Cloudflare Workers require different key-storage and
+audit-log models (no `~/.signet`, no local filesystem). These are v2+ targets
+that need separate storage abstractions.
 
 ### MCP Middleware (`@signet/mcp`)
 
@@ -208,7 +220,8 @@ signet/
 │       ├── verify.rs         # Signature verification
 │       ├── receipt.rs        # Action Receipt types + serialization
 │       ├── audit.rs          # JSONL audit log read/write
-│       └── canonical.rs      # Canonical JSON serialization
+│       ├── canonical.rs      # RFC 8785 (JCS) canonical JSON
+│       └── error.rs          # SignetError enum (thiserror)
 ├── signet-cli/               # CLI tool
 │   └── main.rs               # identity/sign/verify/audit subcommands
 ├── bindings/
@@ -230,11 +243,12 @@ signet/
 
 ### M0: Tech Validation (2-3 days)
 
-Derisk the two key assumptions:
-1. Ed25519 sign → verify roundtrip in Rust + WASM
-2. MCP stdio transport wrapping: inject `_signet` field without breaking MCP server
+Derisk the critical technical assumption:
+1. Ed25519 sign → verify roundtrip in Rust + WASM (Node.js)
 
-**Exit criteria:** Working prototype that signs an MCP tool call via wrapped stdio transport, and a stock MCP server processes the request normally (ignores the extra field).
+**Exit criteria:** `cargo test` passes (Rust roundtrip), `wasm-pack build --target nodejs` succeeds, Node.js script verifies sign/verify/tamper-detect via WASM.
+
+See `docs/superpowers/specs/2026-03-29-m0-tech-validation-design.md` for full M0 spec.
 
 ### M1: Core (2 weeks)
 
@@ -243,11 +257,17 @@ Derisk the two key assumptions:
 - Unit tests 80%+ coverage
 - README + quickstart doc
 
-### M2: Audit (1 week)
+### M2: Audit + Chain (1 week)
 
 - `signet-core`: audit log (JSONL append/query)
+- `signet-core`: SHA-256 hash chain (each record includes hash of previous record)
 - `signet-cli`: `audit --since/--tool/--verify/--export`
+- `signet-cli`: `verify --chain` (validate chain integrity, detect tampering)
 - Integration tests
+
+Note: hash chain provides tamper-evidence for the local log (detects accidental
+or non-privileged modification). It does NOT prevent a compromised machine from
+regenerating a consistent fake history — off-host anchoring is a v2+ feature.
 
 ### M3: MCP + WASM (2 weeks)
 
@@ -268,10 +288,11 @@ Derisk the two key assumptions:
 | Hosted identity registry | MVP proves "signing is useful" first |
 | Server-side verification middleware | Chicken-and-egg: needs adoption first |
 | Agent-to-agent signing (contracts) | Needs registry + delegation |
-| Hash chain in audit log | Enterprise tamper-evidence need, not developer MVP need |
+| Off-host chain anchoring | Local hash chain is MVP; remote anchoring for durable tamper-evidence is v2+ |
 | Multi-signature (M-of-N) | Complex, needs threshold crypto |
 | CBOR serialization | JSON is fine for MVP, CBOR for compact wire format later |
-| Python binding | TypeScript covers MCP ecosystem majority |
+| Python binding (PyO3) | TypeScript covers MCP ecosystem majority; Python follows for LangChain/CrewAI |
+| Browser/Workers/Deno/Bun targets | Require different storage model; Node.js only for MVP |
 | Compliance dashboard | Enterprise feature |
 | Legal attribution layer | Needs legal framework partnership |
 | Cross-framework (A2A, ANP) | MCP first, expand after |
@@ -279,39 +300,7 @@ Derisk the two key assumptions:
 ## Open Source Strategy
 
 - **License:** Apache-2.0 + MIT dual license (maximum compatibility)
-- **GitHub org:** `signet-auth`
+- **GitHub:** `Prismer-AI/signet`
 - **Public development** from day 1
 - Conventional commits, CHANGELOG
 - Issue templates for bug reports and feature requests
-
-## Competitive Positioning
-
-| | Signet | Signet-AI | Aembit | Cloudflare MCP | Red Hat Gateway |
-|--|--------|-----------|--------|----------------|-----------------|
-| What | Action signing SDK | Memory layer | Enterprise NHI gateway | Platform-bound auth | Envoy + OPA |
-| Agent identity | Ed25519 keypairs | None | Workload identity | OAuth server | JWT + mTLS |
-| Action signing | Per-tool-call receipts | None | None | None | None |
-| Audit log | Local JSONL | None | Cloud dashboard | Logs | ELK |
-| MCP support | Client middleware | MCP server (memory) | Gateway proxy | Workers only | Envoy proxy |
-| stdio support | Yes (_signet field) | N/A | No | No | No |
-| Developer effort | Add 3 lines of code | Install daemon | Deploy gateway | Use Workers | Deploy Envoy |
-| Open source | Yes (Apache-2.0 + MIT) | Yes (custom) | No | No | Partial |
-| Target | Developers | Developers | Enterprise | Cloudflare users | Enterprise |
-
-**Unique differentiator:** Signet is the only solution that provides **action-level cryptographic signing** as an **open-source developer SDK** with **stdio transport support**.
-
-## Market Context
-
-- AI security funding: $6.34B in 2025 (3x YoY)
-- NIST AI Agent Standards Initiative (Feb 2026) recommends agent identity registries
-- OpenAI hiring "Agent Security Engineer" roles
-- 88% of MCP servers require credentials but only 8.5% use OAuth
-- No existing tool signs individual agent actions
-
-## Success Metrics (6 months post-launch)
-
-- 500+ GitHub stars
-- 50+ weekly npm downloads of @signet/mcp
-- 3+ third-party integrations (agent frameworks adopting Signet)
-- 1+ conference talk or blog post from an external developer
-- Action Receipt format adopted or referenced by at least 1 MCP-adjacent project

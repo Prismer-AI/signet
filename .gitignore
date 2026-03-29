@@ -26,6 +26,12 @@ Thumbs.db
 # Signet local data (never commit keys)
 .signet/
 
+# Strategy docs (private)
+.strategy.md
+docs/plans/.strategy.md
+
 # Environment
 .env
 .env.*
+package-lock.json
+node_modules/

@@ -5,6 +5,9 @@ pub mod receipt;
 pub mod sign;
 pub mod verify;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod keystore;
+
 pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use receipt::{Action, Receipt, Signer};

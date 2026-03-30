@@ -83,6 +83,9 @@ jobs:
       - name: Build WASM into packages/signet-core/wasm
         run: wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/signet-core/wasm
 
+      - name: Install TypeScript globally
+        run: npm install -g typescript
+
       - name: Install @signet-auth/core dependencies
         working-directory: packages/signet-core
         run: npm install
@@ -90,7 +93,7 @@ jobs:
       - name: Build and test @signet-auth/core
         run: |
           cd packages/signet-core
-          npx tsc
+          tsc
           cp -r wasm dist/wasm
           node --test dist/tests/core.test.js
 
@@ -101,5 +104,5 @@ jobs:
       - name: Build and test @signet-auth/mcp
         run: |
           cd packages/signet-mcp
-          npx tsc
+          tsc
           node --test dist/tests/mcp.test.js

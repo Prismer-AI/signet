@@ -7,8 +7,8 @@
 ## Goal
 
 Build the TypeScript npm packages that make Signet usable by MCP developers:
-a TypeScript wrapper for the WASM core (`@signet/core`) and an MCP transport
-middleware (`@signet/mcp`) that auto-signs every tool call.
+a TypeScript wrapper for the WASM core (`@signet-auth/core`) and an MCP transport
+middleware (`@signet-auth/mcp`) that auto-signs every tool call.
 
 ## Non-Goals
 
@@ -20,8 +20,8 @@ middleware (`@signet/mcp`) that auto-signs every tool call.
 
 ## Exit Criteria
 
-1. `@signet/core` exports typed `generateKeypair()`, `sign()`, `verify()` functions
-2. `@signet/mcp` exports `SigningTransport` class that implements MCP `Transport`
+1. `@signet-auth/core` exports typed `generateKeypair()`, `sign()`, `verify()` functions
+2. `@signet-auth/mcp` exports `SigningTransport` class that implements MCP `Transport`
 3. SigningTransport intercepts `tools/call` → signs → injects `_meta._signet` with receipt (params nulled, hash preserved)
 4. SigningTransport passes through all non-tool-call messages unmodified
 5. Example MCP agent + echo server runs end-to-end
@@ -36,7 +36,7 @@ Developer's Agent Code
         |
         v
 ┌─────────────────────────────────────────┐
-│  @signet/mcp — SigningTransport          │
+│  @signet-auth/mcp — SigningTransport          │
 │  implements MCP Transport interface      │
 │                                          │
 │  send(message):                          │
@@ -49,7 +49,7 @@ Developer's Agent Code
                  │ depends on
                  v
 ┌─────────────────────────────────────────┐
-│  @signet/core — TypeScript wrapper       │
+│  @signet-auth/core — TypeScript wrapper       │
 │                                          │
 │  generateKeypair() → SignetKeypair       │
 │  sign(key, action, name, owner) → Receipt│
@@ -63,7 +63,7 @@ Developer's Agent Code
 └─────────────────────────────────────────┘
 ```
 
-## Package 1: @signet/core
+## Package 1: @signet-auth/core
 
 ### API
 
@@ -186,7 +186,7 @@ packages/signet-core/
 `package.json`:
 ```json
 {
-  "name": "@signet/core",
+  "name": "@signet-auth/core",
   "version": "0.1.0",
   "description": "Cryptographic action receipts for AI agents",
   "type": "module",
@@ -225,14 +225,14 @@ tsconfig.json for both packages:
 }
 ```
 
-## Package 2: @signet/mcp
+## Package 2: @signet-auth/mcp
 
 ### SigningTransport
 
 ```typescript
 import type { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
-import { sign, type SignetReceipt, type SignetAction } from "@signet/core";
+import { sign, type SignetReceipt, type SignetAction } from "@signet-auth/core";
 
 export interface SigningTransportOptions {
   target?: string;              // default "unknown"
@@ -356,7 +356,7 @@ packages/signet-mcp/
 `package.json`:
 ```json
 {
-  "name": "@signet/mcp",
+  "name": "@signet-auth/mcp",
   "version": "0.1.0",
   "description": "MCP middleware for Signet cryptographic action receipts",
   "type": "module",
@@ -371,7 +371,7 @@ packages/signet-mcp/
     "@modelcontextprotocol/sdk": ">=1.10.0"
   },
   "dependencies": {
-    "@signet/core": "workspace:*"
+    "@signet-auth/core": "workspace:*"
   },
   "license": "Apache-2.0 OR MIT"
 }
@@ -421,8 +421,8 @@ MCP client that connects to echo-server via SigningTransport:
 ```typescript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { generateKeypair } from "@signet/core";
-import { SigningTransport } from "@signet/mcp";
+import { generateKeypair } from "@signet-auth/core";
+import { SigningTransport } from "@signet-auth/mcp";
 
 // Generate agent identity
 const { secretKey, publicKey } = generateKeypair();
@@ -461,7 +461,7 @@ Root `package.json` (new):
 }
 ```
 
-This enables npm/yarn workspace linking so `@signet/mcp` can resolve `@signet/core`
+This enables npm/yarn workspace linking so `@signet-auth/mcp` can resolve `@signet-auth/core`
 locally during development.
 
 ## Build Flow
@@ -494,7 +494,7 @@ cd examples/mcp-agent && npx tsx agent.ts
 
 ## Test Plan
 
-### @signet/core tests (6 tests)
+### @signet-auth/core tests (6 tests)
 
 | Test | What it validates |
 |------|-------------------|
@@ -505,7 +505,7 @@ cd examples/mcp-agent && npx tsx agent.ts
 | `test_verify_tampered` | Tampered receipt → verify returns false |
 | `test_params_hash_computed` | Receipt.action.params_hash starts with "sha256:" |
 
-### @signet/mcp tests (5 tests)
+### @signet-auth/mcp tests (5 tests)
 
 | Test | What it validates |
 |------|-------------------|
@@ -524,8 +524,8 @@ complexity in tests.
 ```
 Package             Tests
 ──────────────────────────
-@signet/core        6
-@signet/mcp         5
+@signet-auth/core        6
+@signet-auth/mcp         5
 ──────────────────────────
 Total TS            11
 Total Rust (M0-M2)  64
@@ -538,11 +538,11 @@ Grand total         75
 | File | Action | Responsibility |
 |------|--------|----------------|
 | `package.json` (root) | Create | npm workspace config |
-| `packages/signet-core/package.json` | Create | @signet/core metadata |
+| `packages/signet-core/package.json` | Create | @signet-auth/core metadata |
 | `packages/signet-core/tsconfig.json` | Create | TypeScript config |
 | `packages/signet-core/src/index.ts` | Create | Typed WASM wrapper |
 | `packages/signet-core/tests/core.test.ts` | Create | 6 unit tests |
-| `packages/signet-mcp/package.json` | Create | @signet/mcp metadata |
+| `packages/signet-mcp/package.json` | Create | @signet-auth/mcp metadata |
 | `packages/signet-mcp/tsconfig.json` | Create | TypeScript config |
 | `packages/signet-mcp/src/index.ts` | Create | Re-export SigningTransport |
 | `packages/signet-mcp/src/signing-transport.ts` | Create | SigningTransport class |

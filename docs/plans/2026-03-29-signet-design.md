@@ -133,7 +133,7 @@ signet audit --export report.json --since 30d  # export for review
 Zero-config integration via transport wrapper:
 
 ```typescript
-import { SigningTransport } from "@signet/mcp";
+import { SigningTransport } from "@signet-auth/mcp";
 
 const transport = new SigningTransport(innerTransport, agentKey);
 // All tool calls are now automatically signed + logged
@@ -205,7 +205,7 @@ Browser, Bun, Deno, and Cloudflare Workers require different key-storage and
 audit-log models (no `~/.signet`, no local filesystem). These are v2+ targets
 that need separate storage abstractions.
 
-### MCP Middleware (`@signet/mcp`)
+### MCP Middleware (`@signet-auth/mcp`)
 
 Pure TypeScript. Wraps any MCP transport. Depends on `signet-ts` for crypto.
 
@@ -228,7 +228,7 @@ signet/
 │   └── signet-ts/            # TypeScript binding (wasm-bindgen)
 │       └── src/
 ├── packages/
-│   └── signet-mcp/           # @signet/mcp — TS MCP middleware
+│   └── signet-mcp/           # @signet-auth/mcp — TS MCP middleware
 │       ├── signing-transport.ts
 │       └── index.ts
 ├── examples/
@@ -272,7 +272,7 @@ regenerating a consistent fake history — off-host anchoring is a v2+ feature.
 ### M3: MCP + WASM (2 weeks)
 
 - `signet-ts`: wasm-bindgen binding (identity/sign/verify)
-- `@signet/mcp`: SigningTransport middleware
+- `@signet-auth/mcp`: SigningTransport middleware
 - MCP agent example project
 - npm publish
 - End-to-end example: agent + Signet + MCP server

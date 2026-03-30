@@ -19,8 +19,8 @@ We've already seen the consequences: agents deleting production environments, le
 Signet gives every AI agent an Ed25519 identity and signs every tool call. It's a client-side SDK — not a proxy, not a gateway, not a daemon. You add it to your code, and every tool call gets a cryptographic receipt.
 
 ```typescript
-import { generateKeypair } from "@signet/core";
-import { SigningTransport } from "@signet/mcp";
+import { generateKeypair } from "@signet-auth/core";
+import { SigningTransport } from "@signet-auth/mcp";
 
 const { secretKey } = generateKeypair();
 const transport = new SigningTransport(innerTransport, secretKey, "my-agent");
@@ -92,7 +92,7 @@ Signet also doesn't prove the server *executed* the action — only that the age
 ## Tech Stack
 
 - **Rust core** with `ed25519-dalek`, compiled to WASM for Node.js
-- **TypeScript packages**: `@signet/core` (crypto wrapper) and `@signet/mcp` (transport middleware)
+- **TypeScript packages**: `@signet-auth/core` (crypto wrapper) and `@signet-auth/mcp` (transport middleware)
 - **RFC 8785 (JCS)** for deterministic JSON canonicalization
 - **83 tests** (64 Rust + 8 WASM + 11 TypeScript), zero unsafe code
 
@@ -114,7 +114,7 @@ cargo build --release -p signet-cli
 ./target/release/signet verify --chain
 ```
 
-Or for MCP integration: `npm install @signet/core @signet/mcp` (coming soon to npm).
+Or for MCP integration: `npm install @signet-auth/core @signet-auth/mcp` (coming soon to npm).
 
 ---
 

@@ -16,6 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
@@ -54,15 +56,17 @@ jobs:
         run: cargo install wasm-pack
       - name: Build WASM into packages
         run: wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/signet-core/wasm
-      - name: Build @signet-auth/core
+      - name: Install @signet-auth/core deps + build
         working-directory: packages/signet-core
-        run: npx tsc && cp -r wasm dist/wasm
-      - name: Install @signet-auth/mcp deps
+        run: |
+          npm install
+          npx tsc
+          cp -r wasm dist/wasm
+      - name: Install @signet-auth/mcp deps + build
         working-directory: packages/signet-mcp
-        run: npm install --install-links
-      - name: Build @signet-auth/mcp
-        working-directory: packages/signet-mcp
-        run: npx tsc
+        run: |
+          npm install --install-links
+          npx tsc
       - name: Test @signet-auth/core
         working-directory: packages/signet-core
         run: node --test dist/tests/core.test.js

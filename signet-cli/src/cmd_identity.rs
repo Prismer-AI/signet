@@ -51,7 +51,7 @@ pub fn list() -> Result<()> {
         println!("No keys found in {}/keys/", dir.display());
         return Ok(());
     }
-    println!("{:<20} {:<20} {}", "NAME", "OWNER", "CREATED");
+    println!("{:<20} {:<20} CREATED", "NAME", "OWNER");
     println!("{}", "-".repeat(60));
     for key in &keys {
         println!(

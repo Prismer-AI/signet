@@ -68,10 +68,7 @@ fn list_records(dir: &std::path::Path, filter: &AuditFilter) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "{:<30} {:<15} {:<30} {}",
-        "TIME", "SIGNER", "TOOL", "TARGET"
-    );
+    println!("{:<30} {:<15} {:<30} TARGET", "TIME", "SIGNER", "TOOL");
     println!("{}", "-".repeat(90));
     for record in &records {
         let r = &record.receipt;

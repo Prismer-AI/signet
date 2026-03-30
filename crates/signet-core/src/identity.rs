@@ -96,7 +96,7 @@ pub mod fs_ops {
         // Write .key file atomically, cleaning up .pub on error.
         let write_result = (|| -> Result<(), SignetError> {
             let key_json = if let Some(pass) = passphrase {
-                let params = kdf_params.unwrap_or_else(KdfParams::new);
+                let params = kdf_params.unwrap_or_default();
                 let enc = encrypt_key(&signing_key, name, pass, &params)?;
                 serde_json::to_string_pretty(&enc)?
             } else {
@@ -168,7 +168,7 @@ pub mod fs_ops {
             // Encrypted key
             let enc_file: EncryptedKeyFile = serde_json::from_value(value)
                 .map_err(|e| SignetError::CorruptedFile(format!("invalid encrypted .key file: {e}")))?;
-            let pass = passphrase.ok_or_else(|| SignetError::DecryptionError)?;
+            let pass = passphrase.ok_or(SignetError::DecryptionError)?;
             decrypt_key(&enc_file, pass)
         } else {
             // Unencrypted key
@@ -209,9 +209,8 @@ pub mod fs_ops {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("pub") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    match load_key_info(dir, stem) {
-                        Ok(info) => infos.push(info),
-                        Err(_) => {}
+                    if let Ok(info) = load_key_info(dir, stem) {
+                        infos.push(info);
                     }
                 }
             }

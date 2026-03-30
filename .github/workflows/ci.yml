@@ -4,72 +4,102 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   rust:
-    name: Rust Tests
+    name: Rust (clippy + test + no-unsafe check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
+
       - uses: Swatinem/rust-cache@v2
+
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
       - name: Test
         run: cargo test --workspace
 
+      - name: Check no unsafe code
+        run: |
+          if grep -r --include="*.rs" "unsafe" crates/ signet-cli/src/; then
+            echo "ERROR: unsafe code found"
+            exit 1
+          fi
+          echo "No unsafe code found."
+
   wasm:
-    name: WASM Build + Test
+    name: WASM (build + roundtrip test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-unknown-unknown
+
       - uses: Swatinem/rust-cache@v2
+
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
       - name: Build WASM
-        run: wasm-pack build bindings/signet-ts --target nodejs --out-dir pkg
-      - name: Run WASM tests
+        run: wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/signet-core/wasm
+
+      - name: Run WASM roundtrip test
         run: node examples/wasm-roundtrip/test.mjs
 
   typescript:
-    name: TypeScript Tests
+    name: TypeScript (build + test)
+    needs: wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-unknown-unknown
+
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
+
       - name: Install wasm-pack
-        run: cargo install wasm-pack
-      - name: Build WASM into packages
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM into packages/signet-core/wasm
         run: wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/signet-core/wasm
-      - name: Install @signet-auth/core deps + build
+
+      - name: Install @signet-auth/core dependencies
         working-directory: packages/signet-core
+        run: npm install
+
+      - name: Build and test @signet-auth/core
         run: |
-          npm install
+          cd packages/signet-core
           npx tsc
           cp -r wasm dist/wasm
-      - name: Install @signet-auth/mcp deps + build
+          node --test dist/tests/core.test.js
+
+      - name: Install @signet-auth/mcp dependencies
         working-directory: packages/signet-mcp
+        run: npm install
+
+      - name: Build and test @signet-auth/mcp
         run: |
-          npm install --install-links
+          cd packages/signet-mcp
           npx tsc
-      - name: Test @signet-auth/core
-        working-directory: packages/signet-core
-        run: node --test dist/tests/core.test.js
-      - name: Test @signet-auth/mcp
-        working-directory: packages/signet-mcp
-        run: node --test dist/tests/mcp.test.js
+          node --test dist/tests/mcp.test.js

@@ -43,6 +43,24 @@ cd packages/signet-mcp && npm test
 
 ```bash
 cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
+```
+
+## Project Structure
+
+```
+signet/
+├── crates/
+│   └── signet-core/        # Core crypto library (source of truth)
+├── signet-cli/             # CLI binary
+├── bindings/
+│   └── signet-ts/          # wasm-bindgen WASM binding
+├── packages/
+│   ├── signet-core/        # @signet-auth/core — TypeScript WASM wrapper
+│   └── signet-mcp/         # @signet-auth/mcp — MCP SigningTransport
+└── examples/
+    ├── wasm-roundtrip/     # WASM smoke test
+    └── mcp-agent/          # End-to-end MCP agent example
 ```
 
 ## Development Workflow
@@ -61,6 +79,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `feat(cli):` new feature in signet-cli
 - `feat(wasm):` WASM binding changes
 - `feat(mcp):` @signet-auth/mcp changes
+- `feat(ts):` TypeScript package changes
 - `fix:` bug fix
 - `test:` test changes
 - `docs:` documentation

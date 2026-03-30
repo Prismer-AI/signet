@@ -1,4 +1,4 @@
-// @signet/core — TypeScript wrapper for signet WASM
+// @signet-auth/core — TypeScript wrapper for signet WASM
 import { wasm_generate_keypair, wasm_sign, wasm_verify } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {

@@ -32,6 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |

@@ -27,3 +27,7 @@ What actually happens.
 - Rust version:
 - Signet version:
 - Node.js version (if TS):
+
+## Additional Context
+
+Any other context, logs, or screenshots about the problem.

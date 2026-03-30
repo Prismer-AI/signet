@@ -18,7 +18,7 @@ class MockTransport implements Transport {
   }
 }
 
-describe('@signet/mcp SigningTransport', () => {
+describe('@signet-auth/mcp SigningTransport', () => {
   const kp = generateKeypair();
 
   function createTransport() {

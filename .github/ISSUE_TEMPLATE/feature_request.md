@@ -15,3 +15,7 @@ How should it work?
 ## Alternatives Considered
 
 What other approaches did you think about?
+
+## Additional Context
+
+Any other context, mockups, or examples.

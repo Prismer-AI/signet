@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { generateKeypair, sign, verify, type SignetAction } from '../src/index.js';
 
-describe('@signet/core', () => {
+describe('@signet-auth/core', () => {
   const testAction: SignetAction = {
     tool: 'github_create_issue',
     params: { title: 'fix bug', body: 'details' },

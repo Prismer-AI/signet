@@ -30,6 +30,15 @@ Thumbs.db
 .strategy.md
 docs/plans/.strategy.md
 
+# Local files (not project code)
+Thought.md
+Roadmap.md
+Roadmap-zh.md
+output/
+tmp/
+scripts/
+.codex
+
 # Environment
 .env
 .env.*

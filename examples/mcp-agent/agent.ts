@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { generateKeypair } from '@signet/core';
-import { SigningTransport } from '@signet/mcp';
+import { generateKeypair } from '@signet-auth/core';
+import { SigningTransport } from '@signet-auth/mcp';
 
 // Generate agent identity
 const { secretKey, publicKey } = generateKeypair();

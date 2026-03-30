@@ -1,4 +1,4 @@
-import { sign, type SignetAction, type SignetReceipt } from '@signet/core';
+import { sign, type SignetAction, type SignetReceipt } from '@signet-auth/core';
 
 // Minimal Transport interface — compatible with @modelcontextprotocol/sdk Transport
 // but defined here to avoid requiring the SDK as a dependency

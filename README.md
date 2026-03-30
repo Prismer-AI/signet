@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
-[![npm](https://img.shields.io/npm/v/@signet/mcp.svg)](https://www.npmjs.com/package/@signet/mcp)
+[![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
 
 Cryptographic action receipts for AI agents -- sign, audit, verify.
@@ -44,8 +44,8 @@ signet verify --chain
 ```typescript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { generateKeypair } from "@signet/core";
-import { SigningTransport } from "@signet/mcp";
+import { generateKeypair } from "@signet-auth/core";
+import { SigningTransport } from "@signet-auth/mcp";
 
 // Generate an agent identity
 const { secretKey } = generateKeypair();
@@ -140,8 +140,8 @@ signet/
 ├── signet-cli/               CLI tool (signet binary)
 ├── bindings/signet-ts/       WASM binding (wasm-bindgen)
 ├── packages/
-│   ├── signet-core/          @signet/core — TypeScript wrapper
-│   └── signet-mcp/           @signet/mcp — MCP SigningTransport middleware
+│   ├── signet-core/          @signet-auth/core — TypeScript wrapper
+│   └── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
 │   └── mcp-agent/            MCP agent + echo server example

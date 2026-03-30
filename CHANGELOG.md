@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **signet-cli**: `signet sign` with `--hash-only`, `--output`, `@file` params, `--no-log`
 - **signet-cli**: `signet verify` for receipt verification + `--chain` for hash chain integrity
 - **signet-cli**: `signet audit` with `--since`, `--tool`, `--signer`, `--verify`, `--export`
-- **@signet/core**: TypeScript wrapper for WASM crypto functions
-- **@signet/mcp**: SigningTransport middleware for MCP tool call signing
+- **@signet-auth/core**: TypeScript wrapper for WASM crypto functions
+- **@signet-auth/mcp**: SigningTransport middleware for MCP tool call signing
 - WASM binding (wasm-bindgen) for Node.js
 - End-to-end MCP agent example (agent + echo server)
 

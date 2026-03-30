@@ -60,7 +60,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `feat(core):` new feature in signet-core
 - `feat(cli):` new feature in signet-cli
 - `feat(wasm):` WASM binding changes
-- `feat(mcp):` @signet/mcp changes
+- `feat(mcp):` @signet-auth/mcp changes
 - `fix:` bug fix
 - `test:` test changes
 - `docs:` documentation

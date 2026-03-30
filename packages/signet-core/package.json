@@ -1,5 +1,5 @@
 {
-  "name": "@signet/core",
+  "name": "@signet-auth/core",
   "version": "0.1.0",
   "description": "Cryptographic action receipts for AI agents",
   "type": "module",

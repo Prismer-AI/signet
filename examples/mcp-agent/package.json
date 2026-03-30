@@ -4,8 +4,8 @@
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
-    "@signet/core": "file:../../packages/signet-core",
-    "@signet/mcp": "file:../../packages/signet-mcp",
+    "@signet-auth/core": "file:../../packages/signet-core",
+    "@signet-auth/mcp": "file:../../packages/signet-mcp",
     "tsx": "^4"
   }
 }

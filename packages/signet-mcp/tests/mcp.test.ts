@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKeypair, type SignetReceipt } from '@signet/core';
+import { generateKeypair, type SignetReceipt } from '@signet-auth/core';
 import { SigningTransport, type Transport, type JSONRPCMessage } from '../src/index.js';
 
 // Mock transport that records sent messages

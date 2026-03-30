@@ -1,5 +1,10 @@
 # Signet
 
+[![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
+[![npm](https://img.shields.io/npm/v/@signet/mcp.svg)](https://www.npmjs.com/package/@signet/mcp)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
+
 Cryptographic action receipts for AI agents -- sign, audit, verify.
 
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.

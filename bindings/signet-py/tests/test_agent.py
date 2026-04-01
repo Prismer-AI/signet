@@ -107,3 +107,19 @@ def test_key_info_property(tmp_path):
     info = agent.key_info
     assert info.name == "info-test"
     assert info.owner == "Owner"
+
+
+def test_agent_close(tmp_path):
+    agent = SigningAgent.create("closable", signet_dir=str(tmp_path))
+    agent.sign("tool", audit=False)
+    agent.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        agent.sign("tool", audit=False)
+
+
+def test_agent_context_manager(tmp_path):
+    with SigningAgent.create("ctx", signet_dir=str(tmp_path)) as agent:
+        receipt = agent.sign("tool", audit=False)
+        assert receipt.action.tool == "tool"
+    with pytest.raises(RuntimeError, match="closed"):
+        agent.sign("tool", audit=False)

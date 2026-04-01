@@ -140,3 +140,22 @@ def test_receipt_to_from_json():
     assert restored.action.tool == "test_tool"
     assert restored.signer.name == "agent"
     assert restored.sig == receipt.sig
+
+
+def test_sign_invalid_secret_key():
+    action = signet_auth.Action("test_tool")
+    with pytest.raises(signet_auth.InvalidKeyError):
+        signet_auth.sign("not-valid-base64!!!", action, "agent", "owner")
+
+
+def test_sign_wrong_length_secret_key():
+    import base64
+    short_key = base64.b64encode(b"tooshort").decode()
+    action = signet_auth.Action("test_tool")
+    with pytest.raises(signet_auth.InvalidKeyError):
+        signet_auth.sign(short_key, action, "agent", "owner")
+
+
+def test_receipt_from_json_invalid():
+    with pytest.raises((signet_auth.InvalidReceiptError, signet_auth.SerializeError)):
+        signet_auth.Receipt.from_json("not valid json")

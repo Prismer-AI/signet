@@ -73,12 +73,29 @@ class SigningAgent:
         If audit=True, appends to audit log after signing.
         Audit append failures raise the underlying SignetError.
         """
+        if not self._secret_key:
+            raise RuntimeError("SigningAgent has been closed")
         action = Action(tool, params=params, target=target, transport=transport)
         owner = self._key_info.owner or ""
         receipt = _sign(self._secret_key, action, self._name, owner)
         if audit:
             audit_append(self._signet_dir, receipt)
         return receipt
+
+    def close(self) -> None:
+        """Drop references to secret key material.
+
+        Note: Python strings are immutable and may remain in memory
+        until garbage collected. This method drops the reference
+        to minimize the exposure window.
+        """
+        self._secret_key = ""
+
+    def __enter__(self) -> "SigningAgent":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     def verify(self, receipt: Receipt) -> bool:
         """Verify a receipt against this agent's public key."""

@@ -113,8 +113,8 @@ class ChainStatus:
     def break_point(self) -> ChainBreak | None: ...
 
 class VerifyFailure:
-    file: str
-    line: int
+    file: str | None
+    line: int | None
     receipt_id: str
     reason: str
 

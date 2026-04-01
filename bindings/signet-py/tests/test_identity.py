@@ -118,3 +118,8 @@ def test_sign_verify_roundtrip_with_saved_key(tmp_path):
     action = signet_auth.Action("test_tool", params={"x": 1})
     receipt = signet_auth.sign(sk, action, "e2e", "owner")
     assert signet_auth.verify(receipt, vk) is True
+
+
+def test_export_public_key_not_found(tmp_path):
+    with pytest.raises(signet_auth.KeyNotFoundError):
+        signet_auth.export_public_key(str(tmp_path), "nonexistent")

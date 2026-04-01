@@ -129,8 +129,8 @@ fn audit_verify_signatures(
         .failures
         .into_iter()
         .map(|f| PyVerifyFailure {
-            file: f.file,
-            line: f.line,
+            file: if f.file.is_empty() { None } else { Some(f.file) },
+            line: if f.line == 0 { None } else { Some(f.line) },
             receipt_id: f.receipt_id,
             reason: f.reason,
         })

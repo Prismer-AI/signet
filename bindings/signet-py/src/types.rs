@@ -284,9 +284,9 @@ impl PyChainStatus {
 #[derive(Clone)]
 pub struct PyVerifyFailure {
     #[pyo3(get)]
-    pub file: String,
+    pub file: Option<String>,
     #[pyo3(get)]
-    pub line: usize,
+    pub line: Option<usize>,
     #[pyo3(get)]
     pub receipt_id: String,
     #[pyo3(get)]

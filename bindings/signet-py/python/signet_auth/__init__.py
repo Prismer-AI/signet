@@ -41,6 +41,11 @@ from signet_auth._signet import (
     load_key_info,
     list_keys,
     export_public_key,
+    # Audit functions
+    audit_append,
+    audit_query,
+    audit_verify_chain,
+    audit_verify_signatures,
 )
 
 __all__ = [
@@ -84,4 +89,9 @@ __all__ = [
     "load_key_info",
     "list_keys",
     "export_public_key",
+    # Audit functions
+    "audit_append",
+    "audit_query",
+    "audit_verify_chain",
+    "audit_verify_signatures",
 ]

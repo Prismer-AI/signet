@@ -7,7 +7,7 @@ use crate::types::{PyKeyPair, PyReceipt};
 
 #[pyfunction]
 fn generate_keypair(py: Python<'_>) -> PyKeyPair {
-    let (signing_key, verifying_key) = py.allow_threads(|| signet_core::generate_keypair());
+    let (signing_key, verifying_key) = py.allow_threads(signet_core::generate_keypair);
     let secret_key = B64.encode(signing_key.to_bytes());
     let public_key = B64.encode(verifying_key.as_bytes());
     PyKeyPair { secret_key, public_key }

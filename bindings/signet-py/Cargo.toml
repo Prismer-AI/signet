@@ -1,0 +1,19 @@
+[package]
+name = "signet-python"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for signet-core"
+license = "Apache-2.0 OR MIT"
+
+[lib]
+name = "signet_auth"
+crate-type = ["cdylib"]
+
+[dependencies]
+signet-core = { path = "../../crates/signet-core" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
+pythonize = "0.23"
+serde_json = "1"
+base64 = "0.22"
+ed25519-dalek = "2"
+chrono = { version = "0.4", features = ["serde"] }

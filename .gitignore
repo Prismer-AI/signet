@@ -26,9 +26,12 @@ Thumbs.db
 # Signet local data (never commit keys)
 .signet/
 
-# Strategy docs (private)
+# Internal docs (private)
 .strategy.md
-docs/plans/.strategy.md
+docs/plans/
+docs/marketing/
+docs/blog/
+docs/superpowers/
 
 # Local files (not project code)
 Thought.md

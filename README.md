@@ -3,6 +3,7 @@
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
 [![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
+[![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
 
 Cryptographic action receipts for AI agents -- sign, audit, verify.
@@ -66,6 +67,40 @@ const result = await client.callTool({
 
 Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
 MCP servers don't need to change -- they ignore unknown fields.
+
+### Python (LangChain / CrewAI / AutoGen)
+
+```bash
+pip install signet-auth
+```
+
+```python
+from signet_auth import SigningAgent
+
+# Create an agent identity (saved to ~/.signet/keys/)
+agent = SigningAgent.create("my-agent", owner="willamhou")
+
+# Sign any tool call -- receipt is auto-appended to audit log
+receipt = agent.sign("github_create_issue", params={"title": "fix bug"})
+
+# Verify
+assert agent.verify(receipt)
+
+# Query audit log
+for record in agent.audit_query(since="24h"):
+    print(f"{record.receipt.ts} {record.receipt.action.tool}")
+```
+
+Or use the low-level API for framework integrations:
+
+```python
+from signet_auth import generate_keypair, sign, verify, Action
+
+kp = generate_keypair()
+action = Action("github_create_issue", params={"title": "fix bug"})
+receipt = sign(kp.secret_key, action, "my-agent", "willamhou")
+assert verify(receipt, kp.public_key)
+```
 
 ## How It Works
 
@@ -138,7 +173,9 @@ Passphrase via interactive prompt or `SIGNET_PASSPHRASE` env var for CI.
 signet/
 ├── crates/signet-core/       Rust core: identity, sign, verify, audit, keystore
 ├── signet-cli/               CLI tool (signet binary)
-├── bindings/signet-ts/       WASM binding (wasm-bindgen)
+├── bindings/
+│   ├── signet-ts/            WASM binding (wasm-bindgen)
+│   └── signet-py/            Python binding (PyO3 + maturin)
 ├── packages/
 │   ├── signet-core/          @signet-auth/core — TypeScript wrapper
 │   └── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
@@ -157,6 +194,7 @@ signet/
 - Rust (1.70+)
 - wasm-pack
 - Node.js (18+)
+- Python (3.10+) + maturin (for Python binding)
 
 ### Build
 
@@ -172,11 +210,21 @@ cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
 ```
 
+```bash
+# Python binding
+cd bindings/signet-py
+pip install maturin
+maturin develop
+```
+
 ### Test
 
 ```bash
 # Rust tests (64 tests)
 cargo test --workspace
+
+# Python tests (66 tests)
+cd bindings/signet-py && pytest tests/ -v
 
 # WASM roundtrip (8 tests)
 node examples/wasm-roundtrip/test.mjs

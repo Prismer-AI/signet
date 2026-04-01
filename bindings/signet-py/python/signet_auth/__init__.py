@@ -1,5 +1,61 @@
 """signet-auth: Cryptographic action receipts for AI agents."""
 
-from signet_auth._signet import __version__
+from signet_auth._signet import (
+    __version__,
+    # Exceptions
+    SignetError,
+    InvalidKeyError,
+    SignatureMismatchError,
+    InvalidReceiptError,
+    CanonicalizeError,
+    SerializeError,
+    KeyNotFoundError,
+    KeyExistsError,
+    InvalidNameError,
+    DecryptionError,
+    CorruptedFileError,
+    CorruptedRecordError,
+    SignetIOError,
+    UnsupportedFormatError,
+    # Types
+    Action,
+    Signer,
+    Receipt,
+    KeyPair,
+    KeyInfo,
+    AuditRecord,
+    ChainBreak,
+    ChainStatus,
+    VerifyFailure,
+    VerifyResult,
+)
 
-__all__ = ["__version__"]
+__all__ = [
+    "__version__",
+    # Exceptions
+    "SignetError",
+    "InvalidKeyError",
+    "SignatureMismatchError",
+    "InvalidReceiptError",
+    "CanonicalizeError",
+    "SerializeError",
+    "KeyNotFoundError",
+    "KeyExistsError",
+    "InvalidNameError",
+    "DecryptionError",
+    "CorruptedFileError",
+    "CorruptedRecordError",
+    "SignetIOError",
+    "UnsupportedFormatError",
+    # Types
+    "Action",
+    "Signer",
+    "Receipt",
+    "KeyPair",
+    "KeyInfo",
+    "AuditRecord",
+    "ChainBreak",
+    "ChainStatus",
+    "VerifyFailure",
+    "VerifyResult",
+]

@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 
 mod core_fns;
 mod errors;
+mod identity_fns;
 mod types;
 
 #[pymodule]
@@ -10,5 +11,6 @@ fn _signet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     errors::register(m)?;
     types::register(m)?;
     core_fns::register(m)?;
+    identity_fns::register(m)?;
     Ok(())
 }

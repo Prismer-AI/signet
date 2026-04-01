@@ -32,6 +32,15 @@ from signet_auth._signet import (
     generate_keypair,
     sign,
     verify,
+    # Identity functions
+    validate_key_name,
+    default_signet_dir,
+    generate_and_save,
+    load_signing_key,
+    load_verifying_key,
+    load_key_info,
+    list_keys,
+    export_public_key,
 )
 
 __all__ = [
@@ -66,4 +75,13 @@ __all__ = [
     "generate_keypair",
     "sign",
     "verify",
+    # Identity functions
+    "validate_key_name",
+    "default_signet_dir",
+    "generate_and_save",
+    "load_signing_key",
+    "load_verifying_key",
+    "load_key_info",
+    "list_keys",
+    "export_public_key",
 ]

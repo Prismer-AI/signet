@@ -103,3 +103,26 @@ jobs:
           cd packages/signet-mcp
           npx tsc
           node --test dist/tests/mcp.test.js
+
+  python-binding:
+    name: Python binding (build + test)
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install maturin and pytest
+        run: pip install maturin pytest
+
+      - name: Build and test
+        run: cd bindings/signet-py && maturin develop && pytest tests/ -v

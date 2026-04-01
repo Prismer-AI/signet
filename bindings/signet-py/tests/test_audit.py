@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import pytest
 import signet_auth
 
@@ -55,9 +55,7 @@ def test_audit_query_since_string(tmp_path):
 
 def test_audit_query_since_datetime(tmp_path):
     signet_auth.audit_append(str(tmp_path), _sign_receipt())
-    one_hour_ago = datetime.now(timezone.utc).replace(
-        hour=max(0, datetime.now(timezone.utc).hour - 1)
-    )
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     records = signet_auth.audit_query(str(tmp_path), since=one_hour_ago)
     assert len(records) == 1
 

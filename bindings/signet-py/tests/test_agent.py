@@ -1,5 +1,5 @@
 import pytest
-from signet_auth import SigningAgent, KeyNotFoundError, Receipt
+from signet_auth import SigningAgent, KeyNotFoundError, Receipt, SignetIOError
 
 
 def test_create_agent(tmp_path):
@@ -60,7 +60,7 @@ def test_sign_audit_failure_raises(tmp_path):
     agent = SigningAgent.create("bad-audit", signet_dir=str(tmp_path))
     audit_dir = tmp_path / "audit"
     audit_dir.write_text("not a directory")
-    with pytest.raises(Exception):
+    with pytest.raises(SignetIOError):
         agent.sign("tool1", audit=True)
 
 

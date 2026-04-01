@@ -122,7 +122,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install maturin and pytest
-        run: pip install maturin pytest
+        run: pip install "maturin>=1.5,<2" "pytest>=8"
 
       - name: Build and test
         run: cd bindings/signet-py && maturin develop && pytest tests/ -v

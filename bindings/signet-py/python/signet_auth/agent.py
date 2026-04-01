@@ -73,7 +73,7 @@ class SigningAgent:
         If audit=True, appends to audit log after signing.
         Audit append failures raise the underlying SignetError.
         """
-        if not self._secret_key:
+        if self._secret_key is None:
             raise RuntimeError("SigningAgent has been closed")
         action = Action(tool, params=params, target=target, transport=transport)
         owner = self._key_info.owner or ""
@@ -89,7 +89,7 @@ class SigningAgent:
         until garbage collected. This method drops the reference
         to minimize the exposure window.
         """
-        self._secret_key = ""
+        self._secret_key = None
 
     def __enter__(self) -> "SigningAgent":
         return self

@@ -39,6 +39,15 @@ tmp/
 scripts/
 .codex
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.so
+*.pyd
+*.egg-info/
+.pytest_cache/
+
 # Environment
 .env
 .env.*

@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 
+mod core_fns;
 mod errors;
 mod types;
 
@@ -8,5 +9,6 @@ fn _signet(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", "0.1.0")?;
     errors::register(m)?;
     types::register(m)?;
+    core_fns::register(m)?;
     Ok(())
 }

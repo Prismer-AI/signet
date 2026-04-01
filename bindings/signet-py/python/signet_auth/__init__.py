@@ -28,6 +28,10 @@ from signet_auth._signet import (
     ChainStatus,
     VerifyFailure,
     VerifyResult,
+    # Core functions
+    generate_keypair,
+    sign,
+    verify,
 )
 
 __all__ = [
@@ -58,4 +62,8 @@ __all__ = [
     "ChainStatus",
     "VerifyFailure",
     "VerifyResult",
+    # Core functions
+    "generate_keypair",
+    "sign",
+    "verify",
 ]

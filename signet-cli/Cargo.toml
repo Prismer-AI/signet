@@ -13,7 +13,7 @@ name = "signet"
 path = "src/main.rs"
 
 [dependencies]
-signet-core = { version = "0.1", path = "../crates/signet-core" }
+signet-core = { path = "../crates/signet-core" }
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 anyhow = "1"

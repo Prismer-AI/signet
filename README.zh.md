@@ -27,6 +27,19 @@ AI Agent 执行高价值操作，却零问责。Signet 解决这个问题：
 - **审计** — 仅追加、哈希链接的本地日志
 - **验证** — 离线验证任意操作收据，无需网络
 
+## 安装
+
+```bash
+# CLI
+cargo install signet-cli
+
+# Python
+pip install signet-auth
+
+# TypeScript（MCP 中间件）
+npm install @signet-auth/core @signet-auth/mcp
+```
+
 ## 快速开始
 
 ### CLI

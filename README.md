@@ -27,6 +27,19 @@ AI agents execute high-value actions with zero accountability. Signet fixes this
 
 If Signet is useful to you, a ⭐ helps others find it — thank you!
 
+## Install
+
+```bash
+# CLI
+cargo install signet-cli
+
+# Python
+pip install signet-auth
+
+# TypeScript (MCP middleware)
+npm install @signet-auth/core @signet-auth/mcp
+```
+
 ## Quick Start
 
 ### CLI

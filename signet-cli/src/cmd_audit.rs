@@ -72,9 +72,13 @@ fn list_records(dir: &std::path::Path, filter: &AuditFilter) -> Result<()> {
     println!("{}", "-".repeat(90));
     for record in &records {
         let r = &record.receipt;
+        let ts = r.get("ts").or_else(|| r.get("ts_request")).and_then(|v| v.as_str()).unwrap_or("-");
+        let signer = r.get("signer").and_then(|s| s.get("name")).and_then(|n| n.as_str()).unwrap_or("-");
+        let tool = r.get("action").and_then(|a| a.get("tool")).and_then(|t| t.as_str()).unwrap_or("-");
+        let target = r.get("action").and_then(|a| a.get("target")).and_then(|t| t.as_str()).unwrap_or("-");
         println!(
             "{:<30} {:<15} {:<30} {}",
-            r.ts, r.signer.name, r.action.tool, r.action.target
+            ts, signer, tool, target
         );
     }
     println!("\n{} records", records.len());

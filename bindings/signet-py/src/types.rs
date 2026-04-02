@@ -227,10 +227,9 @@ pub struct PyAuditRecord {
 #[pymethods]
 impl PyAuditRecord {
     #[getter]
-    fn receipt(&self) -> PyReceipt {
-        PyReceipt {
-            inner: self.inner.receipt.clone(),
-        }
+    fn receipt<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        pythonize::pythonize(py, &self.inner.receipt)
+            .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))
     }
 
     #[getter]

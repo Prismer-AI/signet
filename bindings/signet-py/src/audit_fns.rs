@@ -57,9 +57,10 @@ fn build_filter(
 #[pyfunction]
 fn audit_append(py: Python<'_>, dir: String, receipt: &PyReceipt) -> PyResult<PyAuditRecord> {
     let path = Path::new(&dir).to_path_buf();
-    let inner_receipt = receipt.inner.clone();
+    let receipt_json = serde_json::to_value(&receipt.inner)
+        .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
     let record = py
-        .allow_threads(|| signet_core::audit::append(&path, &inner_receipt))
+        .allow_threads(|| signet_core::audit::append(&path, &receipt_json))
         .map_err(to_py_err)?;
     Ok(PyAuditRecord { inner: record })
 }

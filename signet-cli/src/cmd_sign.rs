@@ -71,7 +71,8 @@ pub fn sign(args: SignArgs) -> Result<()> {
     let json = serde_json::to_string(&receipt)?;
 
     if !args.no_log {
-        signet_core::audit::append(&dir, &receipt)?;
+        let receipt_json = serde_json::to_value(&receipt)?;
+        signet_core::audit::append(&dir, &receipt_json)?;
     }
 
     match args.output {

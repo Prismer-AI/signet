@@ -10,13 +10,12 @@ use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::Receipt;
 
 const GENESIS_HASH: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditRecord {
-    pub receipt: Receipt,
+    pub receipt: serde_json::Value,
     pub prev_hash: String,
     pub record_hash: String,
 }
@@ -63,7 +62,25 @@ fn audit_dir(base: &Path) -> PathBuf {
     base.join("audit")
 }
 
-fn compute_record_hash(receipt: &Receipt, prev_hash: &str) -> Result<String, SignetError> {
+fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
+    receipt.get("action")
+        .and_then(|a| a.get("tool"))
+        .and_then(|t| t.as_str())
+}
+
+fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
+    receipt.get("ts")
+        .or_else(|| receipt.get("ts_request"))
+        .and_then(|t| t.as_str())
+}
+
+fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
+    receipt.get("signer")
+        .and_then(|s| s.get("name"))
+        .and_then(|n| n.as_str())
+}
+
+fn compute_record_hash(receipt: &serde_json::Value, prev_hash: &str) -> Result<String, SignetError> {
     let hashable = serde_json::json!({
         "prev_hash": prev_hash,
         "receipt": receipt,
@@ -73,8 +90,10 @@ fn compute_record_hash(receipt: &Receipt, prev_hash: &str) -> Result<String, Sig
     Ok(format!("sha256:{}", hex::encode(hash)))
 }
 
-fn date_from_receipt(receipt: &Receipt) -> Result<NaiveDate, SignetError> {
-    let dt = DateTime::parse_from_rfc3339(&receipt.ts)
+fn date_from_receipt(receipt: &serde_json::Value) -> Result<NaiveDate, SignetError> {
+    let ts = extract_timestamp(receipt)
+        .ok_or_else(|| SignetError::CorruptedRecord("missing timestamp field".to_string()))?;
+    let dt = DateTime::parse_from_rfc3339(ts)
         .map_err(|e| SignetError::CorruptedRecord(format!("invalid timestamp: {e}")))?;
     Ok(dt.date_naive())
 }
@@ -113,7 +132,7 @@ fn last_record_hash(dir: &Path) -> Result<String, SignetError> {
     Ok(GENESIS_HASH.to_string())
 }
 
-pub fn append(dir: &Path, receipt: &Receipt) -> Result<AuditRecord, SignetError> {
+pub fn append(dir: &Path, receipt: &serde_json::Value) -> Result<AuditRecord, SignetError> {
     let adir = audit_dir(dir);
     fs::create_dir_all(&adir)?;
 
@@ -173,24 +192,28 @@ pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, Signe
 
             // Check since filter — stop scanning if record is too old
             if let Some(since) = filter.since {
-                if let Ok(ts) = DateTime::parse_from_rfc3339(&record.receipt.ts) {
-                    if ts < since {
-                        return Ok(results.into_iter().rev().collect());
+                if let Some(ts) = extract_timestamp(&record.receipt) {
+                    if let Ok(parsed) = DateTime::parse_from_rfc3339(ts) {
+                        if parsed < since {
+                            return Ok(results.into_iter().rev().collect());
+                        }
                     }
                 }
             }
 
             // Check tool filter (substring)
             if let Some(ref tool) = filter.tool {
-                if !record.receipt.action.tool.contains(tool.as_str()) {
-                    continue;
+                match extract_tool(&record.receipt) {
+                    Some(t) if t.contains(tool.as_str()) => {}
+                    _ => continue,
                 }
             }
 
             // Check signer filter (exact)
             if let Some(ref signer) = filter.signer {
-                if record.receipt.signer.name != *signer {
-                    continue;
+                match extract_signer_name(&record.receipt) {
+                    Some(n) if n == signer.as_str() => {}
+                    _ => continue,
                 }
             }
 
@@ -280,11 +303,20 @@ pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResul
     for record in &records {
         let receipt = &record.receipt;
 
-        // Decode pubkey from receipt
+        // Extract receipt id for error reporting
+        let receipt_id = receipt
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Decode pubkey from receipt["signer"]["pubkey"]
         let pubkey_result = (|| -> Result<ed25519_dalek::VerifyingKey, String> {
             let b64 = receipt
-                .signer
-                .pubkey
+                .get("signer")
+                .and_then(|s| s.get("pubkey"))
+                .and_then(|p| p.as_str())
+                .ok_or("missing signer.pubkey")?
                 .strip_prefix("ed25519:")
                 .ok_or("missing ed25519: prefix")?;
             let bytes = BASE64.decode(b64).map_err(|e| format!("base64: {e}"))?;
@@ -293,19 +325,23 @@ pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResul
         })();
 
         match pubkey_result {
-            Ok(vk) => match crate::verify(receipt, &vk) {
-                Ok(()) => valid += 1,
-                Err(_) => failures.push(VerifyFailure {
-                    file: String::new(),
-                    line: 0,
-                    receipt_id: receipt.id.clone(),
-                    reason: "signature mismatch".to_string(),
-                }),
-            },
+            Ok(vk) => {
+                let receipt_str = serde_json::to_string(receipt)
+                    .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
+                match crate::verify_any(&receipt_str, &vk) {
+                    Ok(()) => valid += 1,
+                    Err(_) => failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: "signature mismatch".to_string(),
+                    }),
+                }
+            }
             Err(reason) => failures.push(VerifyFailure {
                 file: String::new(),
                 line: 0,
-                receipt_id: receipt.id.clone(),
+                receipt_id,
                 reason: format!("invalid pubkey: {reason}"),
             }),
         }
@@ -348,11 +384,13 @@ mod tests {
     use crate::identity::generate_keypair;
     use crate::sign;
     use crate::test_helpers::test_action;
+    use serde_json::json;
 
-    fn sign_receipt_simple() -> Receipt {
+    fn sign_receipt_simple() -> serde_json::Value {
         let (sk, _) = generate_keypair();
         let action = test_action();
-        sign::sign(&sk, &action, "test-agent", "").unwrap()
+        let receipt = sign::sign(&sk, &action, "test-agent", "").unwrap();
+        serde_json::to_value(&receipt).unwrap()
     }
 
     #[test]
@@ -510,11 +548,118 @@ mod tests {
         let action = test_action();
         for _ in 0..3 {
             let receipt = sign::sign(&sk, &action, "agent", "").unwrap();
-            append(dir.path(), &receipt).unwrap();
+            append(dir.path(), &serde_json::to_value(&receipt).unwrap()).unwrap();
         }
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.total, 3);
         assert_eq!(result.valid, 3);
+        assert!(result.failures.is_empty());
+    }
+
+    // --- v2 (CompoundReceipt) tests ---
+
+    #[test]
+    fn test_audit_append_v2() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+        let action = test_action();
+        let v2 = sign::sign_compound(
+            &sk,
+            &action,
+            &json!({"text": "ok"}),
+            "agent",
+            "",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
+        let record = append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
+        assert!(record.record_hash.starts_with("sha256:"));
+        let files = sorted_audit_files(dir.path(), true).unwrap();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_audit_query_mixed_v1_v2() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+        let action = test_action();
+
+        // Append v1
+        let v1 = sign::sign(&sk, &action, "agent", "").unwrap();
+        append(dir.path(), &serde_json::to_value(&v1).unwrap()).unwrap();
+
+        // Append v2
+        let v2 = sign::sign_compound(
+            &sk,
+            &action,
+            &json!({"text": "ok"}),
+            "agent",
+            "",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
+        append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
+
+        let results = query(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_audit_verify_chain_mixed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+        let action = test_action();
+
+        // v1 record
+        let v1 = sign::sign(&sk, &action, "agent", "").unwrap();
+        append(dir.path(), &serde_json::to_value(&v1).unwrap()).unwrap();
+
+        // v2 record
+        let v2 = sign::sign_compound(
+            &sk,
+            &action,
+            &json!({"text": "ok"}),
+            "agent",
+            "",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
+        append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
+
+        // Another v1
+        let v1b = sign::sign(&sk, &action, "agent", "").unwrap();
+        append(dir.path(), &serde_json::to_value(&v1b).unwrap()).unwrap();
+
+        let status = verify_chain(dir.path()).unwrap();
+        assert!(status.valid);
+        assert_eq!(status.total_records, 3);
+        assert!(status.break_point.is_none());
+    }
+
+    #[test]
+    fn test_audit_verify_sigs_v2() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+        let action = test_action();
+
+        let v2 = sign::sign_compound(
+            &sk,
+            &action,
+            &json!({"text": "ok"}),
+            "agent",
+            "",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
+        append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
+
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.valid, 1);
         assert!(result.failures.is_empty());
     }
 }

@@ -37,7 +37,11 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
 
     let receipt_str = fs::read_to_string(receipt_path)
         .map_err(|e| anyhow::anyhow!("failed to read receipt '{receipt_path}': {e}"))?;
-    let receipt: signet_core::Receipt = serde_json::from_str(&receipt_str)?;
+
+    // Parse as generic JSON first to peek at version and extract display fields.
+    let raw: serde_json::Value = serde_json::from_str(&receipt_str)
+        .map_err(|e| anyhow::anyhow!("failed to parse receipt JSON: {e}"))?;
+    let version = raw.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
 
     let vk = if pubkey.contains('/') || pubkey.ends_with(".pub") {
         let content = fs::read_to_string(pubkey)
@@ -57,12 +61,43 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
         signet_core::load_verifying_key(&dir, pubkey)?
     };
 
-    match signet_core::verify(&receipt, &vk) {
+    match signet_core::verify_any(&receipt_str, &vk) {
         Ok(()) => {
-            println!(
-                "Valid: \"{}\" signed \"{}\" at {}",
-                receipt.signer.name, receipt.action.tool, receipt.ts
-            );
+            if version == 2 {
+                let signer_name = raw
+                    .get("signer")
+                    .and_then(|s| s.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let tool = raw
+                    .get("action")
+                    .and_then(|a| a.get("tool"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let ts_response = raw
+                    .get("ts_response")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                println!(
+                    "Valid: \"{signer_name}\" dispatched \"{tool}\" → response at {ts_response}"
+                );
+            } else {
+                let signer_name = raw
+                    .get("signer")
+                    .and_then(|s| s.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let tool = raw
+                    .get("action")
+                    .and_then(|a| a.get("tool"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let ts = raw
+                    .get("ts")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                println!("Valid: \"{signer_name}\" signed \"{tool}\" at {ts}");
+            }
         }
         Err(signet_core::SignetError::SignatureMismatch) => {
             bail!("signature verification failed");

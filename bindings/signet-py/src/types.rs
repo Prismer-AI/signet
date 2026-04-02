@@ -311,12 +311,104 @@ impl PyVerifyResult {
     }
 }
 
+// ─── Response ─────────────────────────────────────────────────────────────────
+
+#[pyclass(name = "Response")]
+#[derive(Clone)]
+pub struct PyResponse {
+    pub inner: signet_core::receipt::Response,
+}
+
+#[pymethods]
+impl PyResponse {
+    #[getter]
+    fn content_hash(&self) -> &str {
+        &self.inner.content_hash
+    }
+}
+
+// ─── CompoundReceipt ──────────────────────────────────────────────────────────
+
+#[pyclass(name = "CompoundReceipt")]
+#[derive(Clone)]
+pub struct PyCompoundReceipt {
+    pub inner: signet_core::CompoundReceipt,
+}
+
+#[pymethods]
+impl PyCompoundReceipt {
+    #[getter]
+    fn v(&self) -> u8 {
+        self.inner.v
+    }
+
+    #[getter]
+    fn id(&self) -> &str {
+        &self.inner.id
+    }
+
+    #[getter]
+    fn action(&self) -> PyAction {
+        PyAction {
+            inner: self.inner.action.clone(),
+        }
+    }
+
+    #[getter]
+    fn response(&self) -> PyResponse {
+        PyResponse {
+            inner: self.inner.response.clone(),
+        }
+    }
+
+    #[getter]
+    fn signer(&self) -> PySigner {
+        PySigner {
+            inner: self.inner.signer.clone(),
+        }
+    }
+
+    #[getter]
+    fn ts_request(&self) -> &str {
+        &self.inner.ts_request
+    }
+
+    #[getter]
+    fn ts_response(&self) -> &str {
+        &self.inner.ts_response
+    }
+
+    #[getter]
+    fn nonce(&self) -> &str {
+        &self.inner.nonce
+    }
+
+    #[getter]
+    fn sig(&self) -> &str {
+        &self.inner.sig
+    }
+
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner)
+            .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))
+    }
+
+    #[staticmethod]
+    fn from_json(json_str: &str) -> PyResult<Self> {
+        let inner: signet_core::CompoundReceipt = serde_json::from_str(json_str)
+            .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
+        Ok(PyCompoundReceipt { inner })
+    }
+}
+
 // ─── register ─────────────────────────────────────────────────────────────────
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAction>()?;
     m.add_class::<PySigner>()?;
     m.add_class::<PyReceipt>()?;
+    m.add_class::<PyResponse>()?;
+    m.add_class::<PyCompoundReceipt>()?;
     m.add_class::<PyKeyPair>()?;
     m.add_class::<PyKeyInfo>()?;
     m.add_class::<PyAuditRecord>()?;

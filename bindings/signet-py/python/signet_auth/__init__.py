@@ -22,6 +22,8 @@ from signet_auth._signet import (
     Action,
     Signer,
     Receipt,
+    Response,
+    CompoundReceipt,
     KeyPair,
     KeyInfo,
     AuditRecord,
@@ -32,7 +34,9 @@ from signet_auth._signet import (
     # Core functions
     generate_keypair,
     sign,
+    sign_compound,
     verify,
+    verify_any,
     # Identity functions
     validate_key_name,
     default_signet_dir,
@@ -72,6 +76,8 @@ __all__ = [
     "Action",
     "Signer",
     "Receipt",
+    "Response",
+    "CompoundReceipt",
     "KeyPair",
     "KeyInfo",
     "AuditRecord",
@@ -82,7 +88,9 @@ __all__ = [
     # Core functions
     "generate_keypair",
     "sign",
+    "sign_compound",
     "verify",
+    "verify_any",
     # Identity functions
     "validate_key_name",
     "default_signet_dir",

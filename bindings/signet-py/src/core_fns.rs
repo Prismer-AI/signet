@@ -9,7 +9,7 @@ use crate::types::{PyCompoundReceipt, PyKeyPair, PyReceipt};
 #[pyfunction]
 fn generate_keypair(py: Python<'_>) -> PyKeyPair {
     let (signing_key, verifying_key) = py.allow_threads(signet_core::generate_keypair);
-    let secret_key = B64.encode(signing_key.to_bytes());
+    let secret_key = B64.encode(signing_key.to_keypair_bytes());
     let public_key = B64.encode(verifying_key.as_bytes());
     PyKeyPair { secret_key, public_key }
 }
@@ -23,13 +23,14 @@ fn sign(
     signer_name: String,
     signer_owner: Option<String>,
 ) -> PyResult<PyReceipt> {
-    let seed_bytes = B64
+    let keypair_bytes = B64
         .decode(secret_key)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let seed_arr: [u8; 32] = seed_bytes
+    let keypair_arr: [u8; 64] = keypair_bytes
         .try_into()
-        .map_err(|_| InvalidKeyError::new_err("secret key must be 32 bytes"))?;
-    let signing_key = SigningKey::from_bytes(&seed_arr);
+        .map_err(|_| InvalidKeyError::new_err("secret key must be 64 bytes"))?;
+    let signing_key = SigningKey::from_keypair_bytes(&keypair_arr)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?;
 
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();
@@ -75,13 +76,14 @@ fn sign_compound(
     ts_request: Option<String>,
     ts_response: Option<String>,
 ) -> PyResult<PyCompoundReceipt> {
-    let seed_bytes = B64
+    let keypair_bytes = B64
         .decode(secret_key)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let seed_arr: [u8; 32] = seed_bytes
+    let keypair_arr: [u8; 64] = keypair_bytes
         .try_into()
-        .map_err(|_| InvalidKeyError::new_err("secret key must be 32 bytes"))?;
-    let signing_key = SigningKey::from_bytes(&seed_arr);
+        .map_err(|_| InvalidKeyError::new_err("secret key must be 64 bytes"))?;
+    let signing_key = SigningKey::from_keypair_bytes(&keypair_arr)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?;
 
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();

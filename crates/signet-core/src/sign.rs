@@ -19,7 +19,13 @@ pub fn sign(
     let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
         action.params_hash.clone()
     } else {
-        let canonical_params = canonical::canonicalize(&action.params)?;
+        // Normalize null to {} so Python (null) and TS ({}) produce the same hash
+        let params_to_hash = if action.params.is_null() {
+            serde_json::json!({})
+        } else {
+            action.params.clone()
+        };
+        let canonical_params = canonical::canonicalize(&params_to_hash)?;
         let hash = Sha256::digest(canonical_params.as_bytes());
         format!("sha256:{}", hex::encode(hash))
     };
@@ -92,7 +98,13 @@ pub fn sign_compound(
     let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
         action.params_hash.clone()
     } else {
-        let canonical_params = canonical::canonicalize(&action.params)?;
+        // Normalize null to {} so Python (null) and TS ({}) produce the same hash
+        let params_to_hash = if action.params.is_null() {
+            serde_json::json!({})
+        } else {
+            action.params.clone()
+        };
+        let canonical_params = canonical::canonicalize(&params_to_hash)?;
         let hash = Sha256::digest(canonical_params.as_bytes());
         format!("sha256:{}", hex::encode(hash))
     };

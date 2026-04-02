@@ -65,7 +65,7 @@ fn load_signing_key(
         })
         .map_err(to_py_err)?;
 
-    Ok(B64.encode(signing_key.to_bytes()))
+    Ok(B64.encode(signing_key.to_keypair_bytes()))
 }
 
 #[pyfunction]

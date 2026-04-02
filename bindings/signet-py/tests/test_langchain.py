@@ -111,3 +111,36 @@ def test_handler_with_closed_agent(agent):
             input_str="{}",
         )
     assert len(handler.receipts) == 0
+
+
+def test_handler_on_tool_end(agent):
+    handler = SignetCallbackHandler(agent)
+    handler.on_tool_start(
+        serialized={"name": "search"},
+        input_str=json.dumps({"query": "test"}),
+    )
+    handler.on_tool_end(output="search result: found 3 items")
+    assert len(handler.receipts) == 2
+    assert handler.receipts[0].action.tool == "search"
+    assert handler.receipts[1].action.tool == "_tool_end"
+
+
+def test_handler_on_tool_error(agent):
+    handler = SignetCallbackHandler(agent)
+    handler.on_tool_start(
+        serialized={"name": "failing_tool"},
+        input_str="{}",
+    )
+    handler.on_tool_error(error=ValueError("something broke"))
+    assert len(handler.receipts) == 2
+    assert handler.receipts[1].action.tool == "_tool_error"
+
+
+def test_handler_end_output_is_hashed(agent):
+    handler = SignetCallbackHandler(agent, audit=False)
+    handler.on_tool_end(output="sensitive output data")
+    assert len(handler.receipts) == 1
+    # Output should be hashed, not stored raw
+    receipt_json = handler.receipts[0].action.params
+    # params contains output_hash, not the raw output
+    assert "sensitive output data" not in str(receipt_json)

@@ -92,3 +92,49 @@ class SignetCallbackHandler(BaseCallbackHandler):
             logger.debug("Signed tool call: %s (receipt: %s, run_id: %s)", tool_name, receipt.id, run_id)
         except SignetError:
             logger.warning("Failed to sign tool call: %s", tool_name, exc_info=True)
+
+    def on_tool_end(
+        self,
+        output: str,
+        *,
+        run_id: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Called when a tool finishes successfully. Signs the result."""
+        try:
+            receipt = self.agent.sign(
+                "_tool_end",
+                params={"output_hash": _hash_output(output), "run_id": str(run_id)},
+                target=self.target,
+                audit=self.audit,
+            )
+            self.receipts.append(receipt)
+            logger.debug("Signed tool end (run_id: %s)", run_id)
+        except SignetError:
+            logger.warning("Failed to sign tool end (run_id: %s)", run_id, exc_info=True)
+
+    def on_tool_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Called when a tool errors. Signs the error event."""
+        try:
+            receipt = self.agent.sign(
+                "_tool_error",
+                params={"error": str(error), "error_type": type(error).__name__, "run_id": str(run_id)},
+                target=self.target,
+                audit=self.audit,
+            )
+            self.receipts.append(receipt)
+            logger.debug("Signed tool error (run_id: %s)", run_id)
+        except SignetError:
+            logger.warning("Failed to sign tool error (run_id: %s)", run_id, exc_info=True)
+
+
+def _hash_output(output: str) -> str:
+    """SHA-256 hash of tool output. Avoids storing potentially large output in audit log."""
+    import hashlib
+    return f"sha256:{hashlib.sha256(output.encode()).hexdigest()}"

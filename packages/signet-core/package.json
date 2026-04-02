@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cryptographic action receipts for AI agents",
   "type": "module",
   "main": "dist/src/index.js",

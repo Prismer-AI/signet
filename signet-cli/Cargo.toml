@@ -1,6 +1,6 @@
 [package]
 name = "signet-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "CLI tool for Signet cryptographic action receipts"
 license = "Apache-2.0 OR MIT"
@@ -13,7 +13,7 @@ name = "signet"
 path = "src/main.rs"
 
 [dependencies]
-signet-core = { version = "0.1.0", path = "../crates/signet-core" }
+signet-core = { version = "0.1", path = "../crates/signet-core" }
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 anyhow = "1"

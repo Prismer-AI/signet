@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-04-02
+
+### Added
+- **signet-auth (Python)**: LangChain `SignetCallbackHandler` + `AsyncSignetCallbackHandler`
+- **signet-auth (Python)**: CrewAI `install_hooks()` / `uninstall_hooks()` integration
+- **signet-auth (Python)**: Full tool lifecycle signing (start + end + error)
+- **signet-cli**: Published to crates.io (`cargo install signet-cli`)
+
+### Fixed
+- CrewAI hooks: thread safety via `threading.Lock`
+- CrewAI hooks: no longer mutates `tool_input` (was injecting `_signet_receipt_id`)
+- CrewAI hooks: guard against double `install_hooks()` registration
+- LangChain handler: narrow exception catch to `SignetError` (was bare `Exception`)
+- Fixed stale test counts in README, SECURITY.md (Python 66 → 85, total → 172)
+- TODOS.md: Python Binding marked as completed
+
 ## [0.1.0] - 2026-03-29
 
 ### Added

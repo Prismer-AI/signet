@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -52,4 +52,45 @@ export function sign(
 
 export function verify(receipt: SignetReceipt, publicKey: string): boolean {
   return wasm_verify(JSON.stringify(receipt), publicKey);
+}
+
+export interface SignetResponse {
+  content_hash: string;
+}
+
+export interface CompoundReceipt {
+  v: number;
+  id: string;
+  action: SignetAction;
+  response: SignetResponse;
+  signer: SignetSigner;
+  ts_request: string;
+  ts_response: string;
+  nonce: string;
+  sig: string;
+}
+
+export function signCompound(
+  secretKey: string,
+  action: SignetAction,
+  responseContent: unknown,
+  signerName: string,
+  signerOwner: string,
+  tsRequest: string,
+  tsResponse: string,
+): CompoundReceipt {
+  const json = wasm_sign_compound(
+    secretKey,
+    JSON.stringify(action),
+    JSON.stringify(responseContent),
+    signerName,
+    signerOwner,
+    tsRequest,
+    tsResponse,
+  );
+  return JSON.parse(json) as CompoundReceipt;
+}
+
+export function verifyAny(receiptJson: string, publicKey: string): boolean {
+  return wasm_verify_any(receiptJson, publicKey);
 }

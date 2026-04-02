@@ -26,11 +26,18 @@ fn sign(
     let keypair_bytes = B64
         .decode(secret_key)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let keypair_arr: [u8; 64] = keypair_bytes
-        .try_into()
-        .map_err(|_| InvalidKeyError::new_err("secret key must be 64 bytes"))?;
-    let signing_key = SigningKey::from_keypair_bytes(&keypair_arr)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?;
+    let signing_key = match keypair_bytes.len() {
+        32 => {
+            let seed: [u8; 32] = keypair_bytes.try_into().unwrap();
+            SigningKey::from_bytes(&seed)
+        }
+        64 => {
+            let arr: [u8; 64] = keypair_bytes.try_into().unwrap();
+            SigningKey::from_keypair_bytes(&arr)
+                .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
+        }
+        _ => return Err(InvalidKeyError::new_err("secret key must be 32 or 64 bytes")),
+    };
 
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();
@@ -79,11 +86,18 @@ fn sign_compound(
     let keypair_bytes = B64
         .decode(secret_key)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let keypair_arr: [u8; 64] = keypair_bytes
-        .try_into()
-        .map_err(|_| InvalidKeyError::new_err("secret key must be 64 bytes"))?;
-    let signing_key = SigningKey::from_keypair_bytes(&keypair_arr)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?;
+    let signing_key = match keypair_bytes.len() {
+        32 => {
+            let seed: [u8; 32] = keypair_bytes.try_into().unwrap();
+            SigningKey::from_bytes(&seed)
+        }
+        64 => {
+            let arr: [u8; 64] = keypair_bytes.try_into().unwrap();
+            SigningKey::from_keypair_bytes(&arr)
+                .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
+        }
+        _ => return Err(InvalidKeyError::new_err("secret key must be 32 or 64 bytes")),
+    };
 
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();

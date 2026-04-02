@@ -81,8 +81,8 @@ export class SigningTransport implements Transport {
             tsResponse,
           );
           this.opts.onReceipt?.(receipt);
-        } catch {
-          // signing failure should not block message delivery
+        } catch (err) {
+          this.onerror?.(err instanceof Error ? err : new Error(String(err)));
         }
       }
 
@@ -109,6 +109,9 @@ export class SigningTransport implements Transport {
   start(): Promise<void> { return this.inner.start(); }
 
   async close(): Promise<void> {
+    for (const entry of this.pendingRequests.values()) {
+      if (entry.timer) clearTimeout(entry.timer);
+    }
     this.pendingRequests.clear();
     return this.inner.close();
   }

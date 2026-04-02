@@ -9,6 +9,20 @@ use crate::canonical;
 use crate::error::SignetError;
 use crate::receipt::{Action, CompoundReceipt, Receipt, Response, Signer};
 
+fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
+    if action.params.is_null() && !action.params_hash.is_empty() {
+        return Ok(action.params_hash.clone());
+    }
+    let params_to_hash = if action.params.is_null() {
+        serde_json::json!({})
+    } else {
+        action.params.clone()
+    };
+    let canonical = canonical::canonicalize(&params_to_hash)?;
+    let hash = Sha256::digest(canonical.as_bytes());
+    Ok(format!("sha256:{}", hex::encode(hash)))
+}
+
 pub fn sign(
     key: &SigningKey,
     action: &Action,
@@ -16,19 +30,7 @@ pub fn sign(
     signer_owner: &str,
 ) -> Result<Receipt, SignetError> {
     // 1. Compute params_hash from params
-    let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
-        action.params_hash.clone()
-    } else {
-        // Normalize null to {} so Python (null) and TS ({}) produce the same hash
-        let params_to_hash = if action.params.is_null() {
-            serde_json::json!({})
-        } else {
-            action.params.clone()
-        };
-        let canonical_params = canonical::canonicalize(&params_to_hash)?;
-        let hash = Sha256::digest(canonical_params.as_bytes());
-        format!("sha256:{}", hex::encode(hash))
-    };
+    let params_hash = compute_params_hash(action)?;
 
     // 2. Build action with computed hash
     let signed_action = Action {
@@ -95,19 +97,7 @@ pub fn sign_compound(
     ts_response: &str,
 ) -> Result<CompoundReceipt, SignetError> {
     // 1. Compute params_hash (same logic as sign())
-    let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
-        action.params_hash.clone()
-    } else {
-        // Normalize null to {} so Python (null) and TS ({}) produce the same hash
-        let params_to_hash = if action.params.is_null() {
-            serde_json::json!({})
-        } else {
-            action.params.clone()
-        };
-        let canonical_params = canonical::canonicalize(&params_to_hash)?;
-        let hash = Sha256::digest(canonical_params.as_bytes());
-        format!("sha256:{}", hex::encode(hash))
-    };
+    let params_hash = compute_params_hash(action)?;
 
     let signed_action = Action {
         tool: action.tool.clone(),

@@ -1,5 +1,8 @@
 # Signet
 
+[![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
+[![简体中文](https://img.shields.io/badge/简体中文-lightgrey?style=flat-square)](README.zh.md)
+
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
 [![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
@@ -10,6 +13,10 @@ Cryptographic action receipts for AI agents -- sign, audit, verify.
 
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
 
+<p align="center">
+  <img src="demo.gif" alt="Signet CLI demo" width="800">
+</p>
+
 ## Why
 
 AI agents execute high-value actions with zero accountability. Signet fixes this:
@@ -17,6 +24,8 @@ AI agents execute high-value actions with zero accountability. Signet fixes this
 - **Sign** every tool call with the agent's cryptographic key
 - **Audit** what happened with an append-only, hash-chained local log
 - **Verify** any action receipt offline, no network needed
+
+If Signet is useful to you, a ⭐ helps others find it — thank you!
 
 ## Quick Start
 

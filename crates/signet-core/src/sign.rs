@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::{Action, Receipt, Signer};
+use crate::receipt::{Action, CompoundReceipt, Receipt, Response, Signer};
 
 pub fn sign(
     key: &SigningKey,
@@ -79,11 +79,92 @@ pub fn sign(
     })
 }
 
+pub fn sign_compound(
+    key: &SigningKey,
+    action: &Action,
+    response_content: &serde_json::Value,
+    signer_name: &str,
+    signer_owner: &str,
+    ts_request: &str,
+    ts_response: &str,
+) -> Result<CompoundReceipt, SignetError> {
+    // 1. Compute params_hash (same logic as sign())
+    let params_hash = if action.params.is_null() && !action.params_hash.is_empty() {
+        action.params_hash.clone()
+    } else {
+        let canonical_params = canonical::canonicalize(&action.params)?;
+        let hash = Sha256::digest(canonical_params.as_bytes());
+        format!("sha256:{}", hex::encode(hash))
+    };
+
+    let signed_action = Action {
+        tool: action.tool.clone(),
+        params: action.params.clone(),
+        params_hash,
+        target: action.target.clone(),
+        transport: action.transport.clone(),
+    };
+
+    // 2. Hash response content
+    let canonical_response = canonical::canonicalize(response_content)?;
+    let response_hash = Sha256::digest(canonical_response.as_bytes());
+    let response = Response {
+        content_hash: format!("sha256:{}", hex::encode(response_hash)),
+    };
+
+    // 3. Build signer
+    let pubkey_bytes = key.verifying_key().to_bytes();
+    let signer = Signer {
+        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        name: signer_name.to_string(),
+        owner: signer_owner.to_string(),
+    };
+
+    // 4. Generate nonce
+    let mut nonce_bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
+
+    // 5. Build signable (everything except sig and id)
+    let signable = serde_json::json!({
+        "v": 2u8,
+        "action": signed_action,
+        "response": response,
+        "signer": signer,
+        "ts_request": ts_request,
+        "ts_response": ts_response,
+        "nonce": nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+
+    // 6. Sign
+    let signature = key.sign(canonical_bytes.as_bytes());
+    let sig_b64 = BASE64.encode(signature.to_bytes());
+    let sig = format!("ed25519:{}", sig_b64);
+
+    // 7. Derive receipt ID
+    let sig_hash = Sha256::digest(signature.to_bytes());
+    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+
+    Ok(CompoundReceipt {
+        v: 2,
+        id,
+        action: signed_action,
+        response,
+        signer,
+        ts_request: ts_request.to_string(),
+        ts_response: ts_response.to_string(),
+        nonce,
+        sig,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::identity::generate_keypair;
     use crate::test_helpers::test_action;
+    use serde_json::json;
 
     #[test]
     fn test_sign_produces_receipt() {
@@ -146,5 +227,24 @@ mod tests {
         let sig_hash = Sha256::digest(&sig_bytes);
         let expected_id = format!("rec_{}", hex::encode(&sig_hash[..16]));
         assert_eq!(receipt.id, expected_id);
+    }
+
+    #[test]
+    fn test_sign_compound_produces_v2() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let receipt = sign_compound(
+            &key, &action, &response, "agent", "owner",
+            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
+        ).unwrap();
+
+        assert_eq!(receipt.v, 2);
+        assert!(receipt.id.starts_with("rec_"));
+        assert!(receipt.sig.starts_with("ed25519:"));
+        assert!(receipt.response.content_hash.starts_with("sha256:"));
+        assert_eq!(receipt.ts_request, "2026-04-02T10:00:00.000Z");
+        assert_eq!(receipt.ts_response, "2026-04-02T10:00:00.150Z");
+        assert_eq!(receipt.action.tool, "github_create_issue");
     }
 }

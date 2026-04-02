@@ -176,6 +176,18 @@ SigningTransport（包装任意 MCP transport）
 
 密码短语通过交互提示输入，或通过 `SIGNET_PASSPHRASE` 环境变量设置（用于 CI）。
 
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [架构设计](docs/ARCHITECTURE.md) | 系统设计、组件概览、数据流 |
+| [安全模型](docs/SECURITY.md) | 密码学原语、威胁模型、密钥存储 |
+| [MCP 集成指南](docs/guides/mcp-integration.md) | SigningTransport 完整接入教程 |
+| [CI/CD 集成](docs/guides/ci-integration.md) | GitHub Actions 示例、CI 密钥管理 |
+| [审计日志指南](docs/guides/audit-log.md) | 查询、过滤、哈希链验证 |
+| [贡献指南](CONTRIBUTING.md) | 构建说明、开发流程 |
+| [更新日志](CHANGELOG.md) | 版本历史 |
+
 ## 项目结构
 
 ```
@@ -229,7 +241,7 @@ maturin develop
 ### 测试
 
 ```bash
-# Rust 测试（64 个）
+# Rust 测试（68 个）
 cargo test --workspace
 
 # Python 测试（66 个）

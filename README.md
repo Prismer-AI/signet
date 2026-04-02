@@ -176,6 +176,18 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 
 Passphrase via interactive prompt or `SIGNET_PASSPHRASE` env var for CI.
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | System design, component overview, data flow |
+| [Security](docs/SECURITY.md) | Crypto primitives, threat model, key storage |
+| [MCP Integration Guide](docs/guides/mcp-integration.md) | Step-by-step MCP setup with SigningTransport |
+| [CI/CD Integration](docs/guides/ci-integration.md) | GitHub Actions example, key management for CI |
+| [Audit Log Guide](docs/guides/audit-log.md) | Querying, filtering, hash chain verification |
+| [Contributing](CONTRIBUTING.md) | Build instructions, development workflow |
+| [Changelog](CHANGELOG.md) | Version history |
+
 ## Project Structure
 
 ```
@@ -229,7 +241,7 @@ maturin develop
 ### Test
 
 ```bash
-# Rust tests (64 tests)
+# Rust tests (68 tests)
 cargo test --workspace
 
 # Python tests (66 tests)

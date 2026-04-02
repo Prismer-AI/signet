@@ -113,7 +113,36 @@ for record in agent.audit_query(since="24h"):
     print(f"{record.receipt.ts} {record.receipt.action.tool}")
 ```
 
-Or use the low-level API for framework integrations:
+#### LangChain Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.langchain import SignetCallbackHandler
+
+agent = SigningAgent("my-agent")
+handler = SignetCallbackHandler(agent)
+
+# Every tool call is now signed + audited
+chain.invoke(input, config={"callbacks": [handler]})
+
+# Async chains supported too
+from signet_auth.langchain import AsyncSignetCallbackHandler
+```
+
+#### CrewAI Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.crewai import install_hooks
+
+agent = SigningAgent("my-agent")
+install_hooks(agent)
+
+# All CrewAI tool calls are now globally signed
+crew.kickoff()
+```
+
+#### Low-Level API
 
 ```python
 from signet_auth import generate_keypair, sign, verify, Action

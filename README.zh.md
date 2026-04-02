@@ -113,7 +113,36 @@ for record in agent.audit_query(since="24h"):
     print(f"{record.receipt.ts} {record.receipt.action.tool}")
 ```
 
-或使用底层 API 进行框架集成：
+#### LangChain 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.langchain import SignetCallbackHandler
+
+agent = SigningAgent("my-agent")
+handler = SignetCallbackHandler(agent)
+
+# 每次工具调用自动签名 + 写入审计日志
+chain.invoke(input, config={"callbacks": [handler]})
+
+# 也支持异步链
+from signet_auth.langchain import AsyncSignetCallbackHandler
+```
+
+#### CrewAI 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.crewai import install_hooks
+
+agent = SigningAgent("my-agent")
+install_hooks(agent)
+
+# 全局签名所有 CrewAI 工具调用
+crew.kickoff()
+```
+
+#### 底层 API
 
 ```python
 from signet_auth import generate_keypair, sign, verify, Action

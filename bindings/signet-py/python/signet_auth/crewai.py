@@ -16,6 +16,13 @@ Usage:
 
     # When done:
     uninstall_hooks()
+
+Design notes:
+- Uses module-level global state because CrewAI hooks are global (register/unregister).
+- Thread safety via threading.Lock on all mutable state.
+- Correlation between before/after hooks uses id(context) as key instead of
+  mutating tool_input (avoids breaking tools with strict input validation).
+- CrewAI does not provide a run_id equivalent, unlike LangChain.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from typing import Any
 
 from signet_auth._signet import Receipt, SignetError
@@ -46,29 +54,35 @@ def _hash_output(output: Any) -> str:
     return f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-# Module-level state for installed hooks
+# Module-level state (protected by _lock)
+_lock = threading.Lock()
 _installed_agent: SigningAgent | None = None
 _installed_target: str = ""
 _installed_audit: bool = True
 _receipts: list[Receipt] = []
+_pending_receipt_ids: dict[int, str] = {}  # id(context) → receipt_id for correlation
 
 
 def _before_hook(context: ToolCallHookContext) -> bool | None:
-    """Sign tool call before execution."""
-    if _installed_agent is None:
-        return None
+    """Sign tool call before execution. Returns None to allow execution."""
+    with _lock:
+        agent = _installed_agent
+        target = _installed_target
+        audit = _installed_audit
+
+    if agent is None:
+        return None  # hooks uninstalled, allow execution
 
     try:
-        receipt = _installed_agent.sign(
+        receipt = agent.sign(
             context.tool_name,
             params=context.tool_input,
-            target=_installed_target,
-            audit=_installed_audit,
+            target=target,
+            audit=audit,
         )
-        _receipts.append(receipt)
-
-        # Stash receipt ID in tool_input for after_hook correlation
-        context.tool_input["_signet_receipt_id"] = receipt.id
+        with _lock:
+            _receipts.append(receipt)
+            _pending_receipt_ids[id(context)] = receipt.id
 
         logger.debug("Signed tool start: %s (receipt: %s)", context.tool_name, receipt.id)
     except SignetError:
@@ -78,24 +92,29 @@ def _before_hook(context: ToolCallHookContext) -> bool | None:
 
 
 def _after_hook(context: ToolCallHookContext) -> str | None:
-    """Sign tool result after execution."""
-    if _installed_agent is None:
+    """Sign tool result after execution. Returns None to keep original result."""
+    with _lock:
+        agent = _installed_agent
+        target = _installed_target
+        audit = _installed_audit
+        start_receipt_id = _pending_receipt_ids.pop(id(context), "")
+
+    if agent is None:
         return None
 
-    receipt_id = context.tool_input.get("_signet_receipt_id", "")
-
     try:
-        receipt = _installed_agent.sign(
+        receipt = agent.sign(
             "_tool_end",
             params={
                 "tool": context.tool_name,
                 "output_hash": _hash_output(context.tool_result),
-                "start_receipt_id": receipt_id,
+                "start_receipt_id": start_receipt_id,
             },
-            target=_installed_target,
-            audit=_installed_audit,
+            target=target,
+            audit=audit,
         )
-        _receipts.append(receipt)
+        with _lock:
+            _receipts.append(receipt)
         logger.debug("Signed tool end: %s (receipt: %s)", context.tool_name, receipt.id)
     except SignetError:
         logger.warning("Failed to sign tool end: %s", context.tool_name, exc_info=True)
@@ -114,16 +133,28 @@ def install_hooks(
     After calling this, every tool call in any CrewAI crew will be
     signed with the given agent's key.
 
+    Safe to call multiple times — previous hooks are unregistered first.
+
     Args:
         agent: A SigningAgent with a loaded key.
         audit: If True (default), append receipts to audit log.
         target: Optional target URI for receipts.
     """
     global _installed_agent, _installed_target, _installed_audit
-    _installed_agent = agent
-    _installed_target = target
-    _installed_audit = audit
-    _receipts.clear()
+
+    # Guard against double registration
+    with _lock:
+        if _installed_agent is not None:
+            # Unregister previous hooks before re-registering
+            tool_hooks.unregister_before_tool_call_hook(_before_hook)
+            tool_hooks.unregister_after_tool_call_hook(_after_hook)
+            _do_uninstall()
+
+        _installed_agent = agent
+        _installed_target = target
+        _installed_audit = audit
+        _receipts.clear()
+        _pending_receipt_ids.clear()
 
     tool_hooks.register_before_tool_call_hook(_before_hook)
     tool_hooks.register_after_tool_call_hook(_after_hook)
@@ -131,10 +162,23 @@ def install_hooks(
     logger.info("Signet hooks installed for agent '%s'", agent.name)
 
 
-def uninstall_hooks() -> None:
-    """Remove Signet hooks from CrewAI."""
-    global _installed_agent
+def _do_uninstall() -> None:
+    """Internal uninstall (caller must hold _lock)."""
+    global _installed_agent, _installed_target, _installed_audit
     _installed_agent = None
+    _installed_target = ""
+    _installed_audit = True
+    _pending_receipt_ids.clear()
+
+
+def uninstall_hooks() -> None:
+    """Remove Signet hooks from CrewAI.
+
+    Receipts collected before uninstall are preserved and accessible
+    via get_receipts().
+    """
+    with _lock:
+        _do_uninstall()
 
     tool_hooks.unregister_before_tool_call_hook(_before_hook)
     tool_hooks.unregister_after_tool_call_hook(_after_hook)
@@ -143,5 +187,10 @@ def uninstall_hooks() -> None:
 
 
 def get_receipts() -> list[Receipt]:
-    """Return all receipts collected since hooks were installed."""
-    return list(_receipts)
+    """Return all receipts collected since hooks were installed.
+
+    Receipts persist after uninstall_hooks() so you can retrieve them
+    after a crew run completes.
+    """
+    with _lock:
+        return list(_receipts)

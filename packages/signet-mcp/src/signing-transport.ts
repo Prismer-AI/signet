@@ -1,4 +1,4 @@
-import { sign, type SignetAction, type SignetReceipt } from '@signet-auth/core';
+import { signCompound, type CompoundReceipt, type SignetAction } from '@signet-auth/core';
 
 // Minimal Transport interface — compatible with @modelcontextprotocol/sdk Transport
 // but defined here to avoid requiring the SDK as a dependency
@@ -25,7 +25,8 @@ export interface Transport {
 export interface SigningTransportOptions {
   target?: string;
   transport?: string;
-  onSign?: (receipt: SignetReceipt) => void;
+  responseTimeout?: number; // ms, default 30000
+  onReceipt?: (receipt: CompoundReceipt) => void;
 }
 
 export class SigningTransport implements Transport {
@@ -34,6 +35,10 @@ export class SigningTransport implements Transport {
   private signerName: string;
   private signerOwner: string;
   private opts: SigningTransportOptions;
+  private pendingRequests = new Map<
+    string | number,
+    { action: SignetAction; tsRequest: string; timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(
     inner: Transport,
@@ -48,14 +53,48 @@ export class SigningTransport implements Transport {
     this.signerOwner = signerOwner ?? '';
     this.opts = options ?? {};
 
+    const timeout = this.opts.responseTimeout ?? 30000;
+
     // Forward callbacks using lazy closures.
     // MCP SDK's Protocol.connect() sets our callbacks AFTER construction,
     // so these closures must read this.onclose/etc lazily at call time.
     this.inner.onclose = () => this.onclose?.();
     this.inner.onerror = (e: Error) => this.onerror?.(e);
-    this.inner.onmessage = (msg: JSONRPCMessage, extra?: unknown) =>
+    this.inner.onmessage = (msg: JSONRPCMessage, extra?: unknown) => {
+      // Check if this is a response to a pending tool call
+      if (msg.id !== undefined && this.pendingRequests.has(msg.id)) {
+        const pending = this.pendingRequests.get(msg.id)!;
+        clearTimeout(pending.timer);
+        this.pendingRequests.delete(msg.id);
+
+        const tsResponse = new Date().toISOString();
+        const responseContent = msg.result ?? msg.error ?? null;
+
+        try {
+          const receipt = signCompound(
+            this.secretKey,
+            pending.action,
+            responseContent,
+            this.signerName,
+            this.signerOwner,
+            pending.tsRequest,
+            tsResponse,
+          );
+          this.opts.onReceipt?.(receipt);
+        } catch {
+          // signing failure should not block message delivery
+        }
+      }
+
+      // Always forward message to outer onmessage
       this.onmessage?.(msg, extra);
+    };
+
+    // Store timeout for use in send()
+    this._timeout = timeout;
   }
+
+  private _timeout: number;
 
   onclose?: () => void;
   onerror?: (error: Error) => void;
@@ -68,41 +107,36 @@ export class SigningTransport implements Transport {
   };
 
   start(): Promise<void> { return this.inner.start(); }
-  close(): Promise<void> { return this.inner.close(); }
+
+  async close(): Promise<void> {
+    this.pendingRequests.clear();
+    return this.inner.close();
+  }
 
   async send(message: JSONRPCMessage, options?: unknown): Promise<void> {
-    if (this.isToolCall(message)) {
-      const receipt = this.signToolCall(message);
-      this.injectSignet(message, receipt);
-      this.opts.onSign?.(receipt);
+    if (this.isToolCall(message) && message.id !== undefined) {
+      const params = (message.params ?? {}) as Record<string, unknown>;
+      const action: SignetAction = {
+        tool: (params.name as string) ?? 'unknown',
+        params: (params.arguments as Record<string, unknown>) ?? {},
+        params_hash: '',
+        target: this.opts.target ?? 'unknown',
+        transport: this.opts.transport ?? 'stdio',
+      };
+      const tsRequest = new Date().toISOString();
+
+      const id = message.id;
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+      }, this._timeout);
+
+      this.pendingRequests.set(id, { action, tsRequest, timer });
     }
+
     return this.inner.send(message, options);
   }
 
   private isToolCall(message: JSONRPCMessage): boolean {
     return message.method === 'tools/call';
-  }
-
-  private signToolCall(message: JSONRPCMessage): SignetReceipt {
-    const params = (message.params ?? {}) as Record<string, unknown>;
-    const action: SignetAction = {
-      tool: (params.name as string) ?? 'unknown',
-      params: (params.arguments as Record<string, unknown>) ?? {},
-      params_hash: '',
-      target: this.opts.target ?? 'unknown',
-      transport: this.opts.transport ?? 'stdio',
-    };
-    return sign(this.secretKey, action, this.signerName, this.signerOwner);
-  }
-
-  private injectSignet(message: JSONRPCMessage, receipt: SignetReceipt): void {
-    // Deep-clone params to avoid mutating the original object
-    const params = JSON.parse(JSON.stringify(message.params ?? {}));
-    if (!params._meta) params._meta = {};
-    params._meta._signet = {
-      ...receipt,
-      action: { ...receipt.action, params: null },
-    };
-    message.params = params;
   }
 }

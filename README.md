@@ -244,7 +244,7 @@ maturin develop
 # Rust tests (68 tests)
 cargo test --workspace
 
-# Python tests (66 tests)
+# Python tests (85 tests)
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM roundtrip (8 tests)

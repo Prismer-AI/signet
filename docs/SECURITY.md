@@ -133,7 +133,7 @@ record_hash = SHA-256(canonical({prev_hash, receipt}))
 
 - **Zero `unsafe` blocks** in `signet-core`
 - **No `unwrap()` in production code** — all errors propagated via `?` and `SignetError`
-- **145 tests** across Rust (68), Python (66), TypeScript (11)
+- **172 tests** across Rust (68), Python (85), TypeScript (11), WASM (8)
 - CI runs `cargo clippy -- -D warnings` and `cargo fmt --check` on every PR
 
 ## Reporting Vulnerabilities

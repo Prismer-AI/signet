@@ -6,19 +6,15 @@ Effort scale: S = small (< 1 day human / < 30 min CC), M = medium (1–3 days hu
 
 ---
 
-## P1 — Next (post-traction)
+## Completed
 
-### Python Binding (PyO3)
+### ~~Python Binding (PyO3)~~ ✅
 
-**What:** Rust-to-Python binding exposing `sign`, `verify`, and `identity` via PyO3. Published to PyPI as `signet-auth`.
-
-**Why:** Covers the LangChain, CrewAI, and AutoGen ecosystem. Without a Python binding, Signet is invisible to the majority of agent developers.
-
-**Effort:** M — ~2 days human / ~1 hr CC
-
-**Depends on:** traction signal from v0.1
+Shipped 2026-04-01. Published to PyPI as `signet-auth`. Includes `SigningAgent` class, full audit API, and LangChain `SignetCallbackHandler`.
 
 ---
+
+## P1 — Next (post-traction)
 
 ### Homebrew Tap
 

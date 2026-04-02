@@ -14,7 +14,7 @@ Cryptographic action receipts for AI agents -- sign, audit, verify.
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
 
 <p align="center">
-  <img src="demo-twitter.gif" alt="Signet CLI demo" width="800">
+  <img src="demo.gif" alt="Signet CLI demo" width="800">
 </p>
 
 ## Why

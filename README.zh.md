@@ -14,7 +14,7 @@ AI Agent 的密码学操作收据 — 签名、审计、验证。
 Signet 给每个 AI Agent 分配 Ed25519 身份，对每次工具调用进行签名。精确掌握你的 Agent 做了什么、什么时候做的，并且可以证明。
 
 <p align="center">
-  <img src="demo-twitter.gif" alt="Signet CLI 演示" width="800">
+  <img src="demo.gif" alt="Signet CLI 演示" width="800">
 </p>
 
 如果 Signet 对你有帮助，点个 ⭐ 让更多人发现它 — 感谢！

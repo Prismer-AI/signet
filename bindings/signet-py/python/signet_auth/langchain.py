@@ -19,7 +19,7 @@ import json
 import logging
 from typing import Any
 
-from signet_auth._signet import Receipt
+from signet_auth._signet import Receipt, SignetError
 from signet_auth.agent import SigningAgent
 
 logger = logging.getLogger("signet_auth.langchain")
@@ -68,6 +68,8 @@ class SignetCallbackHandler(BaseCallbackHandler):
         self,
         serialized: dict[str, Any],
         input_str: str,
+        *,
+        run_id: Any | None = None,
         **kwargs: Any,
     ) -> None:
         """Called when a tool starts. Signs the tool invocation."""
@@ -87,7 +89,6 @@ class SignetCallbackHandler(BaseCallbackHandler):
                 audit=self.audit,
             )
             self.receipts.append(receipt)
-            logger.debug("Signed tool call: %s (receipt: %s)", tool_name, receipt.id)
-        except Exception:
-            logger.exception("Failed to sign tool call: %s", tool_name)
-            # Don't block the chain — signing failure is non-fatal
+            logger.debug("Signed tool call: %s (receipt: %s, run_id: %s)", tool_name, receipt.id, run_id)
+        except SignetError:
+            logger.warning("Failed to sign tool call: %s", tool_name, exc_info=True)

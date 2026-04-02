@@ -94,5 +94,20 @@ def test_handler_with_target(agent):
         serialized={"name": "test"},
         input_str="{}",
     )
-    # Receipt should have the target (if exposed through the API)
     assert len(handler.receipts) == 1
+    assert handler.receipts[0].action.target == "langchain://my-chain"
+
+
+def test_handler_with_closed_agent(agent):
+    handler = SignetCallbackHandler(agent)
+    agent.close()
+    # Signing fails (RuntimeError), but handler should not propagate it
+    # RuntimeError is not a SignetError, so it WILL propagate
+    import pytest
+
+    with pytest.raises(RuntimeError, match="closed"):
+        handler.on_tool_start(
+            serialized={"name": "test"},
+            input_str="{}",
+        )
+    assert len(handler.receipts) == 0

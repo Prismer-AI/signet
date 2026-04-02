@@ -26,3 +26,21 @@ pub struct Receipt {
     pub nonce: String,
     pub sig: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Response {
+    pub content_hash: String, // sha256(JCS(response_content))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompoundReceipt {
+    pub v: u8,               // always 2
+    pub id: String,
+    pub action: Action,      // same type as v1
+    pub response: Response,
+    pub signer: Signer,      // same type as v1
+    pub ts_request: String,
+    pub ts_response: String,
+    pub nonce: String,
+    pub sig: String,
+}

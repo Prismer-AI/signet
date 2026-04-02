@@ -51,7 +51,7 @@ def test_load_signing_key(tmp_path):
     signet_auth.generate_and_save(str(tmp_path), "loader")
     key = signet_auth.load_signing_key(str(tmp_path), "loader")
     assert isinstance(key, str)
-    assert len(key) == 44
+    assert len(key) == 88  # 64-byte keypair, base64 encoded
 
 
 def test_load_signing_key_encrypted(tmp_path):
@@ -75,7 +75,7 @@ def test_load_verifying_key(tmp_path):
     signet_auth.generate_and_save(str(tmp_path), "vk")
     key = signet_auth.load_verifying_key(str(tmp_path), "vk")
     assert isinstance(key, str)
-    assert len(key) == 44
+    assert len(key) == 44  # 32-byte verifying key, base64 encoded
 
 
 def test_load_key_info(tmp_path):

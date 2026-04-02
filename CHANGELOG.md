@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-02
+
+### Added
+- **signet-core**: Compound receipts (v2) — bind request + response in a single signed record
+- **signet-core**: `sign_compound()` — signs tool call dispatch + response hash atomically
+- **signet-core**: `verify_compound()` — verifies v2 compound receipts
+- **signet-core**: `verify_any()` — auto-detects v1/v2 and dispatches to correct verifier
+- **signet-core**: `Response` and `CompoundReceipt` types
+- **@signet-auth/core**: `signCompound()` and `verifyAny()` TypeScript functions
+- **@signet-auth/mcp**: SigningTransport now captures responses and produces compound receipts
+- **signet-auth (Python)**: `sign_compound()`, `verify_any()`, `CompoundReceipt`, `Response` types
+- **signet-cli**: `signet verify` handles both v1 and v2 receipts
+
+### Changed
+- **signet-core**: `audit::append()` now accepts `&serde_json::Value` instead of `&Receipt` (supports v1+v2)
+- **signet-core**: `compute_params_hash()` extracted as shared function (DRY fix)
+- **signet-core**: null params normalized to `{}` before hashing (cross-language consistency)
+
+### Breaking Changes
+- **@signet-auth/mcp**: `onSign` callback removed from `SigningTransportOptions` — use `onReceipt` instead
+- **@signet-auth/mcp**: SigningTransport no longer injects `_meta._signet` into outbound messages at dispatch time — compound receipt is produced only after response arrives
+- **@signet-auth/mcp**: Added `responseTimeout` option (default 30s) — no receipt for timed-out calls
+- **signet-core (Rust)**: `audit::append()` signature changed: `&Receipt` → `&serde_json::Value`
+- **signet-core (Rust)**: `verify_any()` requires receipt to have a `v` field (no silent v1 fallback)
+- **signet-auth (Python)**: `generate_keypair()` returns 64-byte keypair (was 32-byte seed). Both formats accepted by `sign()`/`sign_compound()` for backward compatibility.
+- **signet-auth (Python)**: `AuditRecord.receipt` returns `dict` instead of typed `Receipt` object
+
+### Migration Guide
+
+**TypeScript (@signet-auth/mcp):**
+```typescript
+// Before (v0.1)
+const transport = new SigningTransport(inner, key, "agent", "owner", {
+  onSign: (receipt) => console.log(receipt),  // fires at dispatch
+});
+
+// After (v0.2)
+const transport = new SigningTransport(inner, key, "agent", "owner", {
+  onReceipt: (compound) => console.log(compound),  // fires after response
+  responseTimeout: 30000,
+});
+```
+
+**Python (signet-auth):**
+```python
+# Key format change — both work:
+kp = generate_keypair()  # now returns 64-byte keypair (88 chars base64)
+sign(kp.secret_key, ...)  # accepts both 32-byte and 64-byte keys
+
+# Audit record change:
+record = audit_query(...)
+record.receipt["id"]  # was: record.receipt.id
+```
+
+**Rust (signet-core):**
+```rust
+// Audit append change:
+let receipt_json = serde_json::to_value(&receipt)?;
+audit::append(&dir, &receipt_json)?;  // was: audit::append(&dir, &receipt)
+```
+
+### Fixed
+- Timer memory leak in SigningTransport `close()` — now clears all pending timeouts
+- Empty catch block in SigningTransport swallowing WASM errors — now forwards to `onerror`
+- `extract_timestamp` ignoring receipt version — now reads `ts_request` for v2
+- `query()` `--since` filter silently including records with missing timestamps — now skips them
+- `result ?? error` conflating `result: null` with error response — now checks `'result' in msg`
+
 ## [0.1.1] - 2026-04-02
 
 ### Added

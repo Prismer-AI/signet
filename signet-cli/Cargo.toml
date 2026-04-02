@@ -4,13 +4,16 @@ version = "0.1.0"
 edition = "2021"
 description = "CLI tool for Signet cryptographic action receipts"
 license = "Apache-2.0 OR MIT"
+repository = "https://github.com/Prismer-AI/signet"
+keywords = ["ed25519", "signing", "ai-agent", "mcp", "cli"]
+categories = ["command-line-utilities", "cryptography"]
 
 [[bin]]
 name = "signet"
 path = "src/main.rs"
 
 [dependencies]
-signet-core = { path = "../crates/signet-core" }
+signet-core = { version = "0.1.0", path = "../crates/signet-core" }
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 anyhow = "1"

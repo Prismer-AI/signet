@@ -14,7 +14,7 @@ def test_audit_append(tmp_path):
     record = signet_auth.audit_append(str(tmp_path), receipt)
     assert isinstance(record, signet_auth.AuditRecord)
     assert record.record_hash.startswith("sha256:")
-    assert record.receipt.id == receipt.id
+    assert record.receipt["id"] == receipt.id
 
 
 def test_audit_append_chain(tmp_path):

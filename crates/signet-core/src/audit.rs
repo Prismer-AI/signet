@@ -69,9 +69,9 @@ fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
 }
 
 fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
-    receipt.get("ts")
-        .or_else(|| receipt.get("ts_request"))
-        .and_then(|t| t.as_str())
+    let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
+    let key = if version >= 2 { "ts_request" } else { "ts" };
+    receipt.get(key).and_then(|t| t.as_str())
 }
 
 fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
@@ -192,12 +192,15 @@ pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, Signe
 
             // Check since filter — stop scanning if record is too old
             if let Some(since) = filter.since {
-                if let Some(ts) = extract_timestamp(&record.receipt) {
-                    if let Ok(parsed) = DateTime::parse_from_rfc3339(ts) {
-                        if parsed < since {
-                            return Ok(results.into_iter().rev().collect());
-                        }
+                match extract_timestamp(&record.receipt)
+                    .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                {
+                    Some(parsed) if parsed >= since => {} // passes filter, continue
+                    Some(_) => {
+                        // Record is older than since — stop scanning (records are chronological)
+                        return Ok(results.into_iter().rev().collect());
                     }
+                    None => continue, // missing or unparseable timestamp — skip
                 }
             }
 

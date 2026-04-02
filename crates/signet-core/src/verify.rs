@@ -62,7 +62,9 @@ pub fn verify_compound(receipt: &CompoundReceipt, pubkey: &VerifyingKey) -> Resu
 pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     let raw: serde_json::Value = serde_json::from_str(receipt_json)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid JSON: {e}")))?;
-    let version = raw.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
+    let version = raw.get("v")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SignetError::InvalidReceipt("missing or non-integer 'v' field".to_string()))?;
     match version {
         1 => {
             let receipt: Receipt = serde_json::from_value(raw)

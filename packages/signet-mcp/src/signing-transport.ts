@@ -68,7 +68,7 @@ export class SigningTransport implements Transport {
         this.pendingRequests.delete(msg.id);
 
         const tsResponse = new Date().toISOString();
-        const responseContent = msg.result ?? msg.error ?? null;
+        const responseContent = 'result' in msg ? msg.result : (msg.error ?? null);
 
         try {
           const receipt = signCompound(

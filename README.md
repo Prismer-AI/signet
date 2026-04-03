@@ -1,20 +1,30 @@
-# Signet
+<h1 align="center">Signet</h1>
 
-[![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
-[![简体中文](https://img.shields.io/badge/简体中文-lightgrey?style=flat-square)](README.zh.md)
+<p align="center">
+  <strong>Cryptographic Action Receipts for AI Agents</strong><br/>
+  <sub>Sign every tool call. Audit what happened. Verify offline. 3 lines of code.</sub>
+</p>
 
-[![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
-[![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
-[![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
-[![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
-[![GitHub stars](https://img.shields.io/github/stars/Prismer-AI/signet?style=social)](https://github.com/Prismer-AI/signet)
+<p align="center">
+  <a href="https://github.com/Prismer-AI/signet/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Prismer-AI/signet/ci.yml?branch=main&style=flat-square&labelColor=black&label=CI" alt="CI"></a>
+  <a href="https://github.com/Prismer-AI/signet/releases/latest"><img src="https://img.shields.io/github/v/release/Prismer-AI/signet?style=flat-square&labelColor=black&color=green&label=release" alt="Release"></a>
+  <a href="https://github.com/Prismer-AI/signet/blob/main/LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?labelColor=black&style=flat-square" alt="License"></a>
+  <a href="https://github.com/Prismer-AI/signet/stargazers"><img src="https://img.shields.io/github/stars/Prismer-AI/signet?style=flat-square&labelColor=black&color=yellow" alt="Stars"></a>
+</p>
 
-Cryptographic action receipts for AI agents -- sign, audit, verify.
+<p align="center">
+  <img src="https://img.shields.io/badge/SDKs-333?style=flat-square" alt="SDKs">
+  <a href="https://crates.io/crates/signet-core"><img src="https://img.shields.io/crates/v/signet-core?style=flat-square&labelColor=black&color=dea584&logo=rust&logoColor=white&label=signet--core" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/@signet-auth/mcp"><img src="https://img.shields.io/npm/v/@signet-auth/mcp?style=flat-square&labelColor=black&color=cb3837&logo=npm&logoColor=white&label=mcp" alt="npm"></a>
+  <a href="https://pypi.org/project/signet-auth/"><img src="https://img.shields.io/pypi/v/signet-auth?style=flat-square&labelColor=black&color=3775A9&logo=python&logoColor=white&label=signet--auth" alt="PyPI"></a>
+</p>
+
+<p align="center">
+  <a href="./README.md"><img alt="English" src="https://img.shields.io/badge/English-d9d9d9"></a>
+  <a href="./README.zh.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
+</p>
 
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
-
-**If you find Signet useful, please consider giving it a star -- it helps others discover the project.**
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet CLI demo" width="820">

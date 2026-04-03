@@ -1,5 +1,4 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use chrono;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use pyo3::prelude::*;
 
@@ -73,6 +72,7 @@ fn verify(py: Python<'_>, receipt: crate::types::PyReceipt, public_key: &str) ->
 
 #[pyfunction]
 #[pyo3(signature = (secret_key, action, response_content, signer_name, signer_owner=None, ts_request=None, ts_response=None))]
+#[allow(clippy::too_many_arguments)]
 fn sign_compound(
     py: Python<'_>,
     secret_key: &str,

@@ -38,6 +38,9 @@ pip install signet-auth
 
 # TypeScript (MCP middleware)
 npm install @signet-auth/core @signet-auth/mcp
+
+# TypeScript (MCP server verification)
+npm install @signet-auth/mcp-server
 ```
 
 ## Quick Start
@@ -88,7 +91,22 @@ const result = await client.callTool({
 ```
 
 Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
-MCP servers don't need to change -- they ignore unknown fields.
+Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
+MCP servers can optionally verify these signatures:
+
+```typescript
+import { verifyRequest } from "@signet-auth/mcp-server";
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const verified = verifyRequest(request, {
+    trustedKeys: ["ed25519:..."],
+    maxAge: 300,
+  });
+  if (!verified.ok) return { content: [{ type: "text", text: verified.error }], isError: true };
+  console.log(`Verified: ${verified.signerName}`);
+  // process tool call...
+});
+```
 
 <p align="center">
   <img src="demo-mcp.svg" alt="Signet MCP end-to-end demo" width="820">
@@ -245,7 +263,8 @@ signet/
 │   └── signet-py/            Python binding (PyO3 + maturin)
 ├── packages/
 │   ├── signet-core/          @signet-auth/core — TypeScript wrapper
-│   └── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
+│   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
+│   └── signet-mcp-server/    @signet-auth/mcp-server — Server verification
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
 │   └── mcp-agent/            MCP agent + echo server example
@@ -317,7 +336,7 @@ Keys stored at `~/.signet/keys/` with `0600` permissions. Override with `SIGNET_
 
 ### What Signet does NOT prove (yet)
 
-- That the MCP server received or executed the action (v2: server receipts)
+- That the MCP server executed the action (server can verify the request via `@signet-auth/mcp-server`, but execution proof requires server co-signing — v0.4)
 - That signer.owner actually controls the key (v2: identity registry)
 
 Signet is an attestation tool (proving what happened), not a prevention tool (blocking bad actions). It complements policy enforcement tools like firewalls and gateways.

@@ -1,4 +1,4 @@
-import { signCompound, type CompoundReceipt, type SignetAction } from '@signet-auth/core';
+import { sign, signCompound, type CompoundReceipt, type SignetAction, type SignetReceipt } from '@signet-auth/core';
 
 // Minimal Transport interface — compatible with @modelcontextprotocol/sdk Transport
 // but defined here to avoid requiring the SDK as a dependency
@@ -27,6 +27,7 @@ export interface SigningTransportOptions {
   transport?: string;
   responseTimeout?: number; // ms, default 30000
   onReceipt?: (receipt: CompoundReceipt) => void;
+  onDispatch?: (receipt: SignetReceipt) => void;
 }
 
 export class SigningTransport implements Transport {
@@ -127,6 +128,19 @@ export class SigningTransport implements Transport {
         transport: this.opts.transport ?? 'stdio',
       };
       const tsRequest = new Date().toISOString();
+
+      // Sign v1 dispatch receipt with full params for server verification
+      try {
+        const dispatchReceipt = sign(this.secretKey, action, this.signerName, this.signerOwner);
+        // Deep-clone and inject into _meta._signet
+        const clonedParams = JSON.parse(JSON.stringify(message.params ?? {}));
+        if (!clonedParams._meta) clonedParams._meta = {};
+        clonedParams._meta._signet = dispatchReceipt;
+        message.params = clonedParams;
+        this.opts.onDispatch?.(dispatchReceipt);
+      } catch (err) {
+        this.onerror?.(err instanceof Error ? err : new Error(String(err)));
+      }
 
       const id = message.id;
       const timer = setTimeout(() => {

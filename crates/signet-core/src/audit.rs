@@ -566,14 +566,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (sk, _) = generate_keypair();
         let action = test_action();
+        let ts_req = chrono::Utc::now();
+        let ts_res = ts_req + chrono::Duration::milliseconds(150);
+        let ts_request = ts_req.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts_response = ts_res.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let v2 = sign::sign_compound(
             &sk,
             &action,
             &json!({"text": "ok"}),
             "agent",
             "",
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &ts_request,
+            &ts_response,
         )
         .unwrap();
         let record = append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -593,14 +597,18 @@ mod tests {
         append(dir.path(), &serde_json::to_value(&v1).unwrap()).unwrap();
 
         // Append v2
+        let ts_req = chrono::Utc::now();
+        let ts_res = ts_req + chrono::Duration::milliseconds(150);
+        let ts_request = ts_req.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts_response = ts_res.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let v2 = sign::sign_compound(
             &sk,
             &action,
             &json!({"text": "ok"}),
             "agent",
             "",
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &ts_request,
+            &ts_response,
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -620,14 +628,18 @@ mod tests {
         append(dir.path(), &serde_json::to_value(&v1).unwrap()).unwrap();
 
         // v2 record
+        let ts_req = chrono::Utc::now();
+        let ts_res = ts_req + chrono::Duration::milliseconds(150);
+        let ts_request = ts_req.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts_response = ts_res.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let v2 = sign::sign_compound(
             &sk,
             &action,
             &json!({"text": "ok"}),
             "agent",
             "",
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &ts_request,
+            &ts_response,
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -648,14 +660,18 @@ mod tests {
         let (sk, _) = generate_keypair();
         let action = test_action();
 
+        let ts_req = chrono::Utc::now();
+        let ts_res = ts_req + chrono::Duration::milliseconds(150);
+        let ts_request = ts_req.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts_response = ts_res.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let v2 = sign::sign_compound(
             &sk,
             &action,
             &json!({"text": "ok"}),
             "agent",
             "",
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &ts_request,
+            &ts_response,
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();

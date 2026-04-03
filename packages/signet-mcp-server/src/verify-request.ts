@@ -42,7 +42,7 @@ export function verifyRequest(
 
   // 3. Validate receipt shape
   const s = signet as Record<string, unknown>;
-  if (!s['v'] || !s['sig'] || !s['action'] || !s['signer']) {
+  if (!s['v'] || !s['sig'] || !s['action'] || !s['signer'] || !s['ts']) {
     return { ok: false, error: 'malformed receipt' };
   }
 
@@ -70,19 +70,17 @@ export function verifyRequest(
     return { ok: false, error: `untrusted signer: ${prefixedPubkey}` };
   }
 
-  // 6. Check freshness
-  if (receipt.ts) {
-    const receiptTime = new Date(receipt.ts).getTime();
-    const now = Date.now();
-    if (isNaN(receiptTime)) {
-      return { ok: false, error: 'invalid receipt timestamp' };
-    }
-    if (receiptTime < now - maxAgeMs) {
-      return { ok: false, error: 'receipt too old' };
-    }
-    if (receiptTime > now + CLOCK_SKEW_TOLERANCE_MS) {
-      return { ok: false, error: 'receipt from future' };
-    }
+  // 6. Check freshness (ts is guaranteed by shape check above)
+  const receiptTime = new Date(receipt.ts).getTime();
+  const now = Date.now();
+  if (isNaN(receiptTime)) {
+    return { ok: false, error: 'invalid receipt timestamp' };
+  }
+  if (receiptTime < now - maxAgeMs) {
+    return { ok: false, error: 'receipt too old' };
+  }
+  if (receiptTime > now + CLOCK_SKEW_TOLERANCE_MS) {
+    return { ok: false, error: 'receipt from future' };
   }
 
   // 7. Check target
@@ -104,9 +102,9 @@ export function verifyRequest(
 
   // 9. Anti-staple: receipt.action.params must match request.params.arguments
   const requestArgs = (request.params as Record<string, unknown> | undefined)?.['arguments'];
-  if (requestArgs !== undefined && receipt.action.params !== undefined) {
-    const signedParams = JSON.stringify(receipt.action.params);
-    const actualParams = JSON.stringify(requestArgs);
+  if (requestArgs !== undefined || receipt.action.params !== undefined) {
+    const signedParams = JSON.stringify(receipt.action.params ?? null);
+    const actualParams = JSON.stringify(requestArgs ?? null);
     if (signedParams !== actualParams) {
       return { ok: false, error: 'params mismatch: signed params differ from request arguments' };
     }

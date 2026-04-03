@@ -140,6 +140,7 @@ export class SigningTransport implements Transport {
         this.opts.onDispatch?.(dispatchReceipt);
       } catch (err) {
         this.onerror?.(err instanceof Error ? err : new Error(String(err)));
+        return;
       }
 
       const id = message.id;

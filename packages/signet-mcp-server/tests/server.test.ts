@@ -154,4 +154,43 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     assert.strictEqual(result.ok, false);
     assert(result.error?.includes('params mismatch'), `Expected 'params mismatch', got: ${result.error}`);
   });
+
+  it('test_verify_no_request_args — receipt signed with params, request has no arguments key → params mismatch', () => {
+    // Sign with params {x: 1} but request omits the arguments key entirely
+    const action = makeAction('echo', { x: 1 });
+    const receipt = sign(kp.secretKey, action, 'test-agent', 'owner');
+    const req = {
+      params: {
+        name: 'echo',
+        // no 'arguments' key — requestArgs will be undefined
+        _meta: { _signet: receipt },
+      },
+    };
+    const result = verifyRequest(req, { trustedKeys: [receipt.signer.pubkey] });
+    // receipt.action.params is {x:1}, requestArgs is undefined → mismatch
+    assert.strictEqual(result.ok, false);
+    assert(result.error?.includes('params mismatch'), `Expected 'params mismatch', got: ${result.error}`);
+  });
+
+  it('test_verify_malformed_no_ts — _signet missing ts field → ok: false, "malformed"', () => {
+    // Construct a receipt-like object without ts to exercise the shape check for ts
+    const req = {
+      params: {
+        name: 'echo',
+        arguments: { message: 'hello' },
+        _meta: {
+          _signet: {
+            v: 1,
+            sig: 'ed25519:AAAA',
+            action: { tool: 'echo', params: {}, params_hash: '', target: '', transport: 'stdio' },
+            signer: { name: 'agent', pubkey: 'ed25519:AAAA', owner: '' },
+            // ts intentionally omitted
+          },
+        },
+      },
+    };
+    const result = verifyRequest(req, { trustedKeys: [] });
+    assert.strictEqual(result.ok, false);
+    assert(result.error?.includes('malformed'), `Expected 'malformed' in error, got: ${result.error}`);
+  });
 });

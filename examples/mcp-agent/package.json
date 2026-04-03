@@ -2,6 +2,12 @@
   "name": "signet-mcp-example",
   "private": true,
   "type": "module",
+  "scripts": {
+    "agent": "npx tsx agent.ts",
+    "echo-server": "npx tsx echo-server.ts",
+    "verifier-server": "node verifier-server.mjs",
+    "smoke": "node --test verifier-server.test.mjs"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
     "@signet-auth/core": "file:../../packages/signet-core",

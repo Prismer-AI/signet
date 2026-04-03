@@ -1,0 +1,8 @@
+.git
+**/node_modules
+bindings/signet-py/target
+crates/**/target
+signet-cli/target
+target
+*.cast
+*.gif

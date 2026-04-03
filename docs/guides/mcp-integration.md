@@ -64,7 +64,7 @@ const isValid = verify(receipt, publicKey);
 const transport = new SigningTransport(inner, secretKey, "my-agent", "owner-name", {
   target: "mcp://github.local",    // MCP target URI (default: "unknown")
   transport: "stdio",              // Transport type (default: "stdio")
-  onSign: (receipt) => {           // Callback after each signing
+  onDispatch: (receipt) => {       // Callback after each dispatch receipt
     console.log(`Signed: ${receipt.action.tool} at ${receipt.ts}`);
   },
 });
@@ -78,7 +78,7 @@ When `SigningTransport` intercepts a `tools/call` request:
 2. Creates a `SignetAction` with tool, params, target, transport
 3. Signs the action with Ed25519
 4. Injects the receipt into `message.params._meta._signet`
-5. Sets `receipt.action.params = null` (avoids duplicating large payloads)
+5. Stores the request so a compound receipt can be created after the response
 6. Forwards the modified message to the inner transport
 
 MCP servers ignore unknown `_meta` fields, so no server-side changes are needed.
@@ -122,4 +122,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 ## Full Example
 
-See [examples/mcp-agent/](../../examples/mcp-agent/) for a complete working example with an agent and echo server.
+See [examples/mcp-agent/](../../examples/mcp-agent/) for a complete working example with:
+
+- a signed MCP client (`agent.ts`)
+- a demo echo server (`echo-server.ts`)
+- a reference verifier MCP server (`verifier-server.mjs`)

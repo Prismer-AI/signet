@@ -42,6 +42,12 @@ tmp/
 scripts/
 .codex
 
+# Recordings (large binaries)
+*.cast
+
+# Patent (private)
+docs/patent/
+
 # Python
 __pycache__/
 *.pyc

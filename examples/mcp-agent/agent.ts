@@ -16,7 +16,7 @@ const inner = new StdioClientTransport({
 const transport = new SigningTransport(inner as any, secretKey, 'demo-agent', 'demo-owner', {
   target: 'mcp://echo-server',
   transport: 'stdio',
-  onSign: (receipt) => {
+  onDispatch: (receipt) => {
     console.log(`Signed: ${receipt.id} | tool: ${receipt.action.tool} | ts: ${receipt.ts}`);
   },
 });

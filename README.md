@@ -28,8 +28,6 @@ AI agents execute high-value actions with zero accountability. Signet fixes this
 - **Audit** what happened with an append-only, hash-chained local log
 - **Verify** any action receipt offline, no network needed
 
-If Signet is useful to you, a ⭐ helps others find it — thank you!
-
 ## Install
 
 ```bash

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKeypair, type CompoundReceipt } from '@signet-auth/core';
-import { SigningTransport, type Transport, type JSONRPCMessage } from '../src/index.js';
+import { generateKeypair, verifyAny, type CompoundReceipt } from '@signet-auth/core';
+import { SigningTransport, type Transport, type JSONRPCMessage, type SignetReceipt } from '../src/index.js';
 
 // Mock transport that records sent messages and supports simulating responses
 class MockTransport implements Transport {
@@ -139,5 +139,49 @@ describe('@signet-auth/mcp SigningTransport v2', () => {
     mock.simulateResponse(6, { content: [] });
 
     assert.strictEqual(receiptCount, 0, 'no receipt after close clears pending');
+  });
+
+  it('injects _meta._signet dispatch receipt into tool call message', async () => {
+    const { mock, signing } = createTransport();
+
+    await signing.send(toolCallMessage(7, 'echo', { message: 'hello' }));
+
+    assert.strictEqual(mock.sent.length, 1);
+    const params = mock.sent[0].params as Record<string, unknown>;
+    const meta = params._meta as Record<string, unknown> | undefined;
+    assert(meta !== undefined, '_meta should be present');
+    const signet = meta._signet as SignetReceipt | undefined;
+    assert(signet !== undefined, '_meta._signet should be present');
+    assert(signet.sig.startsWith('ed25519:'), 'sig should start with ed25519:');
+    assert.strictEqual(signet.v, 1);
+  });
+
+  it('fires onDispatch callback at send time', async () => {
+    let dispatched: SignetReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, kp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      onDispatch: (r) => { dispatched = r; },
+    });
+
+    await signing.send(toolCallMessage(8, 'echo', { message: 'hello' }));
+
+    assert(dispatched !== null, 'onDispatch should have been called');
+    assert.strictEqual((dispatched as SignetReceipt).v, 1);
+    assert((dispatched as SignetReceipt).sig.startsWith('ed25519:'));
+  });
+
+  it('dispatch receipt is verifiable with correct key', async () => {
+    const { mock, signing } = createTransport();
+
+    await signing.send(toolCallMessage(9, 'echo', { message: 'hello' }));
+
+    const params = mock.sent[0].params as Record<string, unknown>;
+    const meta = params._meta as Record<string, unknown>;
+    const signet = meta._signet as SignetReceipt;
+
+    const valid = verifyAny(JSON.stringify(signet), kp.publicKey);
+    assert(valid, 'dispatch receipt should verify with the signer public key');
   });
 });

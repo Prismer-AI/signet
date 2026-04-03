@@ -1,0 +1,21 @@
+{
+  "name": "@signet-auth/mcp-server",
+  "version": "0.3.0",
+  "description": "Server-side verification for Signet cryptographic action receipts",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/"],
+  "scripts": {
+    "build": "npx tsc",
+    "test": "npx tsc && node --test dist/tests/server.test.js"
+  },
+  "dependencies": {
+    "@signet-auth/core": "file:../signet-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-03
+
+### Added
+- **@signet-auth/mcp-server**: New package — server-side verification for MCP tool calls
+- **@signet-auth/mcp-server**: `verifyRequest()` — validates signature, trusted keys, freshness, target, anti-staple (tool + params match)
+- **@signet-auth/mcp**: `onDispatch` callback — fires at send time with v1 dispatch receipt
+- **@signet-auth/mcp**: Restores inline `_meta._signet` injection for server verification (alongside v0.2 compound receipts)
+
+### Changed
+- **@signet-auth/mcp**: SigningTransport now produces both: v1 dispatch receipt (injected at send) + v2 compound receipt (after response)
+- Example echo-server now demonstrates `verifyRequest()` in log-only mode
+
 ## [0.2.0] - 2026-04-02
 
 ### Added

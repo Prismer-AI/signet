@@ -306,18 +306,19 @@ maturin develop
 ### Test
 
 ```bash
-# Rust tests (68 tests)
+# Rust tests (80 tests)
 cargo test --workspace
 
-# Python tests (85 tests)
+# Python tests (73 tests)
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM roundtrip (8 tests)
 node examples/wasm-roundtrip/test.mjs
 
-# TypeScript tests (11 tests)
+# TypeScript tests (26 tests)
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
+cd packages/signet-mcp-server && npm test
 ```
 
 ## Security

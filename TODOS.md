@@ -54,15 +54,9 @@ Shipped 2026-04-01. Published to PyPI as `signet-auth`. Includes `SigningAgent` 
 
 ---
 
-### Server-Side Verification Middleware
+### ~~Server-Side Verification~~ ✅
 
-**What:** MCP servers can optionally verify incoming Signet signatures before executing tool calls. Ships as a middleware for common MCP server frameworks.
-
-**Why:** Bilateral verification closes the trust loop. Single-sided attestation alone means servers cannot enforce signing policy.
-
-**Effort:** L — ~1 week human / ~5 hr CC
-
-**Depends on:** adoption (at least one real MCP server to integrate against)
+Shipped 2026-04-03 as `@signet-auth/mcp-server` v0.3.0. Handler-level `verifyRequest()` with trusted keys, freshness window, target binding, and anti-staple checks.
 
 ---
 

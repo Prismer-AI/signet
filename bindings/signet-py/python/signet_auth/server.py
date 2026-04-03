@@ -31,7 +31,7 @@ class VerifyOptions:
 
 
 @dataclass
-class VerifyResult:
+class ServerVerifyResult:
     """Result of verify_request()."""
 
     ok: bool
@@ -43,7 +43,7 @@ class VerifyResult:
 def verify_request(
     params: dict[str, Any],
     options: VerifyOptions | None = None,
-) -> VerifyResult:
+) -> ServerVerifyResult:
     """Verify a Signet signature in an MCP tool call request.
 
     Args:
@@ -62,21 +62,21 @@ def verify_request(
     # 2. Check presence
     if signet is None:
         if opts.require_signature:
-            return VerifyResult(ok=False, error="unsigned request")
-        return VerifyResult(ok=True)
+            return ServerVerifyResult(ok=False, error="unsigned request")
+        return ServerVerifyResult(ok=True)
 
     # 3. Validate receipt shape
     if not isinstance(signet, dict):
-        return VerifyResult(ok=False, error="malformed receipt")
+        return ServerVerifyResult(ok=False, error="malformed receipt")
     for key in ("v", "sig", "action", "signer", "ts"):
         if key not in signet:
-            return VerifyResult(ok=False, error="malformed receipt")
+            return ServerVerifyResult(ok=False, error="malformed receipt")
 
     # 4. Verify signature
     try:
         receipt = Receipt.from_json(json.dumps(signet))
     except Exception:
-        return VerifyResult(ok=False, error="malformed receipt")
+        return ServerVerifyResult(ok=False, error="malformed receipt")
 
     prefixed_pubkey = receipt.signer.pubkey
     bare_pubkey = (
@@ -88,32 +88,32 @@ def verify_request(
     try:
         valid = verify(receipt, bare_pubkey)
     except Exception:
-        return VerifyResult(ok=False, error="invalid signature")
+        return ServerVerifyResult(ok=False, error="invalid signature")
 
     if not valid:
-        return VerifyResult(ok=False, error="invalid signature")
+        return ServerVerifyResult(ok=False, error="invalid signature")
 
     # 5. Check trusted keys
     if prefixed_pubkey not in opts.trusted_keys:
-        return VerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
+        return ServerVerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
 
     # 6. Check freshness
     try:
         receipt_time = datetime.fromisoformat(receipt.ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
-        return VerifyResult(ok=False, error="invalid receipt timestamp")
+        return ServerVerifyResult(ok=False, error="invalid receipt timestamp")
 
     now = datetime.now(timezone.utc)
     age = (now - receipt_time).total_seconds()
 
     if age > opts.max_age:
-        return VerifyResult(ok=False, error="receipt too old")
+        return ServerVerifyResult(ok=False, error="receipt too old")
     if age < -CLOCK_SKEW_TOLERANCE_SECONDS:
-        return VerifyResult(ok=False, error="receipt from future")
+        return ServerVerifyResult(ok=False, error="receipt from future")
 
     # 7. Check target
     if opts.expected_target and receipt.action.target != opts.expected_target:
-        return VerifyResult(
+        return ServerVerifyResult(
             ok=False,
             error=f"target mismatch: expected {opts.expected_target}, got {receipt.action.target}",
         )
@@ -121,22 +121,22 @@ def verify_request(
     # 8. Anti-staple: tool name
     request_tool = params.get("name")
     if request_tool is not None and receipt.action.tool != request_tool:
-        return VerifyResult(
+        return ServerVerifyResult(
             ok=False,
             error=f'tool mismatch: receipt signed for "{receipt.action.tool}", request is for "{request_tool}"',
         )
 
-    # 9. Anti-staple: params
+    # 9. Anti-staple: params (use raw signet dict to avoid Rust type coercion)
     request_args = params.get("arguments")
-    receipt_params = receipt.action.params
+    receipt_params = signet.get("action", {}).get("params")
     if request_args is not None or receipt_params is not None:
-        signed = json.dumps(receipt_params, sort_keys=True) if receipt_params is not None else "null"
-        actual = json.dumps(request_args, sort_keys=True) if request_args is not None else "null"
+        signed = json.dumps(receipt_params, separators=(",", ":")) if receipt_params is not None else "null"
+        actual = json.dumps(request_args, separators=(",", ":")) if request_args is not None else "null"
         if signed != actual:
-            return VerifyResult(ok=False, error="params mismatch: signed params differ from request arguments")
+            return ServerVerifyResult(ok=False, error="params mismatch: signed params differ from request arguments")
 
     # All checks pass
-    return VerifyResult(
+    return ServerVerifyResult(
         ok=True,
         signer_name=receipt.signer.name,
         signer_pubkey=prefixed_pubkey,

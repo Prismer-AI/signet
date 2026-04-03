@@ -1,7 +1,7 @@
 """signet-auth: Cryptographic action receipts for AI agents."""
 
 from signet_auth.agent import SigningAgent
-from signet_auth.server import VerifyOptions, VerifyResult, verify_request
+from signet_auth.server import VerifyOptions, ServerVerifyResult, verify_request
 from signet_auth._signet import (
     __version__,
     # Exceptions
@@ -85,7 +85,7 @@ __all__ = [
     "ChainBreak",
     "ChainStatus",
     "VerifyFailure",
-    "VerifyResult",
+    "ServerVerifyResult",
     # Core functions
     "generate_keypair",
     "sign",
@@ -108,6 +108,6 @@ __all__ = [
     "audit_verify_signatures",
     # Server verification
     "VerifyOptions",
-    "VerifyResult",
+    "ServerVerifyResult",
     "verify_request",
 ]

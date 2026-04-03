@@ -198,3 +198,37 @@ jobs:
           npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Post-publish smoke test (npm)
+        run: |
+          echo "Waiting 30s for npm registry propagation..."
+          sleep 30
+          mkdir /tmp/npm-smoke && cd /tmp/npm-smoke
+          npm init -y > /dev/null 2>&1
+          npm install @signet-auth/core @signet-auth/mcp @signet-auth/mcp-server
+          node -e "
+            const { generateKeypair, sign, verify } = require('@signet-auth/core');
+            const kp = generateKeypair();
+            const action = { tool: 'test', params: {ok:true}, params_hash: '', target: 'mcp://smoke', transport: 'stdio' };
+            const receipt = sign(kp.secretKey, action, 'smoke-agent', 'ci');
+            if (!verify(receipt, kp.publicKey)) { process.exit(1); }
+            console.log('npm smoke test PASSED: sign + verify roundtrip OK');
+          "
+          rm -rf /tmp/npm-smoke
+
+  smoke-cargo:
+    name: Post-publish smoke test (cargo)
+    needs: crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Smoke test cargo install
+        run: |
+          echo "Waiting 60s for crates.io index propagation..."
+          sleep 60
+          cargo install signet-cli || true
+          signet identity generate --name smoke-test --unencrypted
+          signet sign --key smoke-test --tool test --params '{}' --target mcp://smoke --no-log > /tmp/receipt.json
+          signet verify /tmp/receipt.json --pubkey smoke-test
+          echo "cargo smoke test PASSED: identity + sign + verify OK"
+        env:
+          SIGNET_HOME: /tmp/signet-smoke

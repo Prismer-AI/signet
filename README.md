@@ -14,7 +14,7 @@ Cryptographic action receipts for AI agents -- sign, audit, verify.
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
 
 <p align="center">
-  <img src="demo.svg" alt="Signet CLI demo" width="820">
+  <img src="demo-cli.svg" alt="Signet CLI demo" width="820">
 </p>
 
 ## Why
@@ -89,6 +89,10 @@ const result = await client.callTool({
 
 Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
 MCP servers don't need to change -- they ignore unknown fields.
+
+<p align="center">
+  <img src="demo-mcp.svg" alt="Signet MCP end-to-end demo" width="820">
+</p>
 
 ### Python (LangChain / CrewAI / AutoGen)
 

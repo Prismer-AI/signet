@@ -8,10 +8,13 @@
 [![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
 [![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
+[![GitHub stars](https://img.shields.io/github/stars/Prismer-AI/signet?style=social)](https://github.com/Prismer-AI/signet)
 
 Cryptographic action receipts for AI agents -- sign, audit, verify.
 
 Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
+
+**If you find Signet useful, please consider giving it a star -- it helps others discover the project.**
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet CLI demo" width="820">
@@ -91,7 +94,6 @@ const result = await client.callTool({
 ```
 
 Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
-Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
 MCP servers can optionally verify these signatures:
 
 ```typescript
@@ -111,6 +113,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 <p align="center">
   <img src="demo-mcp.svg" alt="Signet MCP end-to-end demo" width="820">
 </p>
+
+### Reference MCP Server
+
+This repo also includes a minimal MCP reference server that demonstrates server-side verification with `@signet-auth/mcp-server`.
+
+```bash
+cd examples/mcp-agent
+npm ci
+npm run verifier-server
+```
+
+Available tools:
+
+- `inspect_current_request` — verifies the current MCP tool call if it includes `params._meta._signet`
+- `verify_receipt` — verifies a raw Signet receipt against a public key
+- `verify_request_payload` — verifies a synthetic MCP `tools/call` payload offline
+
+Environment variables:
+
+- `SIGNET_TRUSTED_KEYS` — comma-separated `ed25519:<base64>` public keys
+- `SIGNET_REQUIRE_SIGNATURE` — `true` or `false` (default `false`)
+- `SIGNET_MAX_AGE` — max receipt age in seconds (default `300`)
+- `SIGNET_EXPECTED_TARGET` — optional expected `receipt.action.target`
 
 ### Python (LangChain / CrewAI / AutoGen)
 
@@ -267,7 +292,7 @@ signet/
 │   └── signet-mcp-server/    @signet-auth/mcp-server — Server verification
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
-│   └── mcp-agent/            MCP agent + echo server example
+│   └── mcp-agent/            MCP agent, echo server, and verifier server example
 ├── docs/                     Design docs, specs, plans
 ├── LICENSE-APACHE
 └── LICENSE-MIT
@@ -319,6 +344,9 @@ node examples/wasm-roundtrip/test.mjs
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
+
+# Reference verifier server smoke test
+cd examples/mcp-agent && npm run smoke
 ```
 
 ## Security

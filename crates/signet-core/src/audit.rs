@@ -572,8 +572,8 @@ mod tests {
             &json!({"text": "ok"}),
             "agent",
             "",
-            "2026-04-02T10:00:00.000Z",
-            "2026-04-02T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         let record = append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -599,8 +599,8 @@ mod tests {
             &json!({"text": "ok"}),
             "agent",
             "",
-            "2026-04-02T10:00:00.000Z",
-            "2026-04-02T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -626,8 +626,8 @@ mod tests {
             &json!({"text": "ok"}),
             "agent",
             "",
-            "2026-04-02T10:00:00.000Z",
-            "2026-04-02T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();
@@ -654,8 +654,8 @@ mod tests {
             &json!({"text": "ok"}),
             "agent",
             "",
-            "2026-04-02T10:00:00.000Z",
-            "2026-04-02T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         append(dir.path(), &serde_json::to_value(&v2).unwrap()).unwrap();

@@ -6,6 +6,7 @@
     "@modelcontextprotocol/sdk": "^1.10.0",
     "@signet-auth/core": "file:../../packages/signet-core",
     "@signet-auth/mcp": "file:../../packages/signet-mcp",
+    "@signet-auth/mcp-server": "file:../../packages/signet-mcp-server",
     "tsx": "^4"
   }
 }

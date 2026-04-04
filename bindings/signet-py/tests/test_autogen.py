@@ -40,9 +40,7 @@ def test_signed_tool_signs_on_call() -> None:
         tool = MockTool("search")
         wrapped = signed_tool(tool, agent)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            wrapped.run_json({"query": "signet crypto"})
-        )
+        result = asyncio.run(wrapped.run_json({"query": "signet crypto"}))
 
         assert "executed" in str(result)
 
@@ -58,9 +56,7 @@ def test_signed_tool_forwards_result() -> None:
         tool = MockTool("echo")
         wrapped = signed_tool(tool, agent)
 
-        result = asyncio.get_event_loop().run_until_complete(
-            wrapped.run_json({"message": "hello"})
-        )
+        result = asyncio.run(wrapped.run_json({"message": "hello"}))
 
         assert result == {"result": "executed echo with {'message': 'hello'}"}
 
@@ -82,10 +78,23 @@ def test_signed_tool_audit_chain() -> None:
         tools = [MockTool("step_1"), MockTool("step_2")]
         wrapped = sign_tools(tools, agent)
 
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(wrapped[0].run_json({"data": "a"}))
-        loop.run_until_complete(wrapped[1].run_json({"data": "b"}))
+        asyncio.run(wrapped[0].run_json({"data": "a"}))
+        asyncio.run(wrapped[1].run_json({"data": "b"}))
 
         chain = agent.audit_verify_chain()
         assert chain.valid
         assert chain.total_records == 2
+
+
+def test_signed_tool_collects_receipts() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        agent = signet_auth.SigningAgent.create("autogen-bot", signet_dir=tmpdir)
+        tool = MockTool("search")
+        wrapped = signed_tool(tool, agent)
+
+        asyncio.run(wrapped.run_json({"q": "a"}))
+        asyncio.run(wrapped.run_json({"q": "b"}))
+
+        assert len(wrapped.receipts) == 2
+        assert wrapped.receipts[0].action.tool == "search"
+        assert wrapped.receipts[1].action.tool == "search"

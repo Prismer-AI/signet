@@ -4,6 +4,10 @@ Signs every tool call with the agent's Ed25519 key and appends
 to the hash-chained audit log. Wraps FunctionTool to intercept
 calls transparently.
 
+Note: AutoGen is not imported here. This module uses structural duck-typing
+against FunctionTool's interface (name, description, run_json, return_value_as_string).
+Install AutoGen separately: pip install autogen-agentchat
+
 Usage:
     from signet_auth import SigningAgent
     from signet_auth.autogen import signed_tool, sign_tools
@@ -23,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Sequence
 
-from signet_auth._signet import SignetError
+from signet_auth._signet import Receipt, SignetError
 from signet_auth.agent import SigningAgent
 
 logger = logging.getLogger("signet_auth.autogen")
@@ -41,6 +45,7 @@ class SignedFunctionTool:
         """
         self._tool = tool
         self._agent = agent
+        self.receipts: list[Receipt] = []
         # Forward tool attributes
         self.name = tool.name
         self.description = tool.description
@@ -53,21 +58,15 @@ class SignedFunctionTool:
         self, args: dict[str, Any], cancellation_token: Any = None
     ) -> Any:
         """Run the tool with Signet signing before execution."""
-        try:
-            self._agent.sign(
-                self.name,
-                params=args,
-                target="autogen://local",
-                transport="autogen",
-            )
-        except SignetError:
-            logger.warning("Failed to sign tool call: %s", self.name, exc_info=True)
+        receipt = self._agent.sign(
+            self.name,
+            params=args,
+            target="autogen://local",
+        )
+        self.receipts.append(receipt)
 
-        if cancellation_token is not None:
-            result = await self._tool.run_json(args, cancellation_token)
-        else:
-            result = await self._tool.run_json(args)
-
+        # Always forward cancellation_token
+        result = await self._tool.run_json(args, cancellation_token)
         return result
 
     def return_value_as_string(self, value: Any) -> str:
@@ -78,7 +77,10 @@ class SignedFunctionTool:
 
     def __getattr__(self, name: str) -> Any:
         """Forward unknown attributes to the wrapped tool."""
-        return getattr(self._tool, name)
+        tool = self.__dict__.get("_tool")
+        if tool is None:
+            raise AttributeError(name)
+        return getattr(tool, name)
 
 
 def signed_tool(tool: Any, agent: SigningAgent) -> SignedFunctionTool:

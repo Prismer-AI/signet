@@ -4,7 +4,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::{CompoundReceipt, Receipt};
+use crate::receipt::{BilateralReceipt, CompoundReceipt, Receipt};
 
 pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     let sig_b64 = receipt
@@ -76,8 +76,56 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
                 .map_err(|e| SignetError::InvalidReceipt(format!("v2 parse: {e}")))?;
             verify_compound(&receipt, pubkey)
         }
+        3 => Err(SignetError::InvalidReceipt(
+            "v3 bilateral receipts require verify_bilateral(), not verify_any()".to_string(),
+        )),
         _ => Err(SignetError::InvalidReceipt(format!("unsupported version: {version}"))),
     }
+}
+
+pub fn verify_bilateral(receipt: &BilateralReceipt, server_pubkey: &VerifyingKey) -> Result<(), SignetError> {
+    // 1. Verify server signature over v3 body
+    let sig_b64 = receipt
+        .sig
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
+    let sig_bytes = BASE64
+        .decode(sig_b64)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
+    let signature = Signature::from_slice(&sig_bytes)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+
+    let signable = serde_json::json!({
+        "v": receipt.v,
+        "agent_receipt": receipt.agent_receipt,
+        "response": receipt.response,
+        "server": receipt.server,
+        "ts_response": receipt.ts_response,
+        "nonce": receipt.nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+
+    server_pubkey
+        .verify(canonical_bytes.as_bytes(), &signature)
+        .map_err(|_| SignetError::SignatureMismatch)?;
+
+    // 2. Verify embedded agent receipt using its own pubkey
+    let agent_pubkey_b64 = receipt
+        .agent_receipt
+        .signer
+        .pubkey
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| SignetError::InvalidReceipt("agent pubkey missing prefix".to_string()))?;
+    let agent_pubkey_bytes = BASE64
+        .decode(agent_pubkey_b64)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
+    let agent_pubkey_arr: [u8; 32] = agent_pubkey_bytes
+        .try_into()
+        .map_err(|_| SignetError::InvalidReceipt("agent pubkey not 32 bytes".to_string()))?;
+    let agent_vk = VerifyingKey::from_bytes(&agent_pubkey_arr)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
+
+    verify(&receipt.agent_receipt, &agent_vk)
 }
 
 #[cfg(test)]
@@ -222,6 +270,110 @@ mod tests {
         ).unwrap();
         receipt.ts_response = "2099-01-01T00:00:00.000Z".to_string();
         assert!(matches!(verify_compound(&receipt, &vk), Err(SignetError::SignatureMismatch)));
+    }
+
+    #[test]
+    fn test_bilateral_verify_roundtrip() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "issue #42"}]});
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+        assert!(verify_bilateral(&bilateral, &server_vk).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_verify_wrong_server_key() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let (_, wrong_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+        assert!(matches!(
+            verify_bilateral(&bilateral, &wrong_vk),
+            Err(SignetError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn test_bilateral_tampered_response() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let mut bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+        bilateral.response.content_hash = "sha256:tampered".to_string();
+        assert!(matches!(
+            verify_bilateral(&bilateral, &server_vk),
+            Err(SignetError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn test_bilateral_tampered_agent_receipt() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let mut bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+        bilateral.agent_receipt.signer.name = "impostor".to_string();
+        assert!(matches!(
+            verify_bilateral(&bilateral, &server_vk),
+            Err(SignetError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn test_verify_any_v3_rejects() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+        let json = serde_json::to_string(&bilateral).unwrap();
+        let result = verify_any(&json, &server_vk);
+        assert!(matches!(result, Err(SignetError::InvalidReceipt(ref msg)) if msg.contains("verify_bilateral")));
     }
 
     #[test]

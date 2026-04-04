@@ -15,7 +15,7 @@ pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use receipt::{Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer};
 pub use sign::{sign, sign_bilateral, sign_compound};
-pub use verify::{verify, verify_any, verify_compound};
+pub use verify::{verify, verify_any, verify_bilateral, verify_compound};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use identity::fs_ops::{

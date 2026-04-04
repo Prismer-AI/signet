@@ -105,27 +105,26 @@ export class SigningTransport implements Transport {
 
             if (bilateralMeta.response?.content_hash !== actualHash) {
               this.onerror?.(new Error('bilateral receipt response hash mismatch'));
-              return; // don't forward
-            } else if (this.opts.trustedServerKeys?.length) {
-              const serverPubkey = bilateralMeta.server?.pubkey;
-              if (!serverPubkey || !this.opts.trustedServerKeys.includes(serverPubkey)) {
-                this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
-                return; // don't forward
-              } else {
-                if (!verifyBilateral(JSON.stringify(bilateralMeta), serverPubkey)) {
-                  this.onerror?.(new Error('bilateral receipt server signature invalid'));
-                  return; // don't forward
-                } else {
-                  this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
-                }
-              }
+              // Don't fire onBilateral, but still forward message below
             } else {
-              // No server trust anchors — pass through (audit-only)
-              this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+              // Always verify server signature (even without trust anchors)
+              const serverPubkey = bilateralMeta.server?.pubkey;
+              let sigValid = false;
+              try {
+                sigValid = serverPubkey ? verifyBilateral(JSON.stringify(bilateralMeta), serverPubkey) : false;
+              } catch { sigValid = false; }
+
+              if (!sigValid) {
+                this.onerror?.(new Error('bilateral receipt server signature invalid'));
+              } else if (this.opts.trustedServerKeys?.length && !this.opts.trustedServerKeys.includes(serverPubkey)) {
+                this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
+              } else {
+                // Sig valid + (trusted OR no trust anchors configured)
+                this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+              }
             }
           } catch (err) {
             this.onerror?.(err instanceof Error ? err : new Error(String(err)));
-            return; // don't forward on error
           }
         }
       }

@@ -51,7 +51,8 @@ export function sign(
 }
 
 export function verify(receipt: SignetReceipt, publicKey: string): boolean {
-  return wasm_verify(JSON.stringify(receipt), publicKey);
+  const bare = publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
+  return wasm_verify(JSON.stringify(receipt), bare);
 }
 
 export interface SignetResponse {
@@ -92,7 +93,8 @@ export function signCompound(
 }
 
 export function verifyAny(receiptJson: string, publicKey: string): boolean {
-  return wasm_verify_any(receiptJson, publicKey);
+  const bare = publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
+  return wasm_verify_any(receiptJson, bare);
 }
 
 export interface ServerInfo { pubkey: string; name: string; }

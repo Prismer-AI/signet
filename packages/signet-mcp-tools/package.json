@@ -1,0 +1,23 @@
+{
+  "name": "@signet-auth/mcp-tools",
+  "version": "0.4.0",
+  "description": "MCP server exposing Signet cryptographic signing, verification, and audit tools",
+  "type": "module",
+  "bin": {
+    "signet-mcp-tools": "dist/server.js"
+  },
+  "files": ["dist/"],
+  "scripts": {
+    "build": "npx tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@signet-auth/core": "file:../signet-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

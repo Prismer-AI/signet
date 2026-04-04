@@ -339,51 +339,74 @@ pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResul
         let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
 
         if version == 3 {
-            // v3: extract embedded agent_receipt and verify it as standalone v1
-            let agent_receipt = match receipt.get("agent_receipt") {
-                Some(ar) => ar,
+            // v3: parse as BilateralReceipt and verify_bilateral using the self-reported server key
+            let bilateral: crate::BilateralReceipt = match serde_json::from_value(receipt.clone()) {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: format!("v3 parse: {e}"),
+                    });
+                    continue;
+                }
+            };
+            let server_pubkey_b64 = match bilateral.server.pubkey.strip_prefix("ed25519:") {
+                Some(b) => b,
                 None => {
                     failures.push(VerifyFailure {
                         file: String::new(),
                         line: 0,
                         receipt_id,
-                        reason: "v3 missing agent_receipt".to_string(),
+                        reason: "server pubkey missing prefix".to_string(),
                     });
                     continue;
                 }
             };
-            // Extract agent pubkey from agent_receipt.signer.pubkey
-            let agent_pubkey_result = (|| -> Result<ed25519_dalek::VerifyingKey, String> {
-                let b64 = agent_receipt
-                    .get("signer")
-                    .and_then(|s| s.get("pubkey"))
-                    .and_then(|p| p.as_str())
-                    .ok_or("missing agent_receipt.signer.pubkey")?
-                    .strip_prefix("ed25519:")
-                    .ok_or("missing ed25519: prefix")?;
-                let bytes = BASE64.decode(b64).map_err(|e| format!("base64: {e}"))?;
-                let arr: [u8; 32] = bytes.try_into().map_err(|_| "not 32 bytes")?;
-                ed25519_dalek::VerifyingKey::from_bytes(&arr).map_err(|e| format!("{e}"))
-            })();
-            match agent_pubkey_result {
-                Ok(vk) => {
-                    let ar_str = serde_json::to_string(agent_receipt)
-                        .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
-                    match crate::verify_any(&ar_str, &vk) {
-                        Ok(()) => valid += 1,
-                        Err(_) => failures.push(VerifyFailure {
-                            file: String::new(),
-                            line: 0,
-                            receipt_id,
-                            reason: "agent receipt signature mismatch".to_string(),
-                        }),
-                    }
+            let server_bytes = match BASE64.decode(server_pubkey_b64) {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: format!("server pubkey base64: {e}"),
+                    });
+                    continue;
                 }
-                Err(reason) => failures.push(VerifyFailure {
+            };
+            let server_arr: [u8; 32] = match server_bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: "server pubkey not 32 bytes".to_string(),
+                    });
+                    continue;
+                }
+            };
+            let server_vk = match ed25519_dalek::VerifyingKey::from_bytes(&server_arr) {
+                Ok(vk) => vk,
+                Err(e) => {
+                    failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: format!("server pubkey invalid: {e}"),
+                    });
+                    continue;
+                }
+            };
+            match crate::verify_bilateral(&bilateral, &server_vk) {
+                Ok(()) => valid += 1,
+                Err(e) => failures.push(VerifyFailure {
                     file: String::new(),
                     line: 0,
                     receipt_id,
-                    reason: format!("invalid agent pubkey: {reason}"),
+                    reason: format!("bilateral verification failed: {e}"),
                 }),
             }
             continue; // skip the v1/v2 path below

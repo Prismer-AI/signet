@@ -65,8 +65,9 @@ export function verifyRequest(
   }
 
   // 5. Check trusted keys (using prefixed format to match receipt.signer.pubkey)
+  // Empty trustedKeys = "verify signature only, don't check trust". Non-empty = "must be in list".
   const trustedKeys = options.trustedKeys ?? [];
-  if (!trustedKeys.includes(prefixedPubkey)) {
+  if (trustedKeys.length > 0 && !trustedKeys.includes(prefixedPubkey)) {
     return { ok: false, error: `untrusted signer: ${prefixedPubkey}` };
   }
 

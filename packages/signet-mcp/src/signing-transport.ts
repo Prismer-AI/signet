@@ -89,44 +89,49 @@ export class SigningTransport implements Transport {
         }
       }
 
-      // Always forward message to outer onmessage
-      this.onmessage?.(msg, extra);
-
-      // Extract bilateral receipt from response metadata
-      const responseResult = msg.result ?? msg.error;
-      const bilateralMeta = (responseResult as any)?._meta?._signet_bilateral;
-      if (bilateralMeta) {
-        try {
-          // Verify response binding: strip _signet_bilateral, hash, compare
-          const cleanResponse = JSON.parse(JSON.stringify(responseResult ?? {}));
-          if (cleanResponse?._meta?._signet_bilateral) {
-            delete cleanResponse._meta._signet_bilateral;
-            if (cleanResponse._meta && Object.keys(cleanResponse._meta).length === 0) delete cleanResponse._meta;
-          }
-          const actualHash = contentHash(cleanResponse);
-
-          if (bilateralMeta.response?.content_hash !== actualHash) {
-            this.onerror?.(new Error('bilateral receipt response hash mismatch'));
-          } else if (this.opts.trustedServerKeys?.length) {
-            const serverPubkey = bilateralMeta.server?.pubkey;
-            if (!serverPubkey || !this.opts.trustedServerKeys.includes(serverPubkey)) {
-              this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
-            } else {
-              const barePubkey = serverPubkey.replace('ed25519:', '');
-              if (!verifyBilateral(JSON.stringify(bilateralMeta), barePubkey)) {
-                this.onerror?.(new Error('bilateral receipt server signature invalid'));
-              } else {
-                this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
-              }
+      // Extract and verify bilateral receipt BEFORE forwarding (only for responses with id)
+      if (msg.id !== undefined) {
+        const responseResult = msg.result ?? msg.error;
+        const bilateralMeta = (responseResult as any)?._meta?._signet_bilateral;
+        if (bilateralMeta) {
+          try {
+            // Verify response binding: strip _signet_bilateral, hash, compare
+            const cleanResponse = JSON.parse(JSON.stringify(responseResult ?? {}));
+            if (cleanResponse?._meta?._signet_bilateral) {
+              delete cleanResponse._meta._signet_bilateral;
+              if (cleanResponse._meta && Object.keys(cleanResponse._meta).length === 0) delete cleanResponse._meta;
             }
-          } else {
-            // No server trust anchors — pass through (audit-only)
-            this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+            const actualHash = contentHash(cleanResponse);
+
+            if (bilateralMeta.response?.content_hash !== actualHash) {
+              this.onerror?.(new Error('bilateral receipt response hash mismatch'));
+              return; // don't forward
+            } else if (this.opts.trustedServerKeys?.length) {
+              const serverPubkey = bilateralMeta.server?.pubkey;
+              if (!serverPubkey || !this.opts.trustedServerKeys.includes(serverPubkey)) {
+                this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
+                return; // don't forward
+              } else {
+                if (!verifyBilateral(JSON.stringify(bilateralMeta), serverPubkey)) {
+                  this.onerror?.(new Error('bilateral receipt server signature invalid'));
+                  return; // don't forward
+                } else {
+                  this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+                }
+              }
+            } else {
+              // No server trust anchors — pass through (audit-only)
+              this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+            }
+          } catch (err) {
+            this.onerror?.(err instanceof Error ? err : new Error(String(err)));
+            return; // don't forward on error
           }
-        } catch (err) {
-          this.onerror?.(err instanceof Error ? err : new Error(String(err)));
         }
       }
+
+      // Forward message to outer onmessage only after bilateral checks pass
+      this.onmessage?.(msg, extra);
     };
 
     // Store timeout for use in send()

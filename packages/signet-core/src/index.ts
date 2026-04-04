@@ -122,7 +122,10 @@ export function signBilateral(
 }
 
 export function verifyBilateral(receiptJson: string, serverPublicKey: string): boolean {
-  return wasm_verify_bilateral(receiptJson, serverPublicKey);
+  const bare = serverPublicKey.startsWith('ed25519:')
+    ? serverPublicKey.slice('ed25519:'.length)
+    : serverPublicKey;
+  return wasm_verify_bilateral(receiptJson, bare);
 }
 
 export function contentHash(value: unknown): string {

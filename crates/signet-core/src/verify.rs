@@ -84,6 +84,21 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
 }
 
 pub fn verify_bilateral(receipt: &BilateralReceipt, server_pubkey: &VerifyingKey) -> Result<(), SignetError> {
+    // 0. Cross-check: caller's key must match receipt.server.pubkey
+    let receipt_server_b64 = receipt
+        .server
+        .pubkey
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| SignetError::InvalidReceipt("server.pubkey missing prefix".to_string()))?;
+    let receipt_server_bytes = BASE64
+        .decode(receipt_server_b64)
+        .map_err(|e| SignetError::InvalidReceipt(format!("server.pubkey base64: {e}")))?;
+    if receipt_server_bytes.as_slice() != server_pubkey.as_bytes() {
+        return Err(SignetError::InvalidReceipt(
+            "caller-supplied server key does not match receipt.server.pubkey".to_string(),
+        ));
+    }
+
     // 1. Verify server signature over v3 body
     let sig_b64 = receipt
         .sig
@@ -306,10 +321,10 @@ mod tests {
             "2026-04-03T10:00:00.150Z",
         )
         .unwrap();
-        assert!(matches!(
-            verify_bilateral(&bilateral, &wrong_vk),
-            Err(SignetError::SignatureMismatch)
-        ));
+        // With the cross-check, passing a wrong key now returns InvalidReceipt
+        // (key mismatch detected before signature verification)
+        let result = verify_bilateral(&bilateral, &wrong_vk);
+        assert!(result.is_err());
     }
 
     #[test]

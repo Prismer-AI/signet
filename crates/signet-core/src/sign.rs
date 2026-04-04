@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::{Action, CompoundReceipt, Receipt, Response, Signer};
+use crate::receipt::{Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer};
 
 fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
     if action.params.is_null() && !action.params_hash.is_empty() {
@@ -161,6 +161,63 @@ pub fn sign_compound(
     })
 }
 
+pub fn sign_bilateral(
+    server_key: &SigningKey,
+    agent_receipt: &Receipt,
+    response_content: &serde_json::Value,
+    server_name: &str,
+    ts_response: &str,
+) -> Result<BilateralReceipt, SignetError> {
+    // Hash response content
+    let canonical_response = canonical::canonicalize(response_content)?;
+    let response_hash = Sha256::digest(canonical_response.as_bytes());
+    let response = Response {
+        content_hash: format!("sha256:{}", hex::encode(response_hash)),
+    };
+
+    // Server info
+    let pubkey_bytes = server_key.verifying_key().to_bytes();
+    let server = ServerInfo {
+        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        name: server_name.to_string(),
+    };
+
+    // Nonce
+    let mut nonce_bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
+
+    // Signable (everything except sig, id, extensions)
+    let signable = serde_json::json!({
+        "v": 3u8,
+        "agent_receipt": agent_receipt,
+        "response": response,
+        "server": server,
+        "ts_response": ts_response,
+        "nonce": nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+
+    let signature = server_key.sign(canonical_bytes.as_bytes());
+    let sig_b64 = BASE64.encode(signature.to_bytes());
+    let sig = format!("ed25519:{}", sig_b64);
+
+    let sig_hash = Sha256::digest(signature.to_bytes());
+    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+
+    Ok(BilateralReceipt {
+        v: 3,
+        id,
+        agent_receipt: agent_receipt.clone(),
+        response,
+        server,
+        ts_response: ts_response.to_string(),
+        nonce,
+        sig,
+        extensions: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +286,32 @@ mod tests {
         let sig_hash = Sha256::digest(&sig_bytes);
         let expected_id = format!("rec_{}", hex::encode(&sig_hash[..16]));
         assert_eq!(receipt.id, expected_id);
+    }
+
+    #[test]
+    fn test_sign_bilateral_produces_v3() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "issue #42"}]});
+
+        let bilateral = sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "github-mcp",
+            "2026-04-03T10:00:00.150Z",
+        )
+        .unwrap();
+
+        assert_eq!(bilateral.v, 3);
+        assert!(bilateral.id.starts_with("rec_"));
+        assert!(bilateral.sig.starts_with("ed25519:"));
+        assert!(bilateral.response.content_hash.starts_with("sha256:"));
+        assert_eq!(bilateral.server.name, "github-mcp");
+        assert_eq!(bilateral.agent_receipt.id, agent_receipt.id);
+        assert_eq!(bilateral.agent_receipt.sig, agent_receipt.sig);
     }
 
     #[test]

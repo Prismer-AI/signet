@@ -44,3 +44,23 @@ pub struct CompoundReceipt {
     pub nonce: String,
     pub sig: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfo {
+    pub pubkey: String, // "ed25519:<base64>"
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BilateralReceipt {
+    pub v: u8,                   // always 3
+    pub id: String,
+    pub agent_receipt: Receipt,  // embedded v1 receipt verbatim
+    pub response: Response,
+    pub server: ServerInfo,
+    pub ts_response: String,
+    pub nonce: String,
+    pub sig: String,             // server signs entire v3 body
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>, // unsigned, outside sig scope
+}

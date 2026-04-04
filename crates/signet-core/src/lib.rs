@@ -13,8 +13,8 @@ pub mod audit;
 
 pub use error::SignetError;
 pub use identity::generate_keypair;
-pub use receipt::{Action, CompoundReceipt, Receipt, Response, Signer};
-pub use sign::{sign, sign_compound};
+pub use receipt::{Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer};
+pub use sign::{sign, sign_bilateral, sign_compound};
 pub use verify::{verify, verify_any, verify_compound};
 
 #[cfg(not(target_arch = "wasm32"))]

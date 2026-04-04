@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -93,4 +93,38 @@ export function signCompound(
 
 export function verifyAny(receiptJson: string, publicKey: string): boolean {
   return wasm_verify_any(receiptJson, publicKey);
+}
+
+export interface ServerInfo { pubkey: string; name: string; }
+
+export interface BilateralReceipt {
+  v: number;
+  id: string;
+  agent_receipt: SignetReceipt;
+  response: SignetResponse;
+  server: ServerInfo;
+  ts_response: string;
+  nonce: string;
+  sig: string;
+  extensions?: unknown;
+}
+
+export function signBilateral(
+  serverKey: string,
+  agentReceiptJson: string,
+  responseContent: unknown,
+  serverName: string,
+  tsResponse: string,
+): BilateralReceipt {
+  const json = wasm_sign_bilateral(serverKey, agentReceiptJson,
+    JSON.stringify(responseContent), serverName, tsResponse);
+  return JSON.parse(json) as BilateralReceipt;
+}
+
+export function verifyBilateral(receiptJson: string, serverPublicKey: string): boolean {
+  return wasm_verify_bilateral(receiptJson, serverPublicKey);
+}
+
+export function contentHash(value: unknown): string {
+  return wasm_content_hash(JSON.stringify(value));
 }

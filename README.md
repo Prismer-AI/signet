@@ -78,6 +78,10 @@ signet verify --chain
 
 ### MCP Integration (TypeScript)
 
+<p align="center">
+  <img src="demo-mcp.svg" alt="Signet MCP bilateral flow demo" width="820">
+</p>
+
 ```typescript
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";

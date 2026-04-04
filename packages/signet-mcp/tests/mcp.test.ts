@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKeypair, verifyAny, type CompoundReceipt } from '@signet-auth/core';
+import { generateKeypair, sign, signBilateral, verifyAny, type BilateralReceipt, type CompoundReceipt, type SignetAction } from '@signet-auth/core';
 import { SigningTransport, type Transport, type JSONRPCMessage, type SignetReceipt } from '../src/index.js';
 
 // Mock transport that records sent messages and supports simulating responses
@@ -29,6 +29,10 @@ class MockTransport implements Transport {
   }
   simulateError(id: string | number, error: unknown) {
     this.messageHandler?.({ jsonrpc: '2.0', id, error } as JSONRPCMessage, undefined);
+  }
+  simulateResponseWithMeta(id: string | number, result: Record<string, unknown>, meta: Record<string, unknown>) {
+    const msg = { jsonrpc: '2.0' as const, id, result: { ...result, _meta: meta } };
+    this.messageHandler?.(msg, undefined);
   }
 }
 
@@ -183,5 +187,131 @@ describe('@signet-auth/mcp SigningTransport v2', () => {
 
     const valid = verifyAny(JSON.stringify(signet), kp.publicKey);
     assert(valid, 'dispatch receipt should verify with the signer public key');
+  });
+});
+
+describe('@signet-auth/mcp SigningTransport v3 bilateral extraction', () => {
+  const agentKp = generateKeypair();
+  const serverKp = generateKeypair();
+
+  function makeAction(tool: string, args: Record<string, unknown>): SignetAction {
+    return {
+      tool,
+      params: args,
+      params_hash: '',
+      target: 'mcp://test-server',
+      transport: 'stdio',
+    };
+  }
+
+  function buildBilateralResponse(responseContent: Record<string, unknown>): { result: Record<string, unknown>; bilateral: BilateralReceipt } {
+    // Sign agent dispatch receipt
+    const action = makeAction('echo', { message: 'hello' });
+    const agentReceipt = sign(agentKp.secretKey, action, 'test-agent', 'owner');
+
+    // Sign bilateral receipt with server key over the response content
+    const tsResponse = new Date().toISOString();
+    const bilateral = signBilateral(
+      serverKp.secretKey,
+      JSON.stringify(agentReceipt),
+      responseContent,
+      'test-server',
+      tsResponse,
+    );
+
+    // The actual result includes both the content and the bilateral receipt in _meta
+    const result = { ...responseContent, _meta: { _signet_bilateral: bilateral } };
+    return { result, bilateral };
+  }
+
+  it('test_bilateral_extracted_from_response — server sends response with _signet_bilateral → onBilateral fires', async () => {
+    let bilateralReceived: BilateralReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      trustedServerKeys: [`ed25519:${serverKp.publicKey}`],
+      onBilateral: (r) => { bilateralReceived = r; },
+    });
+
+    await signing.send({ jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    const responseContent = { content: [{ type: 'text', text: 'world' }] };
+    const { result } = buildBilateralResponse(responseContent);
+    mock.simulateResponseWithMeta(10, responseContent, { _signet_bilateral: (result._meta as any)._signet_bilateral });
+
+    assert(bilateralReceived !== null, 'onBilateral should have been called');
+    assert.strictEqual((bilateralReceived as BilateralReceipt).v, 3);
+    assert((bilateralReceived as BilateralReceipt).sig.startsWith('ed25519:'));
+  });
+
+  it('test_no_bilateral_on_plain_response — normal response → onBilateral not called', async () => {
+    let bilateralReceived: BilateralReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      onBilateral: (r) => { bilateralReceived = r; },
+    });
+
+    await signing.send({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+    mock.simulateResponse(11, { content: [{ type: 'text', text: 'world' }] });
+
+    assert.strictEqual(bilateralReceived, null, 'onBilateral should not fire for plain responses');
+  });
+
+  it('test_bilateral_hash_mismatch — tampered response content but valid _signet_bilateral → onerror "hash mismatch"', async () => {
+    const errors: Error[] = [];
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      trustedServerKeys: [`ed25519:${serverKp.publicKey}`],
+    });
+    signing.onerror = (e) => { errors.push(e); };
+
+    await signing.send({ jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    // Build bilateral over original content, but send tampered content
+    const originalContent = { content: [{ type: 'text', text: 'original' }] };
+    const { result } = buildBilateralResponse(originalContent);
+    const bilateral = (result._meta as any)._signet_bilateral;
+
+    // Tamper: send different content but keep original bilateral receipt (hash won't match)
+    mock.simulateResponseWithMeta(12, { content: [{ type: 'text', text: 'tampered' }] }, { _signet_bilateral: bilateral });
+
+    assert(errors.length > 0, 'onerror should have been called');
+    assert(errors[0].message.includes('hash mismatch'), `Expected 'hash mismatch', got: ${errors[0].message}`);
+  });
+
+  it('test_bilateral_untrusted_server_key — valid v3 but server pubkey not in trustedServerKeys → onerror "untrusted"', async () => {
+    const errors: Error[] = [];
+    const untrustedKp = generateKeypair(); // A different keypair not in trustedServerKeys
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      trustedServerKeys: [`ed25519:${serverKp.publicKey}`], // only trust serverKp, not untrustedKp
+    });
+    signing.onerror = (e) => { errors.push(e); };
+
+    await signing.send({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    // Build bilateral with untrustedKp instead of serverKp
+    const responseContent = { content: [{ type: 'text', text: 'world' }] };
+    const action = makeAction('echo', { message: 'hello' });
+    const agentReceipt = sign(agentKp.secretKey, action, 'test-agent', 'owner');
+    const bilateral = signBilateral(
+      untrustedKp.secretKey,
+      JSON.stringify(agentReceipt),
+      responseContent,
+      'untrusted-server',
+      new Date().toISOString(),
+    );
+
+    mock.simulateResponseWithMeta(13, responseContent, { _signet_bilateral: bilateral });
+
+    assert(errors.length > 0, 'onerror should have been called');
+    assert(errors[0].message.includes('untrusted'), `Expected 'untrusted' in error, got: ${errors[0].message}`);
   });
 });

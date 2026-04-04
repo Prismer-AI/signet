@@ -5,6 +5,7 @@ use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
 mod cmd_audit;
+mod cmd_claude;
 mod cmd_identity;
 mod cmd_sign;
 mod cmd_verify;
@@ -29,6 +30,11 @@ enum Commands {
     Verify(cmd_verify::VerifyArgs),
     /// Query and verify the audit log
     Audit(cmd_audit::AuditArgs),
+    /// Claude Code integration (install/uninstall Signet skill)
+    Claude {
+        #[command(subcommand)]
+        action: cmd_claude::ClaudeAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -78,6 +84,7 @@ fn run() -> Result<()> {
         Commands::Sign(args) => cmd_sign::sign(args)?,
         Commands::Verify(args) => cmd_verify::verify(args)?,
         Commands::Audit(args) => cmd_audit::audit(args)?,
+        Commands::Claude { action } => cmd_claude::run(action)?,
     }
     Ok(())
 }

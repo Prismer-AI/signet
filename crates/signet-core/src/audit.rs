@@ -63,21 +63,44 @@ fn audit_dir(base: &Path) -> PathBuf {
 }
 
 fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
-    receipt.get("action")
+    // v1/v2: receipt.action.tool
+    receipt
+        .get("action")
         .and_then(|a| a.get("tool"))
         .and_then(|t| t.as_str())
+        // v3: receipt.agent_receipt.action.tool
+        .or_else(|| {
+            receipt
+                .get("agent_receipt")
+                .and_then(|ar| ar.get("action"))
+                .and_then(|a| a.get("tool"))
+                .and_then(|t| t.as_str())
+        })
 }
 
 fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
     let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
-    let key = if version >= 2 { "ts_request" } else { "ts" };
-    receipt.get(key).and_then(|t| t.as_str())
+    match version {
+        1 => receipt.get("ts").and_then(|t| t.as_str()),
+        2 => receipt.get("ts_request").and_then(|t| t.as_str()),
+        _ => receipt.get("ts_response").and_then(|t| t.as_str()), // v3+
+    }
 }
 
 fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
-    receipt.get("signer")
+    // v1/v2: receipt.signer.name
+    receipt
+        .get("signer")
         .and_then(|s| s.get("name"))
         .and_then(|n| n.as_str())
+        // v3: receipt.agent_receipt.signer.name
+        .or_else(|| {
+            receipt
+                .get("agent_receipt")
+                .and_then(|ar| ar.get("signer"))
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str())
+        })
 }
 
 fn compute_record_hash(receipt: &serde_json::Value, prev_hash: &str) -> Result<String, SignetError> {
@@ -313,7 +336,60 @@ pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResul
             .unwrap_or("")
             .to_string();
 
-        // Decode pubkey from receipt["signer"]["pubkey"]
+        let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
+
+        if version == 3 {
+            // v3: extract embedded agent_receipt and verify it as standalone v1
+            let agent_receipt = match receipt.get("agent_receipt") {
+                Some(ar) => ar,
+                None => {
+                    failures.push(VerifyFailure {
+                        file: String::new(),
+                        line: 0,
+                        receipt_id,
+                        reason: "v3 missing agent_receipt".to_string(),
+                    });
+                    continue;
+                }
+            };
+            // Extract agent pubkey from agent_receipt.signer.pubkey
+            let agent_pubkey_result = (|| -> Result<ed25519_dalek::VerifyingKey, String> {
+                let b64 = agent_receipt
+                    .get("signer")
+                    .and_then(|s| s.get("pubkey"))
+                    .and_then(|p| p.as_str())
+                    .ok_or("missing agent_receipt.signer.pubkey")?
+                    .strip_prefix("ed25519:")
+                    .ok_or("missing ed25519: prefix")?;
+                let bytes = BASE64.decode(b64).map_err(|e| format!("base64: {e}"))?;
+                let arr: [u8; 32] = bytes.try_into().map_err(|_| "not 32 bytes")?;
+                ed25519_dalek::VerifyingKey::from_bytes(&arr).map_err(|e| format!("{e}"))
+            })();
+            match agent_pubkey_result {
+                Ok(vk) => {
+                    let ar_str = serde_json::to_string(agent_receipt)
+                        .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
+                    match crate::verify_any(&ar_str, &vk) {
+                        Ok(()) => valid += 1,
+                        Err(_) => failures.push(VerifyFailure {
+                            file: String::new(),
+                            line: 0,
+                            receipt_id,
+                            reason: "agent receipt signature mismatch".to_string(),
+                        }),
+                    }
+                }
+                Err(reason) => failures.push(VerifyFailure {
+                    file: String::new(),
+                    line: 0,
+                    receipt_id,
+                    reason: format!("invalid agent pubkey: {reason}"),
+                }),
+            }
+            continue; // skip the v1/v2 path below
+        }
+
+        // Existing v1/v2: decode pubkey from receipt["signer"]["pubkey"]
         let pubkey_result = (|| -> Result<ed25519_dalek::VerifyingKey, String> {
             let b64 = receipt
                 .get("signer")
@@ -652,6 +728,73 @@ mod tests {
         assert!(status.valid);
         assert_eq!(status.total_records, 3);
         assert!(status.break_point.is_none());
+    }
+
+    #[test]
+    fn test_audit_append_v3_bilateral() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral =
+            sign::sign_bilateral(&server_key, &agent_receipt, &response, "test-server", &ts)
+                .unwrap();
+        let receipt_json = serde_json::to_value(&bilateral).unwrap();
+
+        append(dir.path(), &receipt_json).unwrap();
+        let records = query(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(extract_signer_name(&records[0].receipt), Some("test-agent"));
+        assert_eq!(extract_tool(&records[0].receipt), Some("github_create_issue"));
+    }
+
+    #[test]
+    fn test_audit_verify_signatures_v3() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral =
+            sign::sign_bilateral(&server_key, &agent_receipt, &response, "test-server", &ts)
+                .unwrap();
+
+        append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(result.valid, 1);
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_audit_mixed_v1_v2_v3() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+
+        // v1
+        let receipt_v1 = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        append(dir.path(), &serde_json::to_value(&receipt_v1).unwrap()).unwrap();
+
+        // v3
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &receipt_v1,
+            &json!({"ok": true}),
+            "server",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )
+        .unwrap();
+        append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(result.valid, 2);
+        assert!(result.failures.is_empty());
     }
 
     #[test]

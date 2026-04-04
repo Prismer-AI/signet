@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKeypair, sign, type SignetAction, type SignetReceipt } from '@signet-auth/core';
-import { verifyRequest } from '../src/index.js';
+import { generateKeypair, sign, verifyBilateral, type SignetAction, type SignetReceipt } from '@signet-auth/core';
+import { verifyRequest, signResponse } from '../src/index.js';
 
 describe('@signet-auth/mcp-server verifyRequest', () => {
   const kp = generateKeypair();
@@ -192,5 +192,90 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     const result = verifyRequest(req, { trustedKeys: [] });
     assert.strictEqual(result.ok, false);
     assert(result.error?.includes('malformed'), `Expected 'malformed' in error, got: ${result.error}`);
+  });
+});
+
+describe('@signet-auth/mcp-server signResponse', () => {
+  const agentKp = generateKeypair();
+  const serverKp = generateKeypair();
+
+  function makeAction(tool: string, args: Record<string, unknown>): SignetAction {
+    return {
+      tool,
+      params: args,
+      params_hash: '',
+      target: 'mcp://test-server',
+      transport: 'stdio',
+    };
+  }
+
+  function signedRequest(tool: string, args: Record<string, unknown>) {
+    const action = makeAction(tool, args);
+    const receipt = sign(agentKp.secretKey, action, 'test-agent', 'owner');
+    return {
+      params: {
+        name: tool,
+        arguments: args,
+        _meta: { _signet: receipt },
+      },
+    };
+  }
+
+  it('test_sign_response_produces_bilateral — sign valid request+response → returns v3 with correct fields', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = { content: [{ type: 'text', text: 'world' }] };
+
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    assert.strictEqual(bilateral.v, 3);
+    assert(bilateral.id.startsWith('rec_'), `id should start with rec_, got: ${bilateral.id}`);
+    assert(bilateral.sig.startsWith('ed25519:'), `sig should start with ed25519:, got: ${bilateral.sig}`);
+    assert(bilateral.agent_receipt !== undefined, 'agent_receipt should be present');
+    assert(bilateral.server !== undefined, 'server should be present');
+    assert(bilateral.server.name === 'test-server', `server.name should be test-server, got: ${bilateral.server.name}`);
+    assert(bilateral.response.content_hash.startsWith('sha256:'), `content_hash should start with sha256:, got: ${bilateral.response.content_hash}`);
+  });
+
+  it('test_sign_response_embeds_agent_receipt — v3.agent_receipt matches the original v1 receipt', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const agentReceipt = req.params._meta._signet as SignetReceipt;
+    const response = { content: [{ type: 'text', text: 'world' }] };
+
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    assert.deepStrictEqual(bilateral.agent_receipt, agentReceipt,
+      'agent_receipt in bilateral should match the original v1 receipt');
+  });
+
+  it('test_sign_response_verifiable — produced v3 passes verifyBilateral() with server public key', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = { content: [{ type: 'text', text: 'world' }] };
+
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    const barePubkey = serverKp.publicKey;
+    const valid = verifyBilateral(JSON.stringify(bilateral), barePubkey);
+    assert(valid, 'bilateral receipt should verify with the server public key');
+  });
+
+  it('test_sign_response_no_signet_throws — request without _meta._signet → throws Error', () => {
+    const req = { params: { name: 'echo', arguments: { message: 'hello' } } };
+
+    assert.throws(
+      () => signResponse(req, {}, { serverKey: serverKp.secretKey, serverName: 'test-server' }),
+      (err: Error) => {
+        assert(err.message.includes('_meta._signet'), `Expected error about _meta._signet, got: ${err.message}`);
+        return true;
+      },
+    );
   });
 });

@@ -4,10 +4,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { verifyRequest } from '@signet-auth/mcp-server';
+import { generateKeypair } from '@signet-auth/core';
+import { verifyRequest, signResponse } from '@signet-auth/mcp-server';
 
-// In production, load trusted keys from config or environment.
-// For this demo, we accept any valid signature (requireSignature: false).
+// Generate server identity (in production, load from keystore)
+const serverKp = generateKeypair();
+console.error(`[signet] Server public key: ${serverKp.publicKey}`);
+
 const VERIFY_OPTS = { requireSignature: false };
 
 const server = new Server(
@@ -29,15 +32,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  // Verify the agent's signature (log-only mode for this example)
+  // 1. Verify agent signature
   const verified = verifyRequest(request, VERIFY_OPTS);
   if (verified.ok) {
-    console.error(`[signet] Verified: ${verified.signerName} (${verified.signerPubkey})`);
+    console.error(`[signet] Verified agent: ${verified.signerName}`);
   } else if (verified.error !== 'unsigned request') {
     console.error(`[signet] Warning: ${verified.error}`);
   }
 
-  return {
+  // 2. Execute tool call
+  const result = {
     content: [
       {
         type: 'text' as const,
@@ -45,6 +49,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       },
     ],
   };
+
+  // 3. Co-sign response if agent signed the request (even if untrusted)
+  const hasSigmet = (request.params as any)?._meta?._signet;
+  if (hasSigmet) {
+    try {
+      const bilateral = signResponse(request, result, {
+        serverKey: serverKp.secretKey,
+        serverName: 'echo-server',
+      });
+      console.error(`[signet] Bilateral receipt: ${bilateral.id}`);
+      return { ...result, _meta: { _signet_bilateral: bilateral } };
+    } catch (err) {
+      console.error(`[signet] Co-sign failed: ${err}`);
+    }
+  }
+
+  return result;
 });
 
 const transport = new StdioServerTransport();

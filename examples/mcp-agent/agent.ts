@@ -17,7 +17,13 @@ const transport = new SigningTransport(inner as any, secretKey, 'demo-agent', 'd
   target: 'mcp://echo-server',
   transport: 'stdio',
   onDispatch: (receipt) => {
-    console.log(`Signed: ${receipt.id} | tool: ${receipt.action.tool} | ts: ${receipt.ts}`);
+    console.log(`[dispatch] ${receipt.id} | tool: ${receipt.action.tool}`);
+  },
+  onReceipt: (compound) => {
+    console.log(`[compound] ${compound.id} | response hash: ${compound.response.content_hash.slice(0, 20)}...`);
+  },
+  onBilateral: (bilateral) => {
+    console.log(`[bilateral] ${bilateral.id} | server: ${bilateral.server.name} | agent: ${bilateral.agent_receipt.signer.name}`);
   },
 });
 
@@ -41,4 +47,4 @@ console.log('Response:', JSON.stringify(result.content));
 
 // Cleanup
 await client.close();
-console.log('\nDone. Every tool call was cryptographically signed.');
+console.log('\nDone. Agent signed request, server co-signed response. Full bilateral flow.');

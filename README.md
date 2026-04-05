@@ -56,6 +56,16 @@ npm install @signet-auth/mcp-server
 
 ## Quick Start
 
+### Claude Code Plugin
+
+Auto-sign every tool call in [Claude Code](https://claude.ai/code) with zero configuration:
+
+```bash
+signet claude install
+```
+
+Every tool call is signed with Ed25519 and logged to a hash-chained audit trail at `~/.signet/audit/`. Uninstall with `signet claude uninstall`.
+
 ### CLI
 
 ```bash
@@ -201,6 +211,21 @@ install_hooks(agent)
 crew.kickoff()
 ```
 
+#### AutoGen Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.autogen import signed_tool, sign_tools
+
+agent = SigningAgent("my-agent")
+
+# Wrap a single tool
+wrapped = signed_tool(tool, agent)
+
+# Or wrap all tools at once
+wrapped_tools = sign_tools([tool1, tool2], agent)
+```
+
 #### Low-Level API
 
 ```python
@@ -274,6 +299,8 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --tool <substring>` | Filter by tool name |
 | `signet audit --verify` | Verify all receipt signatures |
 | `signet audit --export <file>` | Export records as JSON |
+| `signet claude install` | Install Claude Code plugin (PostToolUse signing hook) |
+| `signet claude uninstall` | Remove Claude Code plugin |
 
 Passphrase via interactive prompt or `SIGNET_PASSPHRASE` env var for CI.
 
@@ -298,10 +325,13 @@ signet/
 ├── bindings/
 │   ├── signet-ts/            WASM binding (wasm-bindgen)
 │   └── signet-py/            Python binding (PyO3 + maturin)
+├── plugins/
+│   └── claude-code/          Claude Code plugin (WASM signing + audit)
 ├── packages/
 │   ├── signet-core/          @signet-auth/core — TypeScript wrapper
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
-│   └── signet-mcp-server/    @signet-auth/mcp-server — Server verification
+│   ├── signet-mcp-server/    @signet-auth/mcp-server — Server verification
+│   └── signet-mcp-tools/     @signet-auth/mcp-tools — Standalone MCP signing server
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
 │   └── mcp-agent/            MCP agent, echo server, and verifier server example

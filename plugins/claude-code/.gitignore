@@ -1,0 +1,6 @@
+# Override root-level ignores for plugin-specific files
+!wasm/
+!wasm/*.wasm
+!wasm/*.js
+!scripts/
+!scripts/*.sh

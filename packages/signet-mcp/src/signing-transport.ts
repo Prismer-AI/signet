@@ -116,10 +116,19 @@ export class SigningTransport implements Transport {
 
               if (!sigValid) {
                 this.onerror?.(new Error('bilateral receipt server signature invalid'));
-              } else if (this.opts.trustedServerKeys?.length && !this.opts.trustedServerKeys.includes(serverPubkey)) {
-                this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
+              } else if (this.opts.trustedServerKeys?.length) {
+                const normalizedServerKey = serverPubkey.startsWith('ed25519:')
+                  ? serverPubkey : `ed25519:${serverPubkey}`;
+                const normalizedTrustedKeys = this.opts.trustedServerKeys.map(k =>
+                  k.startsWith('ed25519:') ? k : `ed25519:${k}`);
+                if (!normalizedTrustedKeys.includes(normalizedServerKey)) {
+                  this.onerror?.(new Error(`untrusted server: ${serverPubkey}`));
+                } else {
+                  // Sig valid + trusted
+                  this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+                }
               } else {
-                // Sig valid + (trusted OR no trust anchors configured)
+                // Sig valid + no trust anchors configured
                 this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
               }
             }

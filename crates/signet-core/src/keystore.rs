@@ -129,6 +129,11 @@ pub fn decrypt_key(
     let ciphertext = B64.decode(&file.ciphertext)
         .map_err(|e| SignetError::CorruptedFile(format!("invalid ciphertext base64: {e}")))?;
 
+    if nonce_bytes.len() != 24 {
+        return Err(SignetError::CorruptedFile(format!(
+            "invalid nonce length: expected 24, got {}", nonce_bytes.len()
+        )));
+    }
     let nonce = XNonce::from_slice(&nonce_bytes);
     let derived_key = derive_key(passphrase, &salt_bytes, &file.kdf_params)?;
     let cipher_key = Key::from_slice(&derived_key);

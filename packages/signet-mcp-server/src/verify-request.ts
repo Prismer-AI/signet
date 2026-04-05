@@ -1,4 +1,4 @@
-import { verify, type SignetReceipt } from '@signet-auth/core';
+import { verify, contentHash, type SignetReceipt } from '@signet-auth/core';
 
 export interface VerifyOptions {
   /** List of trusted "ed25519:<base64>" pubkeys.
@@ -104,9 +104,9 @@ export function verifyRequest(
   // 9. Anti-staple: receipt.action.params must match request.params.arguments
   const requestArgs = (request.params as Record<string, unknown> | undefined)?.['arguments'];
   if (requestArgs !== undefined || receipt.action.params !== undefined) {
-    const signedParams = JSON.stringify(receipt.action.params ?? null);
-    const actualParams = JSON.stringify(requestArgs ?? null);
-    if (signedParams !== actualParams) {
+    const signedHash = contentHash(receipt.action.params ?? null);
+    const actualHash = contentHash(requestArgs ?? null);
+    if (signedHash !== actualHash) {
       return { ok: false, error: 'params mismatch: signed params differ from request arguments' };
     }
   }

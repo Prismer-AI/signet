@@ -83,8 +83,8 @@ def test_handler_with_target(agent):
 def test_handler_with_closed_agent(agent):
     handler = SignetCallbackHandler(agent)
     agent.close()
-    with pytest.raises(RuntimeError, match="closed"):
-        handler.on_tool_start(serialized={"name": "test"}, input_str="{}")
+    # RuntimeError from a closed agent is caught and logged — handler must not raise
+    handler.on_tool_start(serialized={"name": "test"}, input_str="{}")
     assert len(handler.receipts) == 0
 
 

@@ -152,7 +152,7 @@ class SignetCallbackHandler(BaseCallbackHandler):
         try:
             receipt = _sign_tool_start(self.agent, serialized, input_str, run_id, inputs, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool start: %s", serialized.get("name"), exc_info=True)
 
     def on_tool_end(
@@ -166,7 +166,7 @@ class SignetCallbackHandler(BaseCallbackHandler):
         try:
             receipt = _sign_tool_end(self.agent, output, run_id, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool end (run_id: %s)", run_id, exc_info=True)
 
     def on_tool_error(
@@ -180,7 +180,7 @@ class SignetCallbackHandler(BaseCallbackHandler):
         try:
             receipt = _sign_tool_error(self.agent, error, run_id, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool error (run_id: %s)", run_id, exc_info=True)
 
 
@@ -220,7 +220,7 @@ class AsyncSignetCallbackHandler(AsyncCallbackHandler):
         try:
             receipt = _sign_tool_start(self.agent, serialized, input_str, run_id, inputs, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool start: %s", serialized.get("name"), exc_info=True)
 
     async def on_tool_end(
@@ -235,7 +235,7 @@ class AsyncSignetCallbackHandler(AsyncCallbackHandler):
         try:
             receipt = _sign_tool_end(self.agent, output, run_id, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool end (run_id: %s)", run_id, exc_info=True)
 
     async def on_tool_error(
@@ -250,5 +250,5 @@ class AsyncSignetCallbackHandler(AsyncCallbackHandler):
         try:
             receipt = _sign_tool_error(self.agent, error, run_id, self.target, self.audit)
             self.receipts.append(receipt)
-        except SignetError:
+        except (SignetError, RuntimeError):
             logger.warning("Failed to sign tool error (run_id: %s)", run_id, exc_info=True)

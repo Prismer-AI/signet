@@ -54,7 +54,8 @@ pub fn sign(args: SignArgs) -> Result<()> {
     // Resolve params: --params or --params-from-env
     let params_raw = match (&args.params, &args.params_from_env) {
         (Some(p), _) => p.clone(),
-        (None, Some(env_name)) => std::env::var(env_name).unwrap_or_else(|_| "{}".to_string()),
+        (None, Some(env_name)) => std::env::var(env_name)
+            .map_err(|_| anyhow::anyhow!("env var '{}' not set", env_name))?,
         (None, None) => "{}".to_string(),
     };
 

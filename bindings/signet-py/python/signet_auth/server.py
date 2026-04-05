@@ -18,7 +18,7 @@ class VerifyOptions:
 
     trusted_keys: list[str] = field(default_factory=list)
     """List of trusted 'ed25519:<base64>' pubkeys.
-    If empty and require_signature=True, ALL signed requests are rejected."""
+    If empty, trust any signer with a valid signature (skip trust check)."""
 
     require_signature: bool = True
     """Reject unsigned requests. Default: True."""
@@ -93,14 +93,15 @@ def verify_request(
     if not valid:
         return ServerVerifyResult(ok=False, error="invalid signature")
 
-    # 5. Check trusted keys
-    if prefixed_pubkey not in opts.trusted_keys:
-        return ServerVerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
+    # 5. Check trusted keys — skip if trusted_keys is empty (trust any signer)
+    if opts.trusted_keys:
+        if prefixed_pubkey not in opts.trusted_keys:
+            return ServerVerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
 
     # 6. Check freshness
     try:
         receipt_time = datetime.fromisoformat(receipt.ts.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return ServerVerifyResult(ok=False, error="invalid receipt timestamp")
 
     now = datetime.now(timezone.utc)

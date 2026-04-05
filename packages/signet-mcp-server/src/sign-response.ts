@@ -21,7 +21,9 @@ export function signResponse(
 
   // 3. Verify the agent signature before co-signing
   const receipt = signet as SignetReceipt;
-  const barePubkey = receipt.signer.pubkey.replace('ed25519:', '');
+  const barePubkey = receipt.signer.pubkey.startsWith('ed25519:')
+    ? receipt.signer.pubkey.slice('ed25519:'.length)
+    : receipt.signer.pubkey;
   if (!verify(receipt, barePubkey)) {
     throw new Error('agent receipt signature is invalid — refusing to co-sign');
   }

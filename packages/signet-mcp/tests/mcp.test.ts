@@ -284,6 +284,29 @@ describe('@signet-auth/mcp SigningTransport v3 bilateral extraction', () => {
     assert(errors[0].message.includes('hash mismatch'), `Expected 'hash mismatch', got: ${errors[0].message}`);
   });
 
+  it('test_bilateral_trusted_bare_key — trustedServerKeys with bare base64 key (no prefix) matches prefixed server receipt key → onBilateral fires', async () => {
+    // Fix #2: normalization logic must accept bare base64 in trustedServerKeys even when server
+    // receipt contains a prefixed key (ed25519:<base64>)
+    let bilateralReceived: BilateralReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      // Pass bare base64 key (no ed25519: prefix) — normalization should still match
+      trustedServerKeys: [serverKp.publicKey],
+      onBilateral: (r) => { bilateralReceived = r; },
+    });
+
+    await signing.send({ jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    const responseContent = { content: [{ type: 'text', text: 'world' }] };
+    const { result } = buildBilateralResponse(responseContent);
+    mock.simulateResponseWithMeta(20, responseContent, { _signet_bilateral: (result._meta as any)._signet_bilateral });
+
+    assert(bilateralReceived !== null, 'onBilateral should have been called even when trustedServerKeys uses bare base64 (no ed25519: prefix)');
+    assert.strictEqual((bilateralReceived as BilateralReceipt).v, 3);
+  });
+
   it('test_bilateral_untrusted_server_key — valid v3 but server pubkey not in trustedServerKeys → onerror "untrusted"', async () => {
     const errors: Error[] = [];
     const untrustedKp = generateKeypair(); // A different keypair not in trustedServerKeys

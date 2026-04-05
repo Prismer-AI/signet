@@ -172,6 +172,37 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     assert(result.error?.includes('params mismatch'), `Expected 'params mismatch', got: ${result.error}`);
   });
 
+  it('test_verify_params_key_reorder — receipt signed {a:1,b:2}, request has {b:2,a:1} → ok: true (anti-staple accepts reordered keys)', () => {
+    // Fix #1: params comparison must be order-independent (uses contentHash)
+    const action = makeAction('echo', { a: 1, b: 2 });
+    const receipt = sign(kp.secretKey, action, 'test-agent', 'owner');
+    const req = {
+      params: {
+        name: 'echo',
+        arguments: { b: 2, a: 1 },  // same values, different key order
+        _meta: { _signet: receipt },
+      },
+    };
+    const result = verifyRequest(req, { trustedKeys: [receipt.signer.pubkey] });
+    assert.strictEqual(result.ok, true, `Expected ok: true (reordered keys should not cause anti-staple failure), got error: ${result.error}`);
+  });
+
+  it('test_verify_params_value_change_still_rejected — receipt signed {a:1}, request has {a:999} → ok: false (params mismatch)', () => {
+    // Fix #1 inverse: different values must still be rejected
+    const action = makeAction('echo', { a: 1 });
+    const receipt = sign(kp.secretKey, action, 'test-agent', 'owner');
+    const req = {
+      params: {
+        name: 'echo',
+        arguments: { a: 999 },  // different value
+        _meta: { _signet: receipt },
+      },
+    };
+    const result = verifyRequest(req, { trustedKeys: [receipt.signer.pubkey] });
+    assert.strictEqual(result.ok, false);
+    assert(result.error?.includes('params mismatch'), `Expected 'params mismatch', got: ${result.error}`);
+  });
+
   it('test_verify_malformed_no_ts — _signet missing ts field → ok: false, "malformed"', () => {
     // Construct a receipt-like object without ts to exercise the shape check for ts
     const req = {
@@ -277,5 +308,50 @@ describe('@signet-auth/mcp-server signResponse', () => {
         return true;
       },
     );
+  });
+
+  it('test_sign_response_pubkey_with_prefix — receipt.signer.pubkey already has ed25519: prefix → signResponse succeeds', () => {
+    // Fix #7: signResponse must handle prefixed pubkey in agent receipt (normal case)
+    const req = signedRequest('echo', { message: 'hello' });
+    const agentReceipt = req.params._meta._signet as SignetReceipt;
+
+    // Verify the receipt already has a prefixed pubkey (this is the normal case)
+    assert(agentReceipt.signer.pubkey.startsWith('ed25519:'),
+      `Expected prefixed pubkey in receipt, got: ${agentReceipt.signer.pubkey}`);
+
+    const response = { content: [{ type: 'text', text: 'world' }] };
+    // Should not throw — prefix stripping must work correctly
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    assert.strictEqual(bilateral.v, 3);
+    assert(bilateral.sig.startsWith('ed25519:'));
+  });
+
+  it('test_sign_response_pubkey_prefix_stripping — signResponse correctly strips ed25519: prefix when calling verify() internally', () => {
+    // Fix #7: signResponse must strip "ed25519:" prefix from receipt.signer.pubkey before
+    // passing to verify(), which expects bare base64. This test confirms the internal path
+    // works by checking that a normal (prefixed) receipt produces a valid bilateral, and
+    // that the bilateral's embedded agent_receipt retains the original prefixed pubkey.
+    const req = signedRequest('echo', { message: 'hello' });
+    const agentReceipt = req.params._meta._signet as SignetReceipt;
+
+    assert(agentReceipt.signer.pubkey.startsWith('ed25519:'),
+      `agent receipt must have prefixed pubkey, got: ${agentReceipt.signer.pubkey}`);
+
+    const response = { content: [{ type: 'text', text: 'world' }] };
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    // verify() internally must have succeeded (prefix was stripped) — if it threw
+    // "invalid signature" the test would fail before reaching here
+    assert.strictEqual(bilateral.v, 3);
+    assert(bilateral.sig.startsWith('ed25519:'));
+    // Embedded agent_receipt must preserve the original prefixed pubkey
+    assert.strictEqual(bilateral.agent_receipt.signer.pubkey, agentReceipt.signer.pubkey);
   });
 });

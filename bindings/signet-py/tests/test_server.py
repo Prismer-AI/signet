@@ -121,3 +121,35 @@ def test_verify_no_meta():
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
     assert result.error == "unsigned request"
+
+
+# --- Regression tests ---
+
+
+def test_verify_timezone_less_timestamp_returns_false_not_raises():
+    """Fix #5: timezone-less timestamp must return ok=False, not raise TypeError."""
+    params, pubkey, _ = _signed_request()
+    # Overwrite the timestamp with one that has no timezone info (no Z, no +00:00)
+    params["_meta"]["_signet"]["ts"] = "2026-04-05T12:00:00.000"
+    opts = signet_auth.VerifyOptions(trusted_keys=[pubkey])
+    # Must not raise; must return a VerifyResult with ok=False
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is False
+    assert result.error is not None
+
+
+def test_verify_empty_trusted_keys_accepts_any_valid_signer():
+    """Fix #8 (positive): empty trusted_keys list trusts any valid signature."""
+    params, _, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(trusted_keys=[])
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is True
+
+
+def test_verify_nonempty_trusted_keys_rejects_unknown_signer():
+    """Fix #8 (inverse): non-matching trusted_keys rejects the signer."""
+    params, _, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(trusted_keys=["ed25519:DIFFERENTKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="])
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is False
+    assert "untrusted" in result.error

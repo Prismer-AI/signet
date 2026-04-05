@@ -3,7 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const signet = require('./signet.cjs');
 
-const GENESIS_HASH = 'sha256:genesis';
+// Must match Rust CLI: crates/signet-core/src/audit.rs GENESIS_HASH
+const GENESIS_HASH = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
 function append(signetDir, receipt) {
   const auditDir = path.join(signetDir, 'audit');

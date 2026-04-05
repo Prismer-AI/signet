@@ -19,6 +19,17 @@ function contentHash(value) {
 
 function loadOrCreateKey(keyPath) {
   if (fs.existsSync(keyPath)) {
+    // Warn if key file has lax permissions (Unix only)
+    try {
+      const stat = fs.statSync(keyPath);
+      if ((stat.mode & 0o077) !== 0) {
+        process.stderr.write(
+          'signet: WARNING: ' + keyPath + ' has permissions ' +
+          (stat.mode & 0o777).toString(8) + ' (expected 600)\n'
+        );
+      }
+    } catch { /* non-Unix, skip */ }
+
     const data = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
     if (!data.seed) {
       throw new Error(
@@ -51,7 +62,9 @@ function loadOrCreateKey(keyPath) {
     name: keyName,
     pubkey: 'ed25519:' + kp.publicKey,
   };
-  fs.writeFileSync(pubPath, JSON.stringify(pubFile, null, 2) + '\n', { mode: 0o644 });
+  const tmpPub = pubPath + '.tmp';
+  fs.writeFileSync(tmpPub, JSON.stringify(pubFile, null, 2) + '\n', { mode: 0o644 });
+  fs.renameSync(tmpPub, pubPath);
 
   return kp;
 }

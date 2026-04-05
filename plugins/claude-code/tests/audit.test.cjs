@@ -49,7 +49,7 @@ describe('audit.cjs', () => {
     assert.ok(record.receipt, 'should have receipt');
     assert.ok(record.prev_hash, 'should have prev_hash');
     assert.ok(record.record_hash, 'should have record_hash');
-    assert.equal(record.prev_hash, 'sha256:genesis');
+    assert.equal(record.prev_hash, 'sha256:0000000000000000000000000000000000000000000000000000000000000000');
     assert.ok(record.record_hash.startsWith('sha256:'));
     fs.rmSync(tmpDir, { recursive: true });
   });

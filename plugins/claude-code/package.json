@@ -1,0 +1,10 @@
+{
+  "name": "signet-claude-plugin",
+  "version": "0.4.0",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/",
+    "build": "bash scripts/build-plugin.sh"
+  }
+}

@@ -29,9 +29,11 @@ function lastRecordHash(filepath, auditDir) {
   if (fs.existsSync(filepath)) {
     const content = fs.readFileSync(filepath, 'utf8');
     const lines = content.trim().split('\n').filter(l => l.trim());
-    if (lines.length > 0) {
-      const last = JSON.parse(lines[lines.length - 1]);
-      return last.record_hash;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const rec = JSON.parse(lines[i]);
+        if (rec.record_hash) return rec.record_hash;
+      } catch { /* skip truncated line */ }
     }
   }
 
@@ -45,9 +47,11 @@ function lastRecordHash(filepath, auditDir) {
       if (fullPath === filepath) continue;
       const content = fs.readFileSync(fullPath, 'utf8');
       const lines = content.trim().split('\n').filter(l => l.trim());
-      if (lines.length > 0) {
-        const last = JSON.parse(lines[lines.length - 1]);
-        return last.record_hash;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const rec = JSON.parse(lines[i]);
+          if (rec.record_hash) return rec.record_hash;
+        } catch { /* skip truncated line */ }
       }
     }
   }

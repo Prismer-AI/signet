@@ -20,10 +20,10 @@ function contentHash(value) {
 function loadOrCreateKey(keyPath) {
   if (fs.existsSync(keyPath)) {
     const data = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-    if (data.kdf || data.ciphertext) {
+    if (!data.seed) {
       throw new Error(
-        'Encrypted key detected at ' + keyPath + '. ' +
-        'Run: signet identity generate --name claude-agent --unencrypted'
+        'Key at ' + keyPath + ' has no seed field. ' +
+        'If encrypted, run: signet identity generate --name claude-agent --unencrypted'
       );
     }
     return regenerateFromSeed(data.seed);
@@ -40,7 +40,9 @@ function loadOrCreateKey(keyPath) {
     name: keyName,
     seed: kp.secretKey,
   };
-  fs.writeFileSync(keyPath, JSON.stringify(keyFile, null, 2) + '\n', { mode: 0o600 });
+  const tmpPath = keyPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(keyFile, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmpPath, keyPath);
 
   const pubPath = keyPath.replace(/\.key$/, '.pub');
   const pubFile = {

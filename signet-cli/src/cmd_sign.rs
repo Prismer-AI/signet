@@ -9,10 +9,16 @@ use signet_core::receipt::Action;
 pub struct SignArgs {
     #[arg(long)]
     pub key: String,
-    #[arg(long)]
-    pub tool: String,
-    #[arg(long)]
-    pub params: String,
+    #[arg(long, required_unless_present = "tool_from_env")]
+    pub tool: Option<String>,
+    #[arg(long, required_unless_present = "tool")]
+    /// Read tool name from this environment variable (avoids shell injection)
+    pub tool_from_env: Option<String>,
+    #[arg(long, required_unless_present = "params_from_env")]
+    pub params: Option<String>,
+    #[arg(long, required_unless_present = "params")]
+    /// Read params JSON from this environment variable (avoids shell injection)
+    pub params_from_env: Option<String>,
     #[arg(long)]
     pub target: String,
     #[arg(long)]
@@ -37,12 +43,27 @@ pub fn sign(args: SignArgs) -> Result<()> {
         }
     };
 
+    // Resolve tool name: --tool or --tool-from-env
+    let tool = match (&args.tool, &args.tool_from_env) {
+        (Some(t), _) => t.clone(),
+        (None, Some(env_name)) => std::env::var(env_name)
+            .map_err(|_| anyhow::anyhow!("env var '{}' not set", env_name))?,
+        (None, None) => anyhow::bail!("either --tool or --tool-from-env is required"),
+    };
+
+    // Resolve params: --params or --params-from-env
+    let params_raw = match (&args.params, &args.params_from_env) {
+        (Some(p), _) => p.clone(),
+        (None, Some(env_name)) => std::env::var(env_name).unwrap_or_else(|_| "{}".to_string()),
+        (None, None) => "{}".to_string(),
+    };
+
     // Parse params (inline JSON or @file)
-    let params_str = if let Some(path) = args.params.strip_prefix('@') {
+    let params_str = if let Some(path) = params_raw.strip_prefix('@') {
         fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read params file '{path}': {e}"))?
     } else {
-        args.params.clone()
+        params_raw
     };
     let params: serde_json::Value = serde_json::from_str(&params_str)?;
 
@@ -50,7 +71,7 @@ pub fn sign(args: SignArgs) -> Result<()> {
         let canonical = signet_core::canonical::canonicalize(&params)?;
         let hash = Sha256::digest(canonical.as_bytes());
         Action {
-            tool: args.tool,
+            tool,
             params: serde_json::Value::Null,
             params_hash: format!("sha256:{}", hex::encode(hash)),
             target: args.target,
@@ -58,7 +79,7 @@ pub fn sign(args: SignArgs) -> Result<()> {
         }
     } else {
         Action {
-            tool: args.tool,
+            tool,
             params,
             params_hash: String::new(),
             target: args.target,

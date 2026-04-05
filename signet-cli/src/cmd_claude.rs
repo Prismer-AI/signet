@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Subcommand;
 use std::fs;
 use std::path::PathBuf;
@@ -13,17 +13,18 @@ pub enum ClaudeAction {
     Audit,
 }
 
-fn claude_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".claude/skills/signet")
+fn claude_skills_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    Ok(home.join(".claude/skills/signet"))
 }
 
-fn signet_bin() -> String {
-    std::env::current_exe()
-        .unwrap_or_else(|_| PathBuf::from("signet"))
-        .to_string_lossy()
-        .to_string()
+fn signet_bin() -> Result<String> {
+    let exe = std::env::current_exe()
+        .context("cannot determine signet binary path")?;
+    exe.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("signet binary path is not valid UTF-8"))
 }
 
 pub fn run(action: ClaudeAction) -> Result<()> {
@@ -35,21 +36,25 @@ pub fn run(action: ClaudeAction) -> Result<()> {
 }
 
 fn install() -> Result<()> {
-    let skills_dir = claude_skills_dir();
+    let skills_dir = claude_skills_dir()?;
     let bin_dir = skills_dir.join("bin");
 
-    fs::create_dir_all(&bin_dir)?;
+    fs::create_dir_all(&bin_dir)
+        .with_context(|| format!("failed to create {}", bin_dir.display()))?;
 
     // Generate identity if not exists
     let signet_dir = signet_core::default_signet_dir();
     let key_path = signet_dir.join("keys/claude-agent.key");
     if !key_path.exists() {
-        eprintln!("Generating claude-agent identity...");
+        eprintln!("Generating claude-agent identity (unencrypted for automated signing)...");
+        eprintln!("  Key will be stored at: {}", key_path.display());
+        eprintln!("  Protect this file with filesystem permissions (0600).");
         signet_core::generate_and_save(&signet_dir, "claude-agent", None, None, None)?;
     }
 
-    let signet_bin = signet_bin();
+    let signet_bin = signet_bin()?;
 
+    // Note: ${{...}} is Rust format-string escaping, produces ${...} in output
     let skill_md = format!(
         r#"---
 name: signet
@@ -96,22 +101,37 @@ To export audit report:
 "#
     );
 
-    fs::write(skills_dir.join("SKILL.md"), skill_md)?;
+    fs::write(skills_dir.join("SKILL.md"), skill_md)
+        .with_context(|| format!("failed to write {}", skills_dir.join("SKILL.md").display()))?;
 
+    // Hook script uses --tool-from-env / --params-from-env to avoid shell injection.
+    // Values are read by the Rust binary directly from env vars, never interpreted by bash.
     let hook_script = format!(
         r#"#!/bin/bash
 # Signet PostToolUse hook — signs every tool call
-{signet_bin} sign \
+# Uses --tool-from-env/--params-from-env to read env vars safely in Rust,
+# avoiding shell interpretation of TOOL_INPUT content.
+SIGNET_HOOK_LOG="$HOME/.signet/hook-errors.log"
+
+"{signet_bin}" sign \
   --key claude-agent \
-  --tool "${{TOOL_NAME:-unknown}}" \
-  --params "${{TOOL_INPUT:-'{{}}'}}" \
+  --tool-from-env TOOL_NAME \
+  --params-from-env TOOL_INPUT \
   --target "claude-code://local" \
-  > /dev/null 2>&1 || true
+  > /dev/null 2>&1
+
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+  mkdir -p "$HOME/.signet"
+  echo "[$(date -u +%FT%TZ)] WARN: signing failed (exit $exit_code) tool=${{TOOL_NAME:-unknown}}" \
+    >> "$SIGNET_HOOK_LOG"
+fi
 "#
     );
 
     let hook_path = bin_dir.join("sign-tool-call.sh");
-    fs::write(&hook_path, hook_script)?;
+    fs::write(&hook_path, hook_script)
+        .with_context(|| format!("failed to write {}", hook_path.display()))?;
 
     #[cfg(unix)]
     {
@@ -130,7 +150,7 @@ To export audit report:
 }
 
 fn uninstall() -> Result<()> {
-    let skills_dir = claude_skills_dir();
+    let skills_dir = claude_skills_dir()?;
     if skills_dir.exists() {
         fs::remove_dir_all(&skills_dir)?;
         eprintln!("Signet skill removed from Claude Code.");
@@ -169,7 +189,12 @@ fn audit() -> Result<()> {
             .and_then(|a| a.get("tool"))
             .and_then(|v| v.as_str())
             .unwrap_or("?");
-        println!("{:<30} {:<15} claude-code://local", ts, tool);
+        let target = r
+            .get("action")
+            .and_then(|a| a.get("target"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("claude-code://local");
+        println!("{:<30} {:<15} {}", ts, tool, target);
     }
     println!("\n{} signed tool calls", records.len());
 

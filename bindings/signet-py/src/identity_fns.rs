@@ -74,9 +74,7 @@ fn load_verifying_key(py: Python<'_>, dir: String, name: String) -> PyResult<Str
     let name_c = name.clone();
 
     let verifying_key = py
-        .allow_threads(move || {
-            signet_core::load_verifying_key(Path::new(&dir_c), &name_c)
-        })
+        .allow_threads(move || signet_core::load_verifying_key(Path::new(&dir_c), &name_c))
         .map_err(to_py_err)?;
 
     Ok(B64.encode(verifying_key.as_bytes()))
@@ -114,8 +112,8 @@ fn export_public_key(py: Python<'_>, dir: String, name: String) -> PyResult<PyOb
         .allow_threads(move || signet_core::export_public_key(Path::new(&dir_c), &name_c))
         .map_err(to_py_err)?;
 
-    let value: serde_json::Value =
-        serde_json::to_value(&pub_file).map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
+    let value: serde_json::Value = serde_json::to_value(&pub_file)
+        .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
 
     let dict = PyDict::new(py);
     if let serde_json::Value::Object(map) = value {

@@ -10,7 +10,10 @@ fn generate_keypair(py: Python<'_>) -> PyKeyPair {
     let (signing_key, verifying_key) = py.allow_threads(signet_core::generate_keypair);
     let secret_key = B64.encode(signing_key.to_keypair_bytes());
     let public_key = B64.encode(verifying_key.as_bytes());
-    PyKeyPair { secret_key, public_key }
+    PyKeyPair {
+        secret_key,
+        public_key,
+    }
 }
 
 #[pyfunction]
@@ -35,7 +38,11 @@ fn sign(
             SigningKey::from_keypair_bytes(&arr)
                 .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
         }
-        _ => return Err(InvalidKeyError::new_err("secret key must be 32 or 64 bytes")),
+        _ => {
+            return Err(InvalidKeyError::new_err(
+                "secret key must be 32 or 64 bytes",
+            ))
+        }
     };
 
     let inner_action = action.inner.clone();
@@ -96,7 +103,11 @@ fn sign_compound(
             SigningKey::from_keypair_bytes(&arr)
                 .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
         }
-        _ => return Err(InvalidKeyError::new_err("secret key must be 32 or 64 bytes")),
+        _ => {
+            return Err(InvalidKeyError::new_err(
+                "secret key must be 32 or 64 bytes",
+            ))
+        }
     };
 
     let inner_action = action.inner.clone();
@@ -105,8 +116,7 @@ fn sign_compound(
     let response_json: serde_json::Value = pythonize::depythonize(&response_content)?;
 
     // Use provided timestamps or current time for both.
-    let now = chrono::Utc::now()
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let ts_req = ts_request.unwrap_or_else(|| now.clone());
     let ts_resp = ts_response.unwrap_or_else(|| now.clone());
 

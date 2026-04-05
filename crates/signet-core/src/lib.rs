@@ -13,14 +13,16 @@ pub mod audit;
 
 pub use error::SignetError;
 pub use identity::generate_keypair;
-pub use receipt::{Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer};
+pub use receipt::{
+    Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
+};
 pub use sign::{sign, sign_bilateral, sign_compound};
 pub use verify::{verify, verify_any, verify_bilateral, verify_compound};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use identity::fs_ops::{
-    KeyInfo, default_signet_dir, validate_key_name, generate_and_save,
-    load_key_info, load_signing_key, load_verifying_key, list_keys, export_public_key,
+    default_signet_dir, export_public_key, generate_and_save, list_keys, load_key_info,
+    load_signing_key, load_verifying_key, validate_key_name, KeyInfo,
 };
 
 #[cfg(test)]

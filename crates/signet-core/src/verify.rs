@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 use crate::canonical;
@@ -31,7 +31,10 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
         .map_err(|_| SignetError::SignatureMismatch)
 }
 
-pub fn verify_compound(receipt: &CompoundReceipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
+pub fn verify_compound(
+    receipt: &CompoundReceipt,
+    pubkey: &VerifyingKey,
+) -> Result<(), SignetError> {
     let sig_b64 = receipt
         .sig
         .strip_prefix("ed25519:")
@@ -62,9 +65,9 @@ pub fn verify_compound(receipt: &CompoundReceipt, pubkey: &VerifyingKey) -> Resu
 pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     let raw: serde_json::Value = serde_json::from_str(receipt_json)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid JSON: {e}")))?;
-    let version = raw.get("v")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| SignetError::InvalidReceipt("missing or non-integer 'v' field".to_string()))?;
+    let version = raw.get("v").and_then(|v| v.as_u64()).ok_or_else(|| {
+        SignetError::InvalidReceipt("missing or non-integer 'v' field".to_string())
+    })?;
     match version {
         1 => {
             let receipt: Receipt = serde_json::from_value(raw)
@@ -79,11 +82,16 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
         3 => Err(SignetError::InvalidReceipt(
             "v3 bilateral receipts require verify_bilateral(), not verify_any()".to_string(),
         )),
-        _ => Err(SignetError::InvalidReceipt(format!("unsupported version: {version}"))),
+        _ => Err(SignetError::InvalidReceipt(format!(
+            "unsupported version: {version}"
+        ))),
     }
 }
 
-pub fn verify_bilateral(receipt: &BilateralReceipt, server_pubkey: &VerifyingKey) -> Result<(), SignetError> {
+pub fn verify_bilateral(
+    receipt: &BilateralReceipt,
+    server_pubkey: &VerifyingKey,
+) -> Result<(), SignetError> {
     // 0. Cross-check: caller's key must match receipt.server.pubkey
     let receipt_server_b64 = receipt
         .server
@@ -169,7 +177,10 @@ mod tests {
 
         let result = verify(&receipt, &wrong_key);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SignetError::SignatureMismatch));
+        assert!(matches!(
+            result.unwrap_err(),
+            SignetError::SignatureMismatch
+        ));
     }
 
     #[test]
@@ -233,9 +244,15 @@ mod tests {
         let (sk, vk) = generate_keypair();
         let action = test_action();
         let receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
         assert!(verify_compound(&receipt, &vk).is_ok());
     }
 
@@ -245,10 +262,19 @@ mod tests {
         let (_, wrong_vk) = generate_keypair();
         let action = test_action();
         let receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
-        assert!(matches!(verify_compound(&receipt, &wrong_vk), Err(SignetError::SignatureMismatch)));
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
+        assert!(matches!(
+            verify_compound(&receipt, &wrong_vk),
+            Err(SignetError::SignatureMismatch)
+        ));
     }
 
     #[test]
@@ -256,11 +282,20 @@ mod tests {
         let (sk, vk) = generate_keypair();
         let action = test_action();
         let mut receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
         receipt.action.tool = "evil_tool".to_string();
-        assert!(matches!(verify_compound(&receipt, &vk), Err(SignetError::SignatureMismatch)));
+        assert!(matches!(
+            verify_compound(&receipt, &vk),
+            Err(SignetError::SignatureMismatch)
+        ));
     }
 
     #[test]
@@ -268,11 +303,20 @@ mod tests {
         let (sk, vk) = generate_keypair();
         let action = test_action();
         let mut receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
         receipt.response.content_hash = "sha256:tampered".to_string();
-        assert!(matches!(verify_compound(&receipt, &vk), Err(SignetError::SignatureMismatch)));
+        assert!(matches!(
+            verify_compound(&receipt, &vk),
+            Err(SignetError::SignatureMismatch)
+        ));
     }
 
     #[test]
@@ -280,11 +324,20 @@ mod tests {
         let (sk, vk) = generate_keypair();
         let action = test_action();
         let mut receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
         receipt.ts_response = "2099-01-01T00:00:00.000Z".to_string();
-        assert!(matches!(verify_compound(&receipt, &vk), Err(SignetError::SignatureMismatch)));
+        assert!(matches!(
+            verify_compound(&receipt, &vk),
+            Err(SignetError::SignatureMismatch)
+        ));
     }
 
     #[test]
@@ -388,7 +441,9 @@ mod tests {
         .unwrap();
         let json = serde_json::to_string(&bilateral).unwrap();
         let result = verify_any(&json, &server_vk);
-        assert!(matches!(result, Err(SignetError::InvalidReceipt(ref msg)) if msg.contains("verify_bilateral")));
+        assert!(
+            matches!(result, Err(SignetError::InvalidReceipt(ref msg)) if msg.contains("verify_bilateral"))
+        );
     }
 
     #[test]
@@ -405,9 +460,15 @@ mod tests {
         let (sk, vk) = generate_keypair();
         let action = test_action();
         let receipt = sign_compound(
-            &sk, &action, &test_response(), "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &sk,
+            &action,
+            &test_response(),
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
         let json = serde_json::to_string(&receipt).unwrap();
         assert!(verify_any(&json, &vk).is_ok());
     }

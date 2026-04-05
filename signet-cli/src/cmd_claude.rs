@@ -14,14 +14,13 @@ pub enum ClaudeAction {
 }
 
 fn claude_skills_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
     Ok(home.join(".claude/skills/signet"))
 }
 
 fn signet_bin() -> Result<String> {
-    let exe = std::env::current_exe()
-        .context("cannot determine signet binary path")?;
+    let exe = std::env::current_exe().context("cannot determine signet binary path")?;
     exe.to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow::anyhow!("signet binary path is not valid UTF-8"))

@@ -39,7 +39,11 @@ pub fn generate(args: GenerateArgs) -> Result<()> {
         passphrase.as_deref(),
         Some(KdfParams::new()),
     )?;
-    eprintln!("Identity '{}' created at {}/keys/", info.name, dir.display());
+    eprintln!(
+        "Identity '{}' created at {}/keys/",
+        info.name,
+        dir.display()
+    );
     println!("{}", info.pubkey);
     Ok(())
 }

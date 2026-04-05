@@ -34,11 +34,11 @@ pub struct Response {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompoundReceipt {
-    pub v: u8,               // always 2
+    pub v: u8, // always 2
     pub id: String,
-    pub action: Action,      // same type as v1
+    pub action: Action, // same type as v1
     pub response: Response,
-    pub signer: Signer,      // same type as v1
+    pub signer: Signer, // same type as v1
     pub ts_request: String,
     pub ts_response: String,
     pub nonce: String,
@@ -53,14 +53,14 @@ pub struct ServerInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BilateralReceipt {
-    pub v: u8,                   // always 3
+    pub v: u8, // always 3
     pub id: String,
-    pub agent_receipt: Receipt,  // embedded v1 receipt verbatim
+    pub agent_receipt: Receipt, // embedded v1 receipt verbatim
     pub response: Response,
     pub server: ServerInfo,
     pub ts_response: String,
     pub nonce: String,
-    pub sig: String,             // server signs entire v3 body
+    pub sig: String, // server signs entire v3 body
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<serde_json::Value>, // unsigned, outside sig scope
 }

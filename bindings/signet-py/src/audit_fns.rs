@@ -6,7 +6,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
 use crate::errors::to_py_err;
-use crate::types::{PyAuditRecord, PyChainBreak, PyChainStatus, PyReceipt, PyVerifyFailure, PyVerifyResult};
+use crate::types::{
+    PyAuditRecord, PyChainBreak, PyChainStatus, PyReceipt, PyVerifyFailure, PyVerifyResult,
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -27,9 +29,8 @@ fn parse_since(_py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<DateTime<Utc
     let ts: f64 = obj.call_method0("timestamp")?.extract::<f64>()?;
     let secs = ts.floor() as i64;
     let nsecs = ((ts - ts.floor()) * 1_000_000_000.0) as u32;
-    let dt = DateTime::from_timestamp(secs, nsecs).ok_or_else(|| {
-        PyValueError::new_err(format!("invalid timestamp: {ts}"))
-    })?;
+    let dt = DateTime::from_timestamp(secs, nsecs)
+        .ok_or_else(|| PyValueError::new_err(format!("invalid timestamp: {ts}")))?;
     Ok(dt)
 }
 
@@ -82,7 +83,10 @@ fn audit_query(
     let records = py
         .allow_threads(|| signet_core::audit::query(&path, &filter))
         .map_err(to_py_err)?;
-    Ok(records.into_iter().map(|r| PyAuditRecord { inner: r }).collect())
+    Ok(records
+        .into_iter()
+        .map(|r| PyAuditRecord { inner: r })
+        .collect())
 }
 
 // ─── audit_verify_chain ───────────────────────────────────────────────────────
@@ -130,7 +134,11 @@ fn audit_verify_signatures(
         .failures
         .into_iter()
         .map(|f| PyVerifyFailure {
-            file: if f.file.is_empty() { None } else { Some(f.file) },
+            file: if f.file.is_empty() {
+                None
+            } else {
+                Some(f.file)
+            },
             line: if f.line == 0 { None } else { Some(f.line) },
             receipt_id: f.receipt_id,
             reason: f.reason,

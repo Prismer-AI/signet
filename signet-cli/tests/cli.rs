@@ -79,7 +79,13 @@ fn test_identity_export() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "exporter", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "exporter",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -107,10 +113,14 @@ fn test_sign_stdout() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "signer",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"ls"}"#,
-            "--target", "mcp://local",
+            "--key",
+            "signer",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success()
@@ -121,7 +131,10 @@ fn test_sign_stdout() {
     let stdout = String::from_utf8(out).unwrap();
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout must be valid JSON");
     assert!(v.get("sig").is_some(), "receipt must have 'sig' field");
-    assert!(v.get("action").is_some(), "receipt must have 'action' field");
+    assert!(
+        v.get("action").is_some(),
+        "receipt must have 'action' field"
+    );
 }
 
 #[test]
@@ -138,18 +151,24 @@ fn test_sign_output_file() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "filekey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"pwd"}"#,
-            "--target", "mcp://local",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "filekey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"pwd"}"#,
+            "--target",
+            "mcp://local",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
     assert!(receipt_path.exists(), "receipt file must exist");
     let content = fs::read_to_string(&receipt_path).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&content).expect("receipt file must be valid JSON");
+    let v: serde_json::Value =
+        serde_json::from_str(&content).expect("receipt file must be valid JSON");
     assert!(v.get("sig").is_some());
 }
 
@@ -169,11 +188,16 @@ fn test_verify_valid() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "verkey",
-            "--tool", "read_file",
-            "--params", r#"{"path":"/tmp/foo"}"#,
-            "--target", "mcp://fs",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "verkey",
+            "--tool",
+            "read_file",
+            "--params",
+            r#"{"path":"/tmp/foo"}"#,
+            "--target",
+            "mcp://fs",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -183,7 +207,8 @@ fn test_verify_valid() {
         .args([
             "verify",
             receipt_path.to_str().unwrap(),
-            "--pubkey", "verkey",
+            "--pubkey",
+            "verkey",
         ])
         .assert()
         .success()
@@ -204,11 +229,16 @@ fn test_verify_invalid() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "tampkey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"echo hi"}"#,
-            "--target", "mcp://local",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "tampkey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"echo hi"}"#,
+            "--target",
+            "mcp://local",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -224,7 +254,8 @@ fn test_verify_invalid() {
         .args([
             "verify",
             receipt_path.to_str().unwrap(),
-            "--pubkey", "tampkey",
+            "--pubkey",
+            "tampkey",
         ])
         .assert()
         .failure()
@@ -236,7 +267,13 @@ fn test_verify_pubkey_file() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "pubfilekey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "pubfilekey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -245,11 +282,16 @@ fn test_verify_pubkey_file() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "pubfilekey",
-            "--tool", "list_dir",
-            "--params", r#"{"path":"/tmp"}"#,
-            "--target", "mcp://fs",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "pubfilekey",
+            "--tool",
+            "list_dir",
+            "--params",
+            r#"{"path":"/tmp"}"#,
+            "--target",
+            "mcp://fs",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -260,7 +302,8 @@ fn test_verify_pubkey_file() {
         .args([
             "verify",
             receipt_path.to_str().unwrap(),
-            "--pubkey", pub_file_path.to_str().unwrap(),
+            "--pubkey",
+            pub_file_path.to_str().unwrap(),
         ])
         .assert()
         .success()
@@ -275,9 +318,12 @@ fn test_sign_verify_e2e() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "identity", "generate",
-            "--name", "e2eagent",
-            "--owner", "ci-robot",
+            "identity",
+            "generate",
+            "--name",
+            "e2eagent",
+            "--owner",
+            "ci-robot",
             "--unencrypted",
         ])
         .assert()
@@ -288,11 +334,16 @@ fn test_sign_verify_e2e() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "e2eagent",
-            "--tool", "github_create_pr",
-            "--params", r#"{"title":"fix bug"}"#,
-            "--target", "mcp://github.local",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "e2eagent",
+            "--tool",
+            "github_create_pr",
+            "--params",
+            r#"{"title":"fix bug"}"#,
+            "--target",
+            "mcp://github.local",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -302,7 +353,8 @@ fn test_sign_verify_e2e() {
         .args([
             "verify",
             receipt_path.to_str().unwrap(),
-            "--pubkey", "e2eagent",
+            "--pubkey",
+            "e2eagent",
         ])
         .assert()
         .success()
@@ -330,11 +382,16 @@ fn test_passphrase_env_var() {
         .env("SIGNET_PASSPHRASE", "mypassword")
         .args([
             "sign",
-            "--key", "enckey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"date"}"#,
-            "--target", "mcp://local",
-            "--output", receipt_path.to_str().unwrap(),
+            "--key",
+            "enckey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"date"}"#,
+            "--target",
+            "mcp://local",
+            "--output",
+            receipt_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -349,7 +406,13 @@ fn test_params_at_file() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "atfilekey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "atfilekey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -361,10 +424,14 @@ fn test_params_at_file() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "atfilekey",
-            "--tool", "deploy",
-            "--params", &at_arg,
-            "--target", "mcp://deploy",
+            "--key",
+            "atfilekey",
+            "--tool",
+            "deploy",
+            "--params",
+            &at_arg,
+            "--target",
+            "mcp://deploy",
         ])
         .assert()
         .success()
@@ -378,7 +445,13 @@ fn test_sign_creates_audit_log() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "auditkey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "auditkey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -386,10 +459,14 @@ fn test_sign_creates_audit_log() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "auditkey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"ls"}"#,
-            "--target", "mcp://local",
+            "--key",
+            "auditkey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -408,7 +485,13 @@ fn test_sign_no_log() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "nologkey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "nologkey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -416,17 +499,24 @@ fn test_sign_no_log() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "nologkey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"ls"}"#,
-            "--target", "mcp://local",
+            "--key",
+            "nologkey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
             "--no-log",
         ])
         .assert()
         .success();
 
     let audit_dir = dir.path().join("audit");
-    assert!(!audit_dir.exists(), "audit/ directory must NOT exist when --no-log is used");
+    assert!(
+        !audit_dir.exists(),
+        "audit/ directory must NOT exist when --no-log is used"
+    );
 }
 
 #[test]
@@ -443,10 +533,14 @@ fn test_audit_list() {
             .env("SIGNET_HOME", dir.path())
             .args([
                 "sign",
-                "--key", "listkey",
-                "--tool", "bash",
-                "--params", &format!(r#"{{"cmd":"cmd{i}"}}"#),
-                "--target", "mcp://local",
+                "--key",
+                "listkey",
+                "--tool",
+                "bash",
+                "--params",
+                &format!(r#"{{"cmd":"cmd{i}"}}"#),
+                "--target",
+                "mcp://local",
             ])
             .assert()
             .success();
@@ -465,7 +559,13 @@ fn test_audit_since() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "sincekey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "sincekey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -473,10 +573,14 @@ fn test_audit_since() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "sincekey",
-            "--tool", "bash",
-            "--params", r#"{"cmd":"date"}"#,
-            "--target", "mcp://local",
+            "--key",
+            "sincekey",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"cmd":"date"}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -494,7 +598,13 @@ fn test_audit_verify() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "verifyauditkey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "verifyauditkey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -503,10 +613,14 @@ fn test_audit_verify() {
             .env("SIGNET_HOME", dir.path())
             .args([
                 "sign",
-                "--key", "verifyauditkey",
-                "--tool", "bash",
-                "--params", &format!(r#"{{"cmd":"run{i}"}}"#),
-                "--target", "mcp://local",
+                "--key",
+                "verifyauditkey",
+                "--tool",
+                "bash",
+                "--params",
+                &format!(r#"{{"cmd":"run{i}"}}"#),
+                "--target",
+                "mcp://local",
             ])
             .assert()
             .success();
@@ -525,7 +639,13 @@ fn test_verify_chain() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "chainkey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "chainkey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -534,10 +654,14 @@ fn test_verify_chain() {
             .env("SIGNET_HOME", dir.path())
             .args([
                 "sign",
-                "--key", "chainkey",
-                "--tool", "bash",
-                "--params", &format!(r#"{{"cmd":"step{i}"}}"#),
-                "--target", "mcp://local",
+                "--key",
+                "chainkey",
+                "--tool",
+                "bash",
+                "--params",
+                &format!(r#"{{"cmd":"step{i}"}}"#),
+                "--target",
+                "mcp://local",
             ])
             .assert()
             .success();
@@ -556,7 +680,13 @@ fn test_params_at_nonexistent() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "atmisskey", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "atmisskey",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -564,10 +694,14 @@ fn test_params_at_nonexistent() {
         .env("SIGNET_HOME", dir.path())
         .args([
             "sign",
-            "--key", "atmisskey",
-            "--tool", "bash",
-            "--params", "@/nonexistent/path/params.json",
-            "--target", "mcp://local",
+            "--key",
+            "atmisskey",
+            "--tool",
+            "bash",
+            "--params",
+            "@/nonexistent/path/params.json",
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .failure()

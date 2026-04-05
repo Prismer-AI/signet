@@ -1,8 +1,8 @@
 use std::fs;
 
 use anyhow::{bail, Result};
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use clap::Args;
 
 #[derive(Args)]
@@ -28,10 +28,12 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
     }
 
     // Receipt verification mode
-    let receipt_path = args.receipt
+    let receipt_path = args
+        .receipt
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("receipt file path required (or use --chain)"))?;
-    let pubkey = args.pubkey
+    let pubkey = args
+        .pubkey
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--pubkey required for receipt verification"))?;
 

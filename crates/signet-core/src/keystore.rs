@@ -1,10 +1,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use argon2::{Argon2, Algorithm, Version, Params};
+use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use chacha20poly1305::{
-    XChaCha20Poly1305, Key, XNonce,
     aead::{Aead, AeadCore, KeyInit, OsRng},
+    Key, XChaCha20Poly1305, XNonce,
 };
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,11 @@ pub struct KdfParams {
 impl KdfParams {
     /// Production-grade parameters: t=3, m=65536 (64MB), p=1.
     pub fn new() -> Self {
-        KdfParams { t: 3, m: 65536, p: 1 }
+        KdfParams {
+            t: 3,
+            m: 65536,
+            p: 1,
+        }
     }
 
     /// Fast parameters for tests only (insecure).
@@ -101,7 +105,13 @@ pub fn encrypt_key(
     let seed = signing_key.to_bytes();
 
     let ciphertext = cipher
-        .encrypt(&nonce, chacha20poly1305::aead::Payload { msg: &seed, aad: aad.as_bytes() })
+        .encrypt(
+            &nonce,
+            chacha20poly1305::aead::Payload {
+                msg: &seed,
+                aad: aad.as_bytes(),
+            },
+        )
         .map_err(|_| SignetError::DecryptionError)?;
 
     Ok(EncryptedKeyFile {
@@ -118,20 +128,21 @@ pub fn encrypt_key(
 }
 
 /// Decrypt a signing key from an EncryptedKeyFile.
-pub fn decrypt_key(
-    file: &EncryptedKeyFile,
-    passphrase: &str,
-) -> Result<SigningKey, SignetError> {
-    let salt_bytes = B64.decode(&file.salt)
+pub fn decrypt_key(file: &EncryptedKeyFile, passphrase: &str) -> Result<SigningKey, SignetError> {
+    let salt_bytes = B64
+        .decode(&file.salt)
         .map_err(|e| SignetError::CorruptedFile(format!("invalid salt base64: {e}")))?;
-    let nonce_bytes = B64.decode(&file.nonce)
+    let nonce_bytes = B64
+        .decode(&file.nonce)
         .map_err(|e| SignetError::CorruptedFile(format!("invalid nonce base64: {e}")))?;
-    let ciphertext = B64.decode(&file.ciphertext)
+    let ciphertext = B64
+        .decode(&file.ciphertext)
         .map_err(|e| SignetError::CorruptedFile(format!("invalid ciphertext base64: {e}")))?;
 
     if nonce_bytes.len() != 24 {
         return Err(SignetError::CorruptedFile(format!(
-            "invalid nonce length: expected 24, got {}", nonce_bytes.len()
+            "invalid nonce length: expected 24, got {}",
+            nonce_bytes.len()
         )));
     }
     let nonce = XNonce::from_slice(&nonce_bytes);
@@ -142,7 +153,13 @@ pub fn decrypt_key(
     let aad = build_aad(&file.name, &file.kdf_params)?;
 
     let seed_bytes = cipher
-        .decrypt(nonce, chacha20poly1305::aead::Payload { msg: &ciphertext, aad: aad.as_bytes() })
+        .decrypt(
+            nonce,
+            chacha20poly1305::aead::Payload {
+                msg: &ciphertext,
+                aad: aad.as_bytes(),
+            },
+        )
         .map_err(|_| SignetError::DecryptionError)?;
 
     let seed: [u8; 32] = seed_bytes
@@ -164,7 +181,8 @@ pub fn encode_unencrypted(signing_key: &SigningKey, name: &str) -> UnencryptedKe
 
 /// Decode an unencrypted key file into a SigningKey.
 pub fn decode_unencrypted(file: &UnencryptedKeyFile) -> Result<SigningKey, SignetError> {
-    let seed_bytes = B64.decode(&file.seed)
+    let seed_bytes = B64
+        .decode(&file.seed)
         .map_err(|e| SignetError::CorruptedFile(format!("invalid seed base64: {e}")))?;
     let seed: [u8; 32] = seed_bytes
         .try_into()
@@ -207,8 +225,8 @@ fn build_aad(name: &str, kdf_params: &KdfParams) -> Result<String, SignetError> 
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng as RandOsRng;
     use ed25519_dalek::SigningKey as DalekSigningKey;
+    use rand::rngs::OsRng as RandOsRng;
 
     fn random_signing_key() -> SigningKey {
         DalekSigningKey::generate(&mut RandOsRng)

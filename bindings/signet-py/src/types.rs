@@ -185,7 +185,10 @@ pub struct PyKeyPair {
 #[pymethods]
 impl PyKeyPair {
     fn __repr__(&self) -> String {
-        format!("KeyPair(public_key='{}', secret_key='<REDACTED>')", self.public_key)
+        format!(
+            "KeyPair(public_key='{}', secret_key='<REDACTED>')",
+            self.public_key
+        )
     }
 }
 

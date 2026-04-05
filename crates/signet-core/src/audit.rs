@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 use crate::canonical;
 use crate::error::SignetError;
 
-const GENESIS_HASH: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+const GENESIS_HASH: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditRecord {
@@ -103,7 +104,10 @@ fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
         })
 }
 
-fn compute_record_hash(receipt: &serde_json::Value, prev_hash: &str) -> Result<String, SignetError> {
+fn compute_record_hash(
+    receipt: &serde_json::Value,
+    prev_hash: &str,
+) -> Result<String, SignetError> {
     let hashable = serde_json::json!({
         "prev_hash": prev_hash,
         "receipt": receipt,
@@ -771,7 +775,10 @@ mod tests {
         let records = query(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(extract_signer_name(&records[0].receipt), Some("test-agent"));
-        assert_eq!(extract_tool(&records[0].receipt), Some("github_create_issue"));
+        assert_eq!(
+            extract_tool(&records[0].receipt),
+            Some("github_create_issue")
+        );
     }
 
     #[test]

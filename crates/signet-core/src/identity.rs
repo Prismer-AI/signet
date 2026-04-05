@@ -12,7 +12,7 @@ pub mod fs_ops {
     use super::generate_keypair;
     use crate::error::SignetError;
     use crate::keystore::{
-        decrypt_key, decode_unencrypted, encode_unencrypted, encrypt_key, EncryptedKeyFile,
+        decode_unencrypted, decrypt_key, encode_unencrypted, encrypt_key, EncryptedKeyFile,
         KdfParams, PubKeyFile, UnencryptedKeyFile,
     };
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -166,14 +166,16 @@ pub mod fs_ops {
 
         if value.get("kdf").is_some() {
             // Encrypted key
-            let enc_file: EncryptedKeyFile = serde_json::from_value(value)
-                .map_err(|e| SignetError::CorruptedFile(format!("invalid encrypted .key file: {e}")))?;
+            let enc_file: EncryptedKeyFile = serde_json::from_value(value).map_err(|e| {
+                SignetError::CorruptedFile(format!("invalid encrypted .key file: {e}"))
+            })?;
             let pass = passphrase.ok_or(SignetError::DecryptionError)?;
             decrypt_key(&enc_file, pass)
         } else {
             // Unencrypted key
-            let plain_file: UnencryptedKeyFile = serde_json::from_value(value)
-                .map_err(|e| SignetError::CorruptedFile(format!("invalid unencrypted .key file: {e}")))?;
+            let plain_file: UnencryptedKeyFile = serde_json::from_value(value).map_err(|e| {
+                SignetError::CorruptedFile(format!("invalid unencrypted .key file: {e}"))
+            })?;
             decode_unencrypted(&plain_file)
         }
     }
@@ -188,13 +190,13 @@ pub mod fs_ops {
         let file: PubKeyFile = serde_json::from_str(&json)
             .map_err(|e| SignetError::CorruptedFile(format!("invalid .pub file: {e}")))?;
 
-        let pubkey_bytes = B64.decode(&file.pubkey)
+        let pubkey_bytes = B64
+            .decode(&file.pubkey)
             .map_err(|e| SignetError::CorruptedFile(format!("invalid pubkey base64: {e}")))?;
         let pubkey_arr: [u8; 32] = pubkey_bytes
             .try_into()
             .map_err(|_| SignetError::CorruptedFile("pubkey is not 32 bytes".to_string()))?;
-        VerifyingKey::from_bytes(&pubkey_arr)
-            .map_err(|e| SignetError::InvalidKey(e.to_string()))
+        VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| SignetError::InvalidKey(e.to_string()))
     }
 
     /// List all keys in `dir/keys/`, returning sorted Vec<KeyInfo>.

@@ -1,5 +1,5 @@
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use chrono::Utc;
 use ed25519_dalek::{Signer as _, SigningKey};
 use rand::RngCore;
@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::error::SignetError;
-use crate::receipt::{Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer};
+use crate::receipt::{
+    Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
+};
 
 fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
     if action.params.is_null() && !action.params_hash.is_empty() {
@@ -248,7 +250,10 @@ mod tests {
         let receipt = sign(&key, &action, "test-agent", "owner").unwrap();
 
         let canonical_params = canonical::canonicalize(&action.params).unwrap();
-        let expected_hash = format!("sha256:{}", hex::encode(Sha256::digest(canonical_params.as_bytes())));
+        let expected_hash = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(canonical_params.as_bytes()))
+        );
         assert_eq!(receipt.action.params_hash, expected_hash);
     }
 
@@ -320,9 +325,15 @@ mod tests {
         let action = test_action();
         let response = json!({"content": [{"type": "text", "text": "ok"}]});
         let receipt = sign_compound(
-            &key, &action, &response, "agent", "owner",
-            "2026-04-02T10:00:00.000Z", "2026-04-02T10:00:00.150Z",
-        ).unwrap();
+            &key,
+            &action,
+            &response,
+            "agent",
+            "owner",
+            "2026-04-02T10:00:00.000Z",
+            "2026-04-02T10:00:00.150Z",
+        )
+        .unwrap();
 
         assert_eq!(receipt.v, 2);
         assert!(receipt.id.starts_with("rec_"));

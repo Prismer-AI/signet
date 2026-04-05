@@ -48,7 +48,7 @@ function main() {
   const action = {
     tool: toolName,
     params: toolInput,
-    params_hash: '',
+    params_hash: signet.contentHash(toolInput),
     target: 'claude-code://local',
     transport: 'stdio',
   };

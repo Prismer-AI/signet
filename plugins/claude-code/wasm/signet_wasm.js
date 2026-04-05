@@ -50,6 +50,32 @@ function wasm_generate_keypair() {
 exports.wasm_generate_keypair = wasm_generate_keypair;
 
 /**
+ * @param {string} seed_b64
+ * @returns {string}
+ */
+function wasm_pubkey_from_seed(seed_b64) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(seed_b64, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasm_pubkey_from_seed(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.wasm_pubkey_from_seed = wasm_pubkey_from_seed;
+
+/**
  * @param {string} secret_key_b64
  * @param {string} action_json
  * @param {string} signer_name

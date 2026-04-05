@@ -6,10 +6,32 @@ use wasm_bindgen::prelude::*;
 use signet_core::receipt::Action;
 use signet_core::{generate_keypair, sign, verify};
 
+/// Parse a secret key from base64: accepts both 32-byte seed and 64-byte keypair.
+fn parse_signing_key(key_b64: &str) -> Result<ed25519_dalek::SigningKey, JsError> {
+    let key_bytes = BASE64
+        .decode(key_b64)
+        .map_err(|e| JsError::new(&format!("invalid secret key base64: {e}")))?;
+    match key_bytes.len() {
+        32 => {
+            let seed: [u8; 32] = key_bytes.try_into().unwrap();
+            Ok(ed25519_dalek::SigningKey::from_bytes(&seed))
+        }
+        64 => {
+            let bytes: [u8; 64] = key_bytes.try_into().unwrap();
+            ed25519_dalek::SigningKey::from_keypair_bytes(&bytes)
+                .map_err(|e| JsError::new(&format!("invalid signing key: {e}")))
+        }
+        n => Err(JsError::new(&format!(
+            "secret key must be 32 or 64 bytes, got {n}"
+        ))),
+    }
+}
+
 #[wasm_bindgen]
 pub fn wasm_generate_keypair() -> Result<String, JsError> {
     let (signing_key, verifying_key) = generate_keypair();
-    let secret_b64 = BASE64.encode(signing_key.to_keypair_bytes());
+    // Output 32-byte seed (compatible with CLI .key files)
+    let secret_b64 = BASE64.encode(signing_key.to_bytes());
     let public_b64 = BASE64.encode(verifying_key.to_bytes());
 
     let result = serde_json::json!({
@@ -27,16 +49,7 @@ pub fn wasm_sign(
     signer_name: &str,
     signer_owner: &str,
 ) -> Result<String, JsError> {
-    let key_bytes = BASE64
-        .decode(secret_key_b64)
-        .map_err(|e| JsError::new(&format!("invalid secret key base64: {e}")))?;
-    let signing_key = ed25519_dalek::SigningKey::from_keypair_bytes(
-        key_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| JsError::new("secret key must be 64 bytes"))?,
-    )
-    .map_err(|e| JsError::new(&format!("invalid signing key: {e}")))?;
+    let signing_key = parse_signing_key(secret_key_b64)?;
 
     let action: Action = serde_json::from_str(action_json)
         .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
@@ -80,16 +93,7 @@ pub fn wasm_sign_compound(
     ts_request: &str,
     ts_response: &str,
 ) -> Result<String, JsError> {
-    let key_bytes = BASE64
-        .decode(secret_key_b64)
-        .map_err(|e| JsError::new(&format!("invalid secret key base64: {e}")))?;
-    let signing_key = ed25519_dalek::SigningKey::from_keypair_bytes(
-        key_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| JsError::new("secret key must be 64 bytes"))?,
-    )
-    .map_err(|e| JsError::new(&format!("invalid signing key: {e}")))?;
+    let signing_key = parse_signing_key(secret_key_b64)?;
 
     let action: signet_core::Action = serde_json::from_str(action_json)
         .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
@@ -138,16 +142,7 @@ pub fn wasm_sign_bilateral(
     server_name: &str,
     ts_response: &str,
 ) -> Result<String, JsError> {
-    let key_bytes = BASE64
-        .decode(server_key_b64)
-        .map_err(|e| JsError::new(&format!("invalid server key base64: {e}")))?;
-    let signing_key = ed25519_dalek::SigningKey::from_keypair_bytes(
-        key_bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| JsError::new("server key must be 64 bytes"))?,
-    )
-    .map_err(|e| JsError::new(&format!("invalid signing key: {e}")))?;
+    let signing_key = parse_signing_key(server_key_b64)?;
 
     let agent_receipt: signet_core::Receipt = serde_json::from_str(agent_receipt_json)
         .map_err(|e| JsError::new(&format!("invalid agent receipt JSON: {e}")))?;
@@ -188,6 +183,13 @@ pub fn wasm_verify_bilateral(receipt_json: &str, server_pubkey_b64: &str) -> Res
         Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
         Err(e) => Err(JsError::new(&e.to_string())),
     }
+}
+
+#[wasm_bindgen]
+pub fn wasm_pubkey_from_seed(seed_b64: &str) -> Result<String, JsError> {
+    let signing_key = parse_signing_key(seed_b64)?;
+    let verifying_key = signing_key.verifying_key();
+    Ok(BASE64.encode(verifying_key.to_bytes()))
 }
 
 #[wasm_bindgen]

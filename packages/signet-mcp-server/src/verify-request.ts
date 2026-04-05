@@ -2,7 +2,7 @@ import { verify, contentHash, type SignetReceipt } from '@signet-auth/core';
 
 export interface VerifyOptions {
   /** List of trusted "ed25519:<base64>" pubkeys.
-   *  If omitted and requireSignature=true, ALL signed requests are rejected. */
+   *  If empty, trust any signer with a valid signature (skip trust check). */
   trustedKeys?: string[];
   /** Reject unsigned requests. Default: true. */
   requireSignature?: boolean;

@@ -36,6 +36,7 @@ describe('bin/sign.cjs hook', () => {
     assert.equal(record.receipt.action.tool, 'Bash');
     assert.equal(record.receipt.signer.name, 'claude-agent');
     assert.ok(record.receipt.sig.startsWith('ed25519:'));
+    assert.ok(record.receipt.action.params_hash.startsWith('sha256:'), 'params_hash should be computed');
     fs.rmSync(tmpDir, { recursive: true });
   });
 

@@ -61,7 +61,7 @@ describe('signet.cjs', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
-  it('loadOrCreateKey detects encrypted key file', () => {
+  it('loadOrCreateKey detects key file without seed', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-test-'));
     const keysDir = path.join(tmpDir, 'keys');
     fs.mkdirSync(keysDir, { recursive: true });
@@ -70,7 +70,32 @@ describe('signet.cjs', () => {
       v: 1, algorithm: 'ed25519', name: 'claude-agent',
       kdf: 'argon2id', ciphertext: 'fake'
     }));
-    assert.throws(() => signet.loadOrCreateKey(keyPath), /encrypted/i);
+    assert.throws(() => signet.loadOrCreateKey(keyPath), /no seed/i);
     fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('loadOrCreateKey writes .pub file with created_at', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-test-'));
+    const keyPath = path.join(tmpDir, 'keys', 'claude-agent.key');
+    signet.loadOrCreateKey(keyPath);
+    const pubPath = keyPath.replace(/\.key$/, '.pub');
+    assert.ok(fs.existsSync(pubPath), '.pub file should exist');
+    const pubData = JSON.parse(fs.readFileSync(pubPath, 'utf8'));
+    assert.equal(pubData.v, 1);
+    assert.equal(pubData.algorithm, 'ed25519');
+    assert.ok(pubData.created_at, 'should have created_at');
+    // pubkey should be bare base64, not prefixed
+    assert.ok(!pubData.pubkey.startsWith('ed25519:'), 'pubkey should be bare base64');
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('generateKeypair returns 32-byte seed compatible with CLI', () => {
+    const kp = signet.generateKeypair();
+    // base64 of 32 bytes = 44 chars
+    assert.equal(Buffer.from(kp.secretKey, 'base64').length, 32,
+      'secretKey should be 32-byte seed');
+    // public key is 32 bytes
+    assert.equal(Buffer.from(kp.publicKey, 'base64').length, 32,
+      'publicKey should be 32 bytes');
   });
 });

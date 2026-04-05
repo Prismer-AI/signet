@@ -60,7 +60,8 @@ function loadOrCreateKey(keyPath) {
     v: 1,
     algorithm: 'ed25519',
     name: keyName,
-    pubkey: 'ed25519:' + kp.publicKey,
+    pubkey: kp.publicKey,
+    created_at: new Date().toISOString(),
   };
   const tmpPub = pubPath + '.tmp';
   fs.writeFileSync(tmpPub, JSON.stringify(pubFile, null, 2) + '\n', { mode: 0o644 });
@@ -70,17 +71,8 @@ function loadOrCreateKey(keyPath) {
 }
 
 function regenerateFromSeed(seed) {
-  const dummyAction = JSON.stringify({
-    tool: '_keygen',
-    params: {},
-    params_hash: '',
-    target: '',
-    transport: '',
-  });
-  const receipt = JSON.parse(wasm.wasm_sign(seed, dummyAction, '_', ''));
-  const pubkey = receipt.signer.pubkey;
-  const bare = pubkey.startsWith('ed25519:') ? pubkey.slice('ed25519:'.length) : pubkey;
-  return { publicKey: bare, secretKey: seed };
+  const publicKey = wasm.wasm_pubkey_from_seed(seed);
+  return { publicKey, secretKey: seed };
 }
 
 module.exports = { generateKeypair, sign, contentHash, loadOrCreateKey };

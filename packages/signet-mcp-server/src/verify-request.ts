@@ -1,4 +1,5 @@
 import { verify, contentHash, type SignetReceipt } from '@signet-auth/core';
+import type { NonceCache } from './nonce-cache.js';
 
 export interface VerifyOptions {
   /** List of trusted "ed25519:<base64>" pubkeys.
@@ -10,6 +11,8 @@ export interface VerifyOptions {
   maxAge?: number;
   /** If set, receipt.action.target must match this value. */
   expectedTarget?: string;
+  /** If set, rejects duplicate nonces (replay protection). */
+  nonceCache?: NonceCache;
 }
 
 export interface VerifyResult {
@@ -62,6 +65,13 @@ export function verifyRequest(
     }
   } catch {
     return { ok: false, error: 'invalid signature' };
+  }
+
+  // 4b. Nonce dedup (replay protection)
+  if (options.nonceCache && receipt.nonce) {
+    if (!options.nonceCache.check(receipt.nonce)) {
+      return { ok: false, error: 'duplicate nonce: possible replay' };
+    }
   }
 
   // 5. Check trusted keys (using prefixed format to match receipt.signer.pubkey)

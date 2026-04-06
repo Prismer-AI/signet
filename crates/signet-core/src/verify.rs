@@ -88,9 +88,34 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
     }
 }
 
+/// Options for bilateral receipt verification.
+pub struct BilateralVerifyOptions {
+    /// Maximum allowed seconds between agent signing and server response.
+    /// Default: 300 (5 minutes). Set to 0 to disable time window check.
+    pub max_time_window_secs: u64,
+}
+
+impl Default for BilateralVerifyOptions {
+    fn default() -> Self {
+        Self {
+            max_time_window_secs: 300,
+        }
+    }
+}
+
+/// Verify a bilateral receipt with default options (5-minute window).
 pub fn verify_bilateral(
     receipt: &BilateralReceipt,
     server_pubkey: &VerifyingKey,
+) -> Result<(), SignetError> {
+    verify_bilateral_with_options(receipt, server_pubkey, &BilateralVerifyOptions::default())
+}
+
+/// Verify a bilateral receipt with custom options.
+pub fn verify_bilateral_with_options(
+    receipt: &BilateralReceipt,
+    server_pubkey: &VerifyingKey,
+    options: &BilateralVerifyOptions,
 ) -> Result<(), SignetError> {
     // 0. Cross-check: caller's key must match receipt.server.pubkey
     let receipt_server_b64 = receipt
@@ -148,7 +173,35 @@ pub fn verify_bilateral(
     let agent_vk = VerifyingKey::from_bytes(&agent_pubkey_arr)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
 
-    verify(&receipt.agent_receipt, &agent_vk)
+    verify(&receipt.agent_receipt, &agent_vk)?;
+
+    // 3. Verify timestamp ordering: agent signed before server responded
+    let agent_ts = chrono::DateTime::parse_from_rfc3339(&receipt.agent_receipt.ts)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent timestamp: {e}")))?;
+    let server_ts = chrono::DateTime::parse_from_rfc3339(&receipt.ts_response)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid server timestamp: {e}")))?;
+
+    if agent_ts > server_ts {
+        return Err(SignetError::InvalidReceipt(
+            "agent receipt timestamp is after server response timestamp".to_string(),
+        ));
+    }
+
+    // 4. Check time window between agent signing and server response
+    if options.max_time_window_secs > 0 {
+        let gap = server_ts
+            .signed_duration_since(agent_ts)
+            .num_seconds()
+            .unsigned_abs();
+        if gap > options.max_time_window_secs {
+            return Err(SignetError::InvalidReceipt(format!(
+                "time gap between agent and server ({gap}s) exceeds max window ({}s)",
+                options.max_time_window_secs
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -347,12 +400,14 @@ mod tests {
         let action = test_action();
         let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
         let response = json!({"content": [{"type": "text", "text": "issue #42"}]});
+        let ts_response = chrono::Utc::now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let bilateral = sign::sign_bilateral(
             &server_key,
             &agent_receipt,
             &response,
             "github-mcp",
-            "2026-04-03T10:00:00.150Z",
+            &ts_response,
         )
         .unwrap();
         assert!(verify_bilateral(&bilateral, &server_vk).is_ok());
@@ -371,7 +426,7 @@ mod tests {
             &agent_receipt,
             &response,
             "github-mcp",
-            "2026-04-03T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         // With the cross-check, passing a wrong key now returns InvalidReceipt
@@ -392,7 +447,7 @@ mod tests {
             &agent_receipt,
             &response,
             "github-mcp",
-            "2026-04-03T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         bilateral.response.content_hash = "sha256:tampered".to_string();
@@ -414,7 +469,7 @@ mod tests {
             &agent_receipt,
             &response,
             "github-mcp",
-            "2026-04-03T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         bilateral.agent_receipt.signer.name = "impostor".to_string();
@@ -436,7 +491,7 @@ mod tests {
             &agent_receipt,
             &response,
             "github-mcp",
-            "2026-04-03T10:00:00.150Z",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         )
         .unwrap();
         let json = serde_json::to_string(&bilateral).unwrap();
@@ -471,5 +526,95 @@ mod tests {
         .unwrap();
         let json = serde_json::to_string(&receipt).unwrap();
         assert!(verify_any(&json, &vk).is_ok());
+    }
+
+    // --- Bilateral timestamp ordering tests ---
+
+    fn make_bilateral_with_ts(
+        ts_response: &str,
+    ) -> (BilateralReceipt, VerifyingKey) {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt =
+            sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "test-server",
+            ts_response,
+        )
+        .unwrap();
+        (bilateral, server_vk)
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_ordering_valid() {
+        // ts_response must be after agent signs (Utc::now()), so add 1 second
+        let ts = (chrono::Utc::now() + chrono::Duration::seconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&ts);
+        assert!(verify_bilateral(&bilateral, &server_vk).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_ordering_reversed() {
+        // Agent signs now, but server ts_response is 1 hour in the past
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&past);
+        let result = verify_bilateral(&bilateral, &server_vk);
+        assert!(matches!(
+            result,
+            Err(SignetError::InvalidReceipt(ref msg)) if msg.contains("after server response")
+        ));
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_gap_exceeded() {
+        // Server responds 10 minutes later, but max window is 5 minutes
+        let future = (chrono::Utc::now() + chrono::Duration::minutes(10))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&future);
+        let result = verify_bilateral(&bilateral, &server_vk);
+        assert!(matches!(
+            result,
+            Err(SignetError::InvalidReceipt(ref msg)) if msg.contains("exceeds max window")
+        ));
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_gap_within_window() {
+        // Server responds 2 minutes later — within default 5 min window
+        let future = (chrono::Utc::now() + chrono::Duration::minutes(2))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&future);
+        assert!(verify_bilateral(&bilateral, &server_vk).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_custom_window() {
+        // Server responds 10 minutes later, window set to 20 minutes — ok
+        let future = (chrono::Utc::now() + chrono::Duration::minutes(10))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&future);
+        let opts = BilateralVerifyOptions {
+            max_time_window_secs: 1200,
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_timestamp_window_disabled() {
+        // Server responds 1 hour later, but window is disabled (0)
+        let future = (chrono::Utc::now() + chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let (bilateral, server_vk) = make_bilateral_with_ts(&future);
+        let opts = BilateralVerifyOptions {
+            max_time_window_secs: 0,
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
     }
 }

@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-06
+
+### Added
+
+#### Bilateral Receipt (v3)
+- **signet-core**: `BilateralReceipt` type — embeds v1 agent receipt + server response signature
+- **signet-core**: `sign_bilateral()` — server co-signs agent receipt with response binding
+- **signet-core**: `verify_bilateral()` — validates server sig + embedded agent sig
+- **signet-core**: `verify_any()` now rejects v3 receipts (must use `verify_bilateral()`)
+- **signet-core**: Audit layer v3 support — field extraction, signature verification, mixed v1/v2/v3 logs
+- **@signet-auth/core**: `signBilateral()`, `verifyBilateral()`, `contentHash()` TypeScript functions
+- **@signet-auth/mcp-server**: `signResponse()` — handler-level server co-signing
+- **@signet-auth/mcp**: SigningTransport extracts v3 from response, `onBilateral` callback, `trustedServerKeys` option
+- **WASM**: `wasm_sign_bilateral()`, `wasm_verify_bilateral()`, `wasm_content_hash()`
+
+#### Claude Code Plugin
+- **plugins/claude-code**: PostToolUse hook signs every tool call via embedded WASM (zero npm dependencies)
+- **plugins/claude-code**: Hash-chained JSONL audit log at `~/.signet/audit/`
+- **plugins/claude-code**: Auto key generation on first run with atomic file operations
+- **signet-cli**: `signet claude install` / `signet claude uninstall` commands
+
+#### Ecosystem Integrations
+- **@signet-auth/mcp-tools**: Standalone MCP server exposing signing/verification as tools
+- **signet-auth (Python)**: AutoGen 0.4 integration with `SignedTool` wrapper
+- **signet-auth (Python)**: `verify_request()` for server-side MCP verification
+- Docker support with verifier server example
+
+#### Action Fields
+- **signet-core**: `Action` struct gains optional `session`, `call_id`, `response_hash` fields (backward-compatible, omitted when `None`)
+- **plugins/claude-code**: Captures `session_id`, `tool_use_id`, `tool_response` from stdin; stores response in audit meta
+
+### Changed
+- **WASM**: `wasm_generate_keypair()` now outputs 32-byte seed (was 64-byte keypair) — compatible with CLI `.key` files
+- **WASM**: Key parsing accepts both 32-byte seed and 64-byte keypair via `parse_signing_key()`
+- **WASM**: New `wasm_pubkey_from_seed()` replaces dummy-sign hack for public key derivation
+- **plugins/claude-code**: `.pub` file uses bare base64 pubkey (no `ed25519:` prefix) + `created_at` field
+- **plugins/claude-code**: `params_hash` now computed via `contentHash()` (was empty string)
+- **@signet-auth/mcp-server**: `trustedKeys` empty array now means "trust any valid signer" (was: reject all)
+
+### Fixed
+- Anti-staple params verification in `verifyRequest()` — correctly compares params hash
+- XNonce guard in sign functions — prevents nonce reuse
+- `trusted_keys` semantics aligned across TS and Python
+- `ed25519:` prefix normalization in `verify()` and `verifyAny()`
+- MCP message forwarding after bilateral check — always forwards regardless of verification result
+- Plugin: genesis hash mismatch, key permission check, corrupt line recovery
+- Plugin: atomic key write prevents partial file on crash
+
+### Breaking Changes
+- **signet-core**: `verify_any()` now returns error on v3 receipts — use `verify_bilateral()` instead
+- **signet-auth (Python)**: `generate_keypair()` reverted to 32-byte seed (was 64-byte in v0.2). Both formats still accepted by `sign()`.
+
 ## [0.3.0] - 2026-04-03
 
 ### Added
@@ -117,4 +169,8 @@ audit::append(&dir, &receipt_json)?;  // was: audit::append(&dir, &receipt)
 - WASM binding (wasm-bindgen) for Node.js
 - End-to-end MCP agent example (agent + echo server)
 
+[0.4.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.4.0
+[0.3.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.3.0
+[0.2.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.2.0
+[0.1.1]: https://github.com/Prismer-AI/signet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.1.0

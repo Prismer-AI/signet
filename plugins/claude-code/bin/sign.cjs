@@ -72,17 +72,20 @@ function main() {
   // Append to audit log — store tool_response as unsigned metadata for audit queries
   // Cap at 64KB to prevent large tool responses from bloating the audit log
   const MAX_META_SIZE = 64 * 1024;
-  let meta = null;
+  const meta = {};
   if (toolResponse !== undefined) {
     const responseStr = JSON.stringify(toolResponse);
     if (responseStr.length <= MAX_META_SIZE) {
-      meta = { tool_response: toolResponse };
+      meta.tool_response = toolResponse;
     } else {
-      meta = { tool_response_truncated: true, tool_response_size: responseStr.length };
+      meta.tool_response_truncated = true;
+      meta.tool_response_size = responseStr.length;
     }
   }
+  if (input.cwd) meta.cwd = input.cwd;
+  if (input.transcript_path) meta.transcript_path = input.transcript_path;
   try {
-    audit.append(signetDir, receipt, meta);
+    audit.append(signetDir, receipt, Object.keys(meta).length > 0 ? meta : null);
   } catch (err) {
     process.stderr.write('signet: audit append failed: ' + err.message + '\n');
   }

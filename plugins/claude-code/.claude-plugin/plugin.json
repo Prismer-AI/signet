@@ -1,7 +1,7 @@
 {
   "name": "signet",
   "description": "Cryptographic signing for every AI agent tool call — Ed25519 receipts + hash-chained audit log",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": { "name": "Prismer AI" },
   "homepage": "https://github.com/Prismer-AI/signet",
   "repository": "https://github.com/Prismer-AI/signet",

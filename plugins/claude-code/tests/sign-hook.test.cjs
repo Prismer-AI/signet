@@ -83,6 +83,27 @@ describe('bin/sign.cjs hook', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
+  it('stores cwd and transcript_path in audit meta', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'pwd' },
+        cwd: '/home/user/project',
+        transcript_path: '/home/user/.claude/sess.jsonl',
+      },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    assert.equal(record.meta.cwd, '/home/user/project');
+    assert.equal(record.meta.transcript_path, '/home/user/.claude/sess.jsonl');
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
   it('response_hash matches expected hash of tool_response', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
     const toolResponse = { stdout: 'hello\n' };

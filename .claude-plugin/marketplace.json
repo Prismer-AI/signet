@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "signet",
+  "description": "Cryptographic signing and audit tools for AI agent tool calls",
+  "owner": {
+    "name": "Prismer AI"
+  },
+  "plugins": [
+    {
+      "name": "signet",
+      "description": "Ed25519 cryptographic signing for every Claude Code tool call. Hash-chained audit log, automatic key management, tamper-evident verification.",
+      "version": "0.4.1",
+      "category": "security",
+      "source": "./plugins/claude-code",
+      "homepage": "https://github.com/Prismer-AI/signet/tree/main/plugins/claude-code",
+      "tags": ["security", "signing", "audit", "cryptography", "ed25519", "mcp"]
+    }
+  ]
+}

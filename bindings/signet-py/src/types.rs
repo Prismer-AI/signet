@@ -11,12 +11,15 @@ pub struct PyAction {
 #[pymethods]
 impl PyAction {
     #[new]
-    #[pyo3(signature = (tool, params=None, target=String::new(), transport=String::from("stdio")))]
+    #[pyo3(signature = (tool, params=None, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None))]
     fn new(
         tool: String,
         params: Option<Bound<'_, PyAny>>,
         target: String,
         transport: String,
+        session: Option<String>,
+        call_id: Option<String>,
+        response_hash: Option<String>,
     ) -> PyResult<Self> {
         let json_params = match params {
             Some(p) => pythonize::depythonize(&p)?,
@@ -29,21 +32,25 @@ impl PyAction {
                 params_hash: String::new(),
                 target,
                 transport,
-                session: None,
-                call_id: None,
-                response_hash: None,
+                session,
+                call_id,
+                response_hash,
             },
         })
     }
 
     #[classmethod]
-    #[pyo3(signature = (tool, params_hash, *, target=String::new(), transport=String::from("stdio")))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (tool, params_hash, *, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None))]
     fn hash_only(
         _cls: &Bound<'_, pyo3::types::PyType>,
         tool: String,
         params_hash: String,
         target: String,
         transport: String,
+        session: Option<String>,
+        call_id: Option<String>,
+        response_hash: Option<String>,
     ) -> Self {
         PyAction {
             inner: signet_core::receipt::Action {
@@ -52,9 +59,9 @@ impl PyAction {
                 params_hash,
                 target,
                 transport,
-                session: None,
-                call_id: None,
-                response_hash: None,
+                session,
+                call_id,
+                response_hash,
             },
         }
     }
@@ -87,6 +94,21 @@ impl PyAction {
     #[getter]
     fn transport(&self) -> &str {
         &self.inner.transport
+    }
+
+    #[getter]
+    fn session(&self) -> Option<&str> {
+        self.inner.session.as_deref()
+    }
+
+    #[getter]
+    fn call_id(&self) -> Option<&str> {
+        self.inner.call_id.as_deref()
+    }
+
+    #[getter]
+    fn response_hash(&self) -> Option<&str> {
+        self.inner.response_hash.as_deref()
     }
 }
 

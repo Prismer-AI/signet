@@ -15,6 +15,9 @@ function append(signetDir, receipt, meta) {
   const filepath = path.join(auditDir, date + '.jsonl');
 
   const prevHash = lastRecordHash(filepath, auditDir);
+  // meta is intentionally excluded from record_hash to stay consistent
+  // with Rust compute_record_hash() in crates/signet-core/src/audit.rs.
+  // The signed response_hash in the receipt provides integrity for the response.
   const recordHash = signet.contentHash({ prev_hash: prevHash, receipt });
 
   const record = {

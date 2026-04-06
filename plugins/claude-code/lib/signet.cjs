@@ -75,4 +75,9 @@ function regenerateFromSeed(seed) {
   return { publicKey, secretKey: seed };
 }
 
-module.exports = { generateKeypair, sign, contentHash, loadOrCreateKey };
+function verify(receiptJson, publicKey) {
+  const bare = publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
+  return wasm.wasm_verify(JSON.stringify(receiptJson), bare);
+}
+
+module.exports = { generateKeypair, sign, verify, contentHash, loadOrCreateKey };

@@ -33,6 +33,9 @@ class Action:
         params: Any | None = None,
         target: str = "",
         transport: str = "stdio",
+        session: str | None = None,
+        call_id: str | None = None,
+        response_hash: str | None = None,
     ) -> None: ...
     @classmethod
     def hash_only(
@@ -42,6 +45,9 @@ class Action:
         *,
         target: str = "",
         transport: str = "stdio",
+        session: str | None = None,
+        call_id: str | None = None,
+        response_hash: str | None = None,
     ) -> Action: ...
     @property
     def tool(self) -> str: ...
@@ -53,6 +59,12 @@ class Action:
     def target(self) -> str: ...
     @property
     def transport(self) -> str: ...
+    @property
+    def session(self) -> str | None: ...
+    @property
+    def call_id(self) -> str | None: ...
+    @property
+    def response_hash(self) -> str | None: ...
 
 class Signer:
     @property

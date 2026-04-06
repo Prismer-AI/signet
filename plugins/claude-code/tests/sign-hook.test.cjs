@@ -83,6 +83,53 @@ describe('bin/sign.cjs hook', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
+  it('response_hash matches expected hash of tool_response', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    const toolResponse = { stdout: 'hello\n' };
+    runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo hello' },
+        tool_response: toolResponse,
+      },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const signet = require('../lib/signet.cjs');
+    const expectedHash = signet.contentHash(toolResponse);
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    assert.equal(record.receipt.action.response_hash, expectedHash);
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('truncates large tool_response in meta', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    const largeResponse = { data: 'x'.repeat(100 * 1024) }; // > 64KB
+    runHook(
+      {
+        tool_name: 'Read',
+        tool_input: { file_path: '/tmp/big' },
+        tool_response: largeResponse,
+      },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    assert.equal(record.meta.tool_response_truncated, true);
+    assert.equal(typeof record.meta.tool_response_size, 'number');
+    assert.equal(record.meta.tool_response, undefined);
+    // response_hash is still computed from the full response
+    assert.ok(record.receipt.action.response_hash.startsWith('sha256:'));
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
   it('omits session/call_id/response_hash when not provided', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
     runHook(

@@ -30,8 +30,8 @@ function main() {
 
   const toolName = input.tool_name || 'unknown';
   const toolInput = input.tool_input || {};
-  const sessionId = input.session_id || null;
-  const toolUseId = input.tool_use_id || null;
+  const sessionId = input.session_id ?? null;
+  const toolUseId = input.tool_use_id ?? null;
   const toolResponse = input.tool_response;
 
   // Load WASM wrapper (lazy)
@@ -55,8 +55,8 @@ function main() {
     target: 'claude-code://local',
     transport: 'stdio',
   };
-  if (sessionId) action.session = sessionId;
-  if (toolUseId) action.call_id = toolUseId;
+  if (sessionId !== null) action.session = sessionId;
+  if (toolUseId !== null) action.call_id = toolUseId;
   if (toolResponse !== undefined) {
     action.response_hash = signet.contentHash(toolResponse);
   }
@@ -70,7 +70,17 @@ function main() {
   }
 
   // Append to audit log — store tool_response as unsigned metadata for audit queries
-  const meta = toolResponse !== undefined ? { tool_response: toolResponse } : null;
+  // Cap at 64KB to prevent large tool responses from bloating the audit log
+  const MAX_META_SIZE = 64 * 1024;
+  let meta = null;
+  if (toolResponse !== undefined) {
+    const responseStr = JSON.stringify(toolResponse);
+    if (responseStr.length <= MAX_META_SIZE) {
+      meta = { tool_response: toolResponse };
+    } else {
+      meta = { tool_response_truncated: true, tool_response_size: responseStr.length };
+    }
+  }
   try {
     audit.append(signetDir, receipt, meta);
   } catch (err) {

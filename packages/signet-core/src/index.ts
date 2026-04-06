@@ -12,6 +12,9 @@ export interface SignetAction {
   params_hash: string;
   target: string;
   transport: string;
+  session?: string;
+  call_id?: string;
+  response_hash?: string;
 }
 
 export interface SignetSigner {

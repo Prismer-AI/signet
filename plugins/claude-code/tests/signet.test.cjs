@@ -89,6 +89,63 @@ describe('signet.cjs', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
+  it('verify returns true for valid receipt', () => {
+    const kp = signet.generateKeypair();
+    const receipt = signet.sign(kp.secretKey, {
+      tool: 'Bash',
+      params: { command: 'ls' },
+      params_hash: '',
+      target: 'claude-code://local',
+      transport: 'stdio',
+      session: 'sess_123',
+      call_id: 'toolu_456',
+      response_hash: 'sha256:abc',
+    }, 'test-agent');
+    assert.equal(signet.verify(receipt, kp.publicKey), true);
+  });
+
+  it('verify detects tampered session field', () => {
+    const kp = signet.generateKeypair();
+    const receipt = signet.sign(kp.secretKey, {
+      tool: 'Bash',
+      params: { command: 'ls' },
+      params_hash: '',
+      target: 'claude-code://local',
+      transport: 'stdio',
+      session: 'sess_original',
+    }, 'test-agent');
+    receipt.action.session = 'sess_tampered';
+    assert.equal(signet.verify(receipt, kp.publicKey), false);
+  });
+
+  it('verify detects tampered call_id field', () => {
+    const kp = signet.generateKeypair();
+    const receipt = signet.sign(kp.secretKey, {
+      tool: 'Bash',
+      params: { command: 'ls' },
+      params_hash: '',
+      target: 'claude-code://local',
+      transport: 'stdio',
+      call_id: 'toolu_original',
+    }, 'test-agent');
+    receipt.action.call_id = 'toolu_tampered';
+    assert.equal(signet.verify(receipt, kp.publicKey), false);
+  });
+
+  it('verify detects tampered response_hash field', () => {
+    const kp = signet.generateKeypair();
+    const receipt = signet.sign(kp.secretKey, {
+      tool: 'Bash',
+      params: { command: 'ls' },
+      params_hash: '',
+      target: 'claude-code://local',
+      transport: 'stdio',
+      response_hash: 'sha256:original',
+    }, 'test-agent');
+    receipt.action.response_hash = 'sha256:tampered';
+    assert.equal(signet.verify(receipt, kp.publicKey), false);
+  });
+
   it('generateKeypair returns 32-byte seed compatible with CLI', () => {
     const kp = signet.generateKeypair();
     // base64 of 32 bytes = 44 chars

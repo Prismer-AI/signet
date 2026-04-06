@@ -1,0 +1,1 @@
+# Intentionally empty — override .gitignore fallback so wasm/ is included in npm pack

@@ -237,6 +237,27 @@ receipt = sign(kp.secret_key, action, "my-agent", "willamhou")
 assert verify(receipt, kp.public_key)
 ```
 
+#### Bilateral Receipt (Server Co-signing)
+
+```python
+from signet_auth import generate_keypair, sign, sign_bilateral, verify_bilateral, Action
+
+# Agent signs the tool call
+agent_kp = generate_keypair()
+action = Action("github_create_issue", params={"title": "fix bug"})
+agent_receipt = sign(agent_kp.secret_key, action, "my-agent")
+
+# Server co-signs with the response
+server_kp = generate_keypair()
+bilateral = sign_bilateral(
+    server_kp.secret_key, agent_receipt,
+    {"content": [{"type": "text", "text": "issue #42 created"}]},
+    "github-server",
+)
+assert verify_bilateral(bilateral, server_kp.public_key)
+assert bilateral.v == 3  # v3 = bilateral receipt
+```
+
 ## How It Works
 
 ```

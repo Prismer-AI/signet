@@ -3,7 +3,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use pyo3::prelude::*;
 
 use crate::errors::{to_py_err, InvalidKeyError};
-use crate::types::{PyCompoundReceipt, PyKeyPair, PyReceipt};
+use crate::types::{PyBilateralReceipt, PyCompoundReceipt, PyKeyPair, PyReceipt};
 
 #[pyfunction]
 fn generate_keypair(py: Python<'_>) -> PyKeyPair {
@@ -25,26 +25,7 @@ fn sign(
     signer_name: String,
     signer_owner: Option<String>,
 ) -> PyResult<PyReceipt> {
-    let keypair_bytes = B64
-        .decode(secret_key)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let signing_key = match keypair_bytes.len() {
-        32 => {
-            let seed: [u8; 32] = keypair_bytes.try_into().unwrap();
-            SigningKey::from_bytes(&seed)
-        }
-        64 => {
-            let arr: [u8; 64] = keypair_bytes.try_into().unwrap();
-            SigningKey::from_keypair_bytes(&arr)
-                .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
-        }
-        _ => {
-            return Err(InvalidKeyError::new_err(
-                "secret key must be 32 or 64 bytes",
-            ))
-        }
-    };
-
+    let signing_key = parse_signing_key(secret_key)?;
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();
 
@@ -57,15 +38,7 @@ fn sign(
 
 #[pyfunction]
 fn verify(py: Python<'_>, receipt: crate::types::PyReceipt, public_key: &str) -> PyResult<bool> {
-    let pubkey_bytes = B64
-        .decode(public_key)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 public key: {e}")))?;
-    let pubkey_arr: [u8; 32] = pubkey_bytes
-        .try_into()
-        .map_err(|_| InvalidKeyError::new_err("public key must be 32 bytes"))?;
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
-        .map_err(|e| InvalidKeyError::new_err(e.to_string()))?;
-
+    let verifying_key = parse_verifying_key(public_key)?;
     let inner_receipt = receipt.inner.clone();
 
     let result = py.allow_threads(|| signet_core::verify(&inner_receipt, &verifying_key));
@@ -90,26 +63,7 @@ fn sign_compound(
     ts_request: Option<String>,
     ts_response: Option<String>,
 ) -> PyResult<PyCompoundReceipt> {
-    let keypair_bytes = B64
-        .decode(secret_key)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
-    let signing_key = match keypair_bytes.len() {
-        32 => {
-            let seed: [u8; 32] = keypair_bytes.try_into().unwrap();
-            SigningKey::from_bytes(&seed)
-        }
-        64 => {
-            let arr: [u8; 64] = keypair_bytes.try_into().unwrap();
-            SigningKey::from_keypair_bytes(&arr)
-                .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))?
-        }
-        _ => {
-            return Err(InvalidKeyError::new_err(
-                "secret key must be 32 or 64 bytes",
-            ))
-        }
-    };
-
+    let signing_key = parse_signing_key(secret_key)?;
     let inner_action = action.inner.clone();
     let owner = signer_owner.unwrap_or_default();
 
@@ -139,15 +93,7 @@ fn sign_compound(
 
 #[pyfunction]
 fn verify_any(py: Python<'_>, receipt_json: &str, public_key: &str) -> PyResult<bool> {
-    let pubkey_bytes = B64
-        .decode(public_key)
-        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 public key: {e}")))?;
-    let pubkey_arr: [u8; 32] = pubkey_bytes
-        .try_into()
-        .map_err(|_| InvalidKeyError::new_err("public key must be 32 bytes"))?;
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
-        .map_err(|e| InvalidKeyError::new_err(e.to_string()))?;
-
+    let verifying_key = parse_verifying_key(public_key)?;
     let json_str = receipt_json.to_string();
     let result = py.allow_threads(|| signet_core::verify_any(&json_str, &verifying_key));
 
@@ -158,11 +104,97 @@ fn verify_any(py: Python<'_>, receipt_json: &str, public_key: &str) -> PyResult<
     }
 }
 
+fn parse_signing_key(secret_key: &str) -> PyResult<SigningKey> {
+    let keypair_bytes = B64
+        .decode(secret_key)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
+    match keypair_bytes.len() {
+        32 => {
+            let seed: [u8; 32] = keypair_bytes.try_into().unwrap();
+            Ok(SigningKey::from_bytes(&seed))
+        }
+        64 => {
+            let arr: [u8; 64] = keypair_bytes.try_into().unwrap();
+            SigningKey::from_keypair_bytes(&arr)
+                .map_err(|e| InvalidKeyError::new_err(format!("invalid signing key: {e}")))
+        }
+        _ => Err(InvalidKeyError::new_err(
+            "secret key must be 32 or 64 bytes",
+        )),
+    }
+}
+
+fn parse_verifying_key(public_key: &str) -> PyResult<VerifyingKey> {
+    let pubkey_bytes = B64
+        .decode(public_key)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 public key: {e}")))?;
+    let pubkey_arr: [u8; 32] = pubkey_bytes
+        .try_into()
+        .map_err(|_| InvalidKeyError::new_err("public key must be 32 bytes"))?;
+    VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| InvalidKeyError::new_err(e.to_string()))
+}
+
+#[pyfunction]
+#[pyo3(signature = (server_key, agent_receipt, response_content, server_name, ts_response=None))]
+fn sign_bilateral(
+    py: Python<'_>,
+    server_key: &str,
+    agent_receipt: crate::types::PyReceipt,
+    response_content: Bound<'_, PyAny>,
+    server_name: String,
+    ts_response: Option<String>,
+) -> PyResult<PyBilateralReceipt> {
+    let signing_key = parse_signing_key(server_key)?;
+    let inner_receipt = agent_receipt.inner.clone();
+    let response_json: serde_json::Value = pythonize::depythonize(&response_content)?;
+    let ts = ts_response
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+
+    let bilateral = py
+        .allow_threads(|| {
+            signet_core::sign_bilateral(
+                &signing_key,
+                &inner_receipt,
+                &response_json,
+                &server_name,
+                &ts,
+            )
+        })
+        .map_err(to_py_err)?;
+
+    Ok(PyBilateralReceipt { inner: bilateral })
+}
+
+#[pyfunction]
+fn verify_bilateral(
+    py: Python<'_>,
+    receipt: crate::types::PyBilateralReceipt,
+    server_public_key: &str,
+) -> PyResult<bool> {
+    let verifying_key = parse_verifying_key(server_public_key)?;
+    let inner = receipt.inner.clone();
+
+    let result = py.allow_threads(|| signet_core::verify_bilateral(&inner, &verifying_key));
+
+    match result {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(signet_core::SignetError::InvalidReceipt(ref msg))
+            if msg.contains("does not match") =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign, m)?)?;
     m.add_function(wrap_pyfunction!(verify, m)?)?;
     m.add_function(wrap_pyfunction!(sign_compound, m)?)?;
     m.add_function(wrap_pyfunction!(verify_any, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_bilateral, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_bilateral, m)?)?;
     Ok(())
 }

@@ -432,6 +432,104 @@ impl PyCompoundReceipt {
     }
 }
 
+// ─── ServerInfo ──────────────────────────────────────────────────────────────
+
+#[pyclass(name = "ServerInfo")]
+#[derive(Clone)]
+pub struct PyServerInfo {
+    pub inner: signet_core::receipt::ServerInfo,
+}
+
+#[pymethods]
+impl PyServerInfo {
+    #[getter]
+    fn pubkey(&self) -> &str {
+        &self.inner.pubkey
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.inner.name
+    }
+}
+
+// ─── BilateralReceipt ────────────────────────────────────────────────────────
+
+#[pyclass(name = "BilateralReceipt")]
+#[derive(Clone)]
+pub struct PyBilateralReceipt {
+    pub inner: signet_core::BilateralReceipt,
+}
+
+#[pymethods]
+impl PyBilateralReceipt {
+    #[getter]
+    fn v(&self) -> u8 {
+        self.inner.v
+    }
+
+    #[getter]
+    fn id(&self) -> &str {
+        &self.inner.id
+    }
+
+    #[getter]
+    fn agent_receipt(&self) -> PyReceipt {
+        PyReceipt {
+            inner: self.inner.agent_receipt.clone(),
+        }
+    }
+
+    #[getter]
+    fn response(&self) -> PyResponse {
+        PyResponse {
+            inner: self.inner.response.clone(),
+        }
+    }
+
+    #[getter]
+    fn server(&self) -> PyServerInfo {
+        PyServerInfo {
+            inner: self.inner.server.clone(),
+        }
+    }
+
+    #[getter]
+    fn ts_response(&self) -> &str {
+        &self.inner.ts_response
+    }
+
+    #[getter]
+    fn nonce(&self) -> &str {
+        &self.inner.nonce
+    }
+
+    #[getter]
+    fn sig(&self) -> &str {
+        &self.inner.sig
+    }
+
+    #[getter]
+    fn extensions<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        match &self.inner.extensions {
+            Some(v) => Ok(Some(pythonize::pythonize(py, v)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn to_json(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner)
+            .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))
+    }
+
+    #[staticmethod]
+    fn from_json(json_str: &str) -> PyResult<Self> {
+        let inner: signet_core::BilateralReceipt = serde_json::from_str(json_str)
+            .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
+        Ok(PyBilateralReceipt { inner })
+    }
+}
+
 // ─── register ─────────────────────────────────────────────────────────────────
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -447,5 +545,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChainStatus>()?;
     m.add_class::<PyVerifyFailure>()?;
     m.add_class::<PyVerifyResult>()?;
+    m.add_class::<PyServerInfo>()?;
+    m.add_class::<PyBilateralReceipt>()?;
     Ok(())
 }

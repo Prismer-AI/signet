@@ -37,6 +37,9 @@ pub(crate) mod test_helpers {
             params_hash: String::new(),
             target: "mcp://github.local".to_string(),
             transport: "stdio".to_string(),
+            session: None,
+            call_id: None,
+            response_hash: None,
         }
     }
 }

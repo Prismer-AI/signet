@@ -6,7 +6,7 @@ const signet = require('./signet.cjs');
 // Must match Rust CLI: crates/signet-core/src/audit.rs GENESIS_HASH
 const GENESIS_HASH = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
-function append(signetDir, receipt) {
+function append(signetDir, receipt, meta) {
   const auditDir = path.join(signetDir, 'audit');
   fs.mkdirSync(auditDir, { recursive: true });
 
@@ -22,6 +22,7 @@ function append(signetDir, receipt) {
     prev_hash: prevHash,
     record_hash: recordHash,
   };
+  if (meta) record.meta = meta;
 
   fs.appendFileSync(filepath, JSON.stringify(record) + '\n');
 }

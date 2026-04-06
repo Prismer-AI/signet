@@ -30,6 +30,9 @@ function main() {
 
   const toolName = input.tool_name || 'unknown';
   const toolInput = input.tool_input || {};
+  const sessionId = input.session_id || null;
+  const toolUseId = input.tool_use_id || null;
+  const toolResponse = input.tool_response;
 
   // Load WASM wrapper (lazy)
   const signet = require('../lib/signet.cjs');
@@ -44,7 +47,7 @@ function main() {
     return;
   }
 
-  // Sign the action
+  // Sign the action — session_id, call_id, and response_hash are covered by signature
   const action = {
     tool: toolName,
     params: toolInput,
@@ -52,6 +55,11 @@ function main() {
     target: 'claude-code://local',
     transport: 'stdio',
   };
+  if (sessionId) action.session = sessionId;
+  if (toolUseId) action.call_id = toolUseId;
+  if (toolResponse !== undefined) {
+    action.response_hash = signet.contentHash(toolResponse);
+  }
 
   let receipt;
   try {
@@ -61,9 +69,10 @@ function main() {
     return;
   }
 
-  // Append to audit log
+  // Append to audit log — store tool_response as unsigned metadata for audit queries
+  const meta = toolResponse !== undefined ? { tool_response: toolResponse } : null;
   try {
-    audit.append(signetDir, receipt);
+    audit.append(signetDir, receipt, meta);
   } catch (err) {
     process.stderr.write('signet: audit append failed: ' + err.message + '\n');
   }

@@ -7,6 +7,12 @@ pub struct Action {
     pub params_hash: String,
     pub target: String,
     pub transport: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

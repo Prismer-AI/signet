@@ -41,6 +41,9 @@ pub fn sign(
         params_hash,
         target: action.target.clone(),
         transport: action.transport.clone(),
+        session: action.session.clone(),
+        call_id: action.call_id.clone(),
+        response_hash: action.response_hash.clone(),
     };
 
     // 3. Build signer
@@ -107,6 +110,9 @@ pub fn sign_compound(
         params_hash,
         target: action.target.clone(),
         transport: action.transport.clone(),
+        session: action.session.clone(),
+        call_id: action.call_id.clone(),
+        response_hash: action.response_hash.clone(),
     };
 
     // 2. Hash response content
@@ -266,6 +272,9 @@ mod tests {
             params_hash: "sha256:abc123".to_string(),
             target: "mcp://test".to_string(),
             transport: "stdio".to_string(),
+            session: None,
+            call_id: None,
+            response_hash: None,
         };
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
         assert_eq!(receipt.action.params_hash, "sha256:abc123");

@@ -77,6 +77,9 @@ pub fn sign(args: SignArgs) -> Result<()> {
             params_hash: format!("sha256:{}", hex::encode(hash)),
             target: args.target,
             transport: "stdio".to_string(),
+            session: None,
+            call_id: None,
+            response_hash: None,
         }
     } else {
         Action {
@@ -85,6 +88,9 @@ pub fn sign(args: SignArgs) -> Result<()> {
             params_hash: String::new(),
             target: args.target,
             transport: "stdio".to_string(),
+            session: None,
+            call_id: None,
+            response_hash: None,
         }
     };
 

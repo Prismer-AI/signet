@@ -29,6 +29,9 @@ impl PyAction {
                 params_hash: String::new(),
                 target,
                 transport,
+                session: None,
+                call_id: None,
+                response_hash: None,
             },
         })
     }
@@ -49,6 +52,9 @@ impl PyAction {
                 params_hash,
                 target,
                 transport,
+                session: None,
+                call_id: None,
+                response_hash: None,
             },
         }
     }

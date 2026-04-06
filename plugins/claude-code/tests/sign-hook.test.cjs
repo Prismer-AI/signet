@@ -40,6 +40,67 @@ describe('bin/sign.cjs hook', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
+  it('includes session_id, call_id, and response_hash in signed action', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'echo hello' },
+        session_id: 'sess_abc123',
+        tool_use_id: 'toolu_xyz789',
+        tool_response: { stdout: 'hello\n' },
+      },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    const action = record.receipt.action;
+    assert.equal(action.session, 'sess_abc123');
+    assert.equal(action.call_id, 'toolu_xyz789');
+    assert.ok(action.response_hash.startsWith('sha256:'), 'response_hash should be computed');
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('stores tool_response in audit record meta (unsigned)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    runHook(
+      {
+        tool_name: 'Read',
+        tool_input: { file_path: '/tmp/test' },
+        tool_response: { content: 'file contents' },
+      },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    assert.deepEqual(record.meta.tool_response, { content: 'file contents' });
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('omits session/call_id/response_hash when not provided', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
+    runHook(
+      { tool_name: 'Bash', tool_input: { command: 'ls' } },
+      { SIGNET_HOME: tmpDir },
+    );
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const file = fs.readdirSync(auditDir)[0];
+    const line = fs.readFileSync(path.join(auditDir, file), 'utf8').trim();
+    const record = JSON.parse(line);
+    assert.equal(record.receipt.action.session, undefined);
+    assert.equal(record.receipt.action.call_id, undefined);
+    assert.equal(record.receipt.action.response_hash, undefined);
+    assert.equal(record.meta, undefined);
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
   it('auto-generates key on first run', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
     runHook(

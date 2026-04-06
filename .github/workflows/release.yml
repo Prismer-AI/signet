@@ -178,7 +178,7 @@ jobs:
           cd packages/signet-core
           npm install
           tsc
-          cp -r wasm dist/wasm
+          rsync -a --exclude='.gitignore' wasm/ dist/wasm/
           npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

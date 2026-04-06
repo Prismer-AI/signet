@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/core",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Cryptographic action receipts for AI agents",
   "type": "module",
   "main": "dist/src/index.js",
@@ -10,8 +10,8 @@
     "wasm/"
   ],
   "scripts": {
-    "build": "npx tsc && cp -r wasm dist/wasm",
-    "test": "npx tsc && cp -r wasm dist/wasm && node --test dist/tests/core.test.js"
+    "build": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/",
+    "test": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/ && node --test dist/tests/core.test.js"
   },
   "license": "Apache-2.0 OR MIT",
   "devDependencies": {

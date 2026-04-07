@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp-tools",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "MCP server exposing Signet cryptographic signing, verification, and audit tools",
   "keywords": [
     "mcp",
@@ -19,7 +19,7 @@
     "url": "git+https://github.com/Prismer-AI/signet.git",
     "directory": "packages/signet-mcp-tools"
   },
-  "mcpName": "io.github.prismer-ai/signet-mcp-tools",
+  "mcpName": "io.github.Prismer-AI/signet-mcp-tools",
   "type": "module",
   "bin": {
     "signet-mcp-tools": "dist/server.js"

@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "signet-auth"
 version = "0.4.0"
 description = "Cryptographic action receipts for AI agents"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0 OR MIT"
 classifiers = [

@@ -47,3 +47,9 @@ io.github.prismer-ai/signet-mcp-tools
 ```
 
 The registry manifest is in [server.json](./server.json).
+
+## Links
+
+- [Full documentation & all SDKs](https://github.com/Prismer-AI/signet)
+
+If Signet is useful to you, [star us on GitHub](https://github.com/Prismer-AI/signet) — it helps others discover the project.

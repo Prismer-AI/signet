@@ -5,6 +5,7 @@ edition = "2021"
 description = "Cryptographic action receipts for AI agents"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/Prismer-AI/signet"
+readme = "README.md"
 keywords = ["ed25519", "signing", "ai-agent", "mcp", "audit"]
 categories = ["cryptography", "authentication"]
 

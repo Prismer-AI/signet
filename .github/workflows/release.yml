@@ -206,6 +206,14 @@ jobs:
           npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Build and publish @signet-auth/vercel-ai
+        run: |
+          cd packages/signet-vercel-ai
+          npm install
+          npx tsc
+          npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Post-publish smoke test (npm)
         run: |
           echo "Waiting 30s for npm registry propagation..."

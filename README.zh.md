@@ -17,7 +17,11 @@
 AI Agent 现在可以提工单、调用 MCP 工具、执行 shell 命令、直接发版，但几乎没有内建问责能力。Signet 为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，并支持离线验证收据。
 
 <p align="center">
-  <img src="demo.svg" alt="Signet CLI 演示" width="820">
+  <img src="demo-cli.svg" alt="Signet 演示" width="820">
+</p>
+
+<p align="center">
+  <sub>也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
 </p>
 
 如果 Signet 对你有帮助，点个 ⭐ 让更多人发现它 — 感谢！
@@ -48,6 +52,20 @@ print(receipt.id)
 ```
 
 如果你更关心具体接入方式，下面有 Claude Code、Codex CLI、CLI、MCP 集成、Python 框架和 Vercel AI SDK 的入口。
+
+## 什么时候该用 Signet
+
+- 你需要为 coding agent、MCP 工具调用或 CI 自动化补上一条审计轨迹
+- 你希望在事故发生后，证明到底是哪个 Agent 发起了哪个动作
+- 你需要可离线验证的收据，而不是依赖某个托管平台查看日志
+- 你想为工具调用补上签名证据，但不想额外引入 proxy 或 gateway
+
+## Signet 是什么，不是什么
+
+- **Signet 是** 面向 Agent 行为的证明层：签名、审计、验证
+- **Signet 是** 可以嵌入现有 Agent 栈的 SDK、插件和 MCP 中间件
+- **Signet 不是** 策略引擎、防火墙或动作拦截器
+- **Signet 不是** gateway 的替代品；它与 prevention / enforcement 工具互补
 
 ## 安装
 

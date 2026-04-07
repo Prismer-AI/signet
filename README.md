@@ -29,7 +29,11 @@ AI agents can open tickets, call MCP tools, run shell commands, and ship code wi
 If Signet is useful to you, star this repo to help more teams find it.
 
 <p align="center">
-  <img src="demo-cli.svg" alt="Signet CLI demo" width="820">
+  <img src="demo-cli.svg" alt="Signet demo" width="820">
+</p>
+
+<p align="center">
+  <sub>See also the <a href="./demo-mcp.svg">MCP flow diagram</a>.</sub>
 </p>
 
 ## Why Signet
@@ -58,6 +62,20 @@ print(receipt.id)
 ```
 
 Prefer a different entry point? See the sections below for Claude Code, Codex CLI, the CLI, MCP integration, Python frameworks, and Vercel AI SDK.
+
+## When Teams Reach For Signet
+
+- You need an audit trail for coding agents, MCP tools, or CI automation
+- You want to prove which agent requested an action after an incident
+- You need receipts that can be verified offline without depending on a hosted service
+- You want signed tool-call evidence without adding a proxy or gateway to your stack
+
+## What Signet Is And Isn't
+
+- **Signet is** an attestation layer for agent actions: sign, audit, and verify
+- **Signet is** designed to fit into existing agent stacks with SDKs, plugins, and MCP middleware
+- **Signet is not** a policy engine, firewall, or action blocker
+- **Signet is not** a replacement for gateways; it complements prevention and enforcement tools
 
 ## Install
 

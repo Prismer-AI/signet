@@ -382,6 +382,7 @@ wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/sign
 # TypeScript packages
 cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
+cd packages/signet-mcp-tools && npm run build
 ```
 
 ```bash
@@ -407,6 +408,7 @@ node examples/wasm-roundtrip/test.mjs
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
+cd packages/signet-mcp-tools && npm test
 
 # Reference verifier server smoke test
 cd examples/mcp-agent && npm run smoke

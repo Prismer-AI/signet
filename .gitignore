@@ -6,6 +6,7 @@ Cargo.lock
 # Node
 node_modules/
 dist/
+dist-test/
 *.tgz
 
 # WASM

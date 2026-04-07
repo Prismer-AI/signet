@@ -2,6 +2,24 @@
   "name": "@signet-auth/mcp-tools",
   "version": "0.4.0",
   "description": "MCP server exposing Signet cryptographic signing, verification, and audit tools",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "signet",
+    "signing",
+    "audit",
+    "cryptography"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-mcp-tools#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-mcp-tools"
+  },
+  "mcpName": "io.github.prismer-ai/signet-mcp-tools",
   "type": "module",
   "bin": {
     "signet-mcp-tools": "dist/server.js"
@@ -9,11 +27,15 @@
   "files": ["dist/"],
   "scripts": {
     "build": "npx tsc",
+    "test": "npx tsc -p tsconfig.test.json && node --test dist-test/tests/tools.test.js",
     "start": "node dist/server.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
-    "@signet-auth/core": "file:../signet-core"
+    "@signet-auth/core": "^0.4.1"
   },
   "devDependencies": {
     "@types/node": "^22",

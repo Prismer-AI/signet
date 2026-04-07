@@ -11,7 +11,7 @@
     "test": "npx tsc && node --test dist/tests/mcp.test.js"
   },
   "dependencies": {
-    "@signet-auth/core": "file:../signet-core"
+    "@signet-auth/core": "^0.4.1"
   },
   "devDependencies": {
     "@types/node": "^22",

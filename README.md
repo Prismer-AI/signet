@@ -1,8 +1,8 @@
 <h1 align="center">Signet</h1>
 
 <p align="center">
-  <strong>Cryptographic Action Receipts for AI Agents</strong><br/>
-  <sub>Sign every tool call. Audit what happened. Verify offline. 3 lines of code.</sub>
+  <strong>Signed audit trails for AI agent tool calls</strong><br/>
+  <sub>See exactly which agent called which tool, when, and with what params hash. Verify offline in 3 lines.</sub>
 </p>
 
 <p align="center">
@@ -24,19 +24,40 @@
   <a href="./README.zh.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
 </p>
 
-Signet gives every AI agent an Ed25519 identity and signs every tool call. Know exactly what your agent did, when, and prove it.
+AI agents can open tickets, call MCP tools, run shell commands, and ship code with almost no built-in accountability. Signet gives each agent an Ed25519 identity, signs every tool call, writes a hash-chained audit log, and lets you verify receipts offline.
+
+If Signet is useful to you, star this repo to help more teams find it.
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet CLI demo" width="820">
 </p>
 
-## Why
+## Why Signet
 
-AI agents execute high-value actions with zero accountability. Signet fixes this:
+Signet adds a lightweight trust layer for agent actions:
 
 - **Sign** every tool call with the agent's cryptographic key
 - **Audit** what happened with an append-only, hash-chained local log
 - **Verify** any action receipt offline, no network needed
+- **Integrate** with Claude Code, Codex CLI, MCP clients and servers, Python frameworks, and Vercel AI SDK
+
+## Try It In 30 Seconds
+
+```bash
+pip install signet-auth
+```
+
+```python
+from signet_auth import SigningAgent
+
+agent = SigningAgent.create("my-agent", owner="team")
+receipt = agent.sign("github_create_issue", params={"title": "fix bug"})
+
+assert agent.verify(receipt)
+print(receipt.id)
+```
+
+Prefer a different entry point? See the sections below for Claude Code, Codex CLI, the CLI, MCP integration, Python frameworks, and Vercel AI SDK.
 
 ## Install
 

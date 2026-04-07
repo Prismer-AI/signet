@@ -1,4 +1,9 @@
-# Signet
+<h1 align="center">Signet</h1>
+
+<p align="center">
+  <strong>面向 AI Agent 工具调用的签名审计轨迹</strong><br/>
+  <sub>精确知道是哪个 Agent 在什么时间调用了哪个工具，以及参数哈希是什么。3 行代码即可离线验证。</sub>
+</p>
 
 [![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
 [![简体中文](https://img.shields.io/badge/简体中文-lightgrey?style=flat-square)](README.zh.md)
@@ -9,9 +14,7 @@
 [![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
 
-AI Agent 的密码学操作收据 — 签名、审计、验证。
-
-Signet 给每个 AI Agent 分配 Ed25519 身份，对每次工具调用进行签名。精确掌握你的 Agent 做了什么、什么时候做的，并且可以证明。
+AI Agent 现在可以提工单、调用 MCP 工具、执行 shell 命令、直接发版，但几乎没有内建问责能力。Signet 为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，并支持离线验证收据。
 
 <p align="center">
   <img src="demo.svg" alt="Signet CLI 演示" width="820">
@@ -19,13 +22,32 @@ Signet 给每个 AI Agent 分配 Ed25519 身份，对每次工具调用进行签
 
 如果 Signet 对你有帮助，点个 ⭐ 让更多人发现它 — 感谢！
 
-## 为什么需要
+## 为什么是 Signet
 
-AI Agent 执行高价值操作，却零问责。Signet 解决这个问题：
+Signet 为 Agent 行为增加一层轻量但可验证的信任层：
 
 - **签名** — 用 Agent 的密码学密钥签名每次工具调用
 - **审计** — 仅追加、哈希链接的本地日志
 - **验证** — 离线验证任意操作收据，无需网络
+- **集成** — 可接入 Claude Code、Codex CLI、MCP 客户端与服务端、Python 框架和 Vercel AI SDK
+
+## 30 秒体验
+
+```bash
+pip install signet-auth
+```
+
+```python
+from signet_auth import SigningAgent
+
+agent = SigningAgent.create("my-agent", owner="team")
+receipt = agent.sign("github_create_issue", params={"title": "fix bug"})
+
+assert agent.verify(receipt)
+print(receipt.id)
+```
+
+如果你更关心具体接入方式，下面有 Claude Code、Codex CLI、CLI、MCP 集成、Python 框架和 Vercel AI SDK 的入口。
 
 ## 安装
 

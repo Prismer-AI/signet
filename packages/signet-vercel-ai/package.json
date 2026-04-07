@@ -1,0 +1,24 @@
+{
+  "name": "@signet-auth/vercel-ai",
+  "version": "0.4.1",
+  "description": "Signet signing middleware for Vercel AI SDK",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/"],
+  "scripts": {
+    "build": "npx tsc",
+    "test": "npx tsc -p tsconfig.test.json && node --test dist-test/tests/vercel-ai.test.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@signet-auth/core": "^0.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

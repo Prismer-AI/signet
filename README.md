@@ -52,6 +52,9 @@ npm install @signet-auth/core @signet-auth/mcp
 
 # TypeScript (MCP server verification)
 npm install @signet-auth/mcp-server
+
+# TypeScript (Vercel AI SDK middleware)
+npm install @signet-auth/vercel-ai
 ```
 
 ## Quick Start
@@ -192,6 +195,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   <img src="demo-mcp.svg" alt="Signet MCP end-to-end demo" width="820">
 </p>
 
+### Vercel AI SDK Integration
+
+```typescript
+import { generateText } from "ai";
+import { generateKeypair } from "@signet-auth/core";
+import { createSignetCallbacks } from "@signet-auth/vercel-ai";
+
+const { secretKey } = generateKeypair();
+const callbacks = createSignetCallbacks(secretKey, "my-agent");
+
+const result = await generateText({
+  model: openai("gpt-4"),
+  tools: { myTool },
+  ...callbacks,
+  prompt: "...",
+});
+
+// Every tool call is now signed
+console.log(callbacks.receipts);
+```
+
 ### Reference MCP Server
 
 This repo also includes a minimal MCP reference server that demonstrates server-side verification with `@signet-auth/mcp-server`.
@@ -225,7 +249,7 @@ npx @signet-auth/mcp-tools
 
 Available tools: `signet_sign`, `signet_verify`, `signet_audit`, `signet_identity`.
 
-### Python (LangChain / CrewAI / AutoGen)
+### Python (LangChain / CrewAI / AutoGen + 6 more)
 
 ```bash
 pip install signet-auth
@@ -291,6 +315,90 @@ wrapped = signed_tool(tool, agent)
 # Or wrap all tools at once
 wrapped_tools = sign_tools([tool1, tool2], agent)
 ```
+
+#### LangGraph Integration
+
+LangGraph uses LangChain's callback system — the same handler works directly:
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.langgraph import SignetCallbackHandler
+
+agent = SigningAgent("my-agent")
+handler = SignetCallbackHandler(agent)
+
+result = graph.invoke(input, config={"callbacks": [handler]})
+```
+
+#### LlamaIndex Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.llamaindex import install_handler
+
+agent = SigningAgent("my-agent")
+handler = install_handler(agent)
+
+# All tool call events are now signed
+index = ... # your LlamaIndex setup
+response = index.as_query_engine().query("What is Signet?")
+
+# Access receipts
+print(handler.receipts)
+```
+
+#### Pydantic AI Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.pydantic_ai_integration import SignetCapability
+
+agent = SigningAgent("my-agent")
+capability = SignetCapability(agent)
+
+pydantic_agent = Agent(model, capabilities=[capability])
+```
+
+#### Google ADK Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.google_adk import SignetPlugin
+
+agent = SigningAgent("my-agent")
+plugin = SignetPlugin(agent)
+
+# Pass as callback to ADK agent
+```
+
+#### Smolagents Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.smolagents import signet_step_callback
+
+agent = SigningAgent("my-agent")
+callback = signet_step_callback(agent)
+
+bot = CodeAgent(tools=[...], model=model, step_callbacks=[callback])
+```
+
+#### OpenAI Agents SDK Integration
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.openai_agents import SignetAgentHooks
+
+agent = SigningAgent("my-agent")
+
+oai_agent = Agent(
+    name="assistant",
+    hooks=SignetAgentHooks(agent),
+    tools=[...],
+)
+```
+
+> **Note:** Tool call arguments are not yet available in the hook API ([issue #939](https://github.com/openai/openai-agents-python/issues/939)). Only the tool name is signed.
 
 #### Low-Level API
 
@@ -419,7 +527,8 @@ signet/
 │   ├── signet-core/          @signet-auth/core — TypeScript wrapper
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
 │   ├── signet-mcp-server/    @signet-auth/mcp-server — Server verification
-│   └── signet-mcp-tools/     @signet-auth/mcp-tools — Standalone MCP signing server
+│   ├── signet-mcp-tools/     @signet-auth/mcp-tools — Standalone MCP signing server
+│   └── signet-vercel-ai/     @signet-auth/vercel-ai — Vercel AI SDK middleware
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
 │   └── mcp-agent/            MCP agent, echo server, and verifier server example
@@ -465,7 +574,7 @@ maturin develop
 # Rust tests (95 tests)
 cargo test --workspace
 
-# Python tests (135 tests)
+# Python tests (160 tests)
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM roundtrip (8 tests)
@@ -480,6 +589,9 @@ cd packages/signet-mcp-tools && npm test
 # Plugin tests (54 tests)
 cd plugins/claude-code && npm test
 cd plugins/codex && npm test
+
+# Vercel AI SDK tests (5 tests)
+cd packages/signet-vercel-ai && npm test
 
 # Reference verifier server smoke test
 cd examples/mcp-agent && npm run smoke

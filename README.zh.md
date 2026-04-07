@@ -42,6 +42,9 @@ npm install @signet-auth/core @signet-auth/mcp
 # TypeScript（MCP 服务端验证）
 npm install @signet-auth/mcp-server
 
+# TypeScript（Vercel AI SDK 中间件）
+npm install @signet-auth/vercel-ai
+
 # TypeScript（独立 MCP 签名服务）
 npx @signet-auth/mcp-tools
 ```
@@ -162,7 +165,7 @@ const result = await client.callTool({
 每次 `tools/call` 请求会在 `params._meta._signet` 中注入签名收据。
 MCP Server 无需修改 — 未知字段会被忽略。
 
-### Python（LangChain / CrewAI / AutoGen）
+### Python（LangChain / CrewAI / AutoGen + 6 more）
 
 ```bash
 pip install signet-auth
@@ -229,6 +232,90 @@ wrapped = signed_tool(tool, agent)
 wrapped_tools = sign_tools([tool1, tool2], agent)
 ```
 
+#### LangGraph 集成
+
+LangGraph 使用 LangChain 的 callback 系统，同一个 handler 直接可用：
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.langgraph import SignetCallbackHandler
+
+agent = SigningAgent("my-agent")
+handler = SignetCallbackHandler(agent)
+
+result = graph.invoke(input, config={"callbacks": [handler]})
+```
+
+#### LlamaIndex 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.llamaindex import install_handler
+
+agent = SigningAgent("my-agent")
+handler = install_handler(agent)
+
+# 所有工具调用事件自动签名
+index = ... # 你的 LlamaIndex 配置
+response = index.as_query_engine().query("What is Signet?")
+
+# 访问收据
+print(handler.receipts)
+```
+
+#### Pydantic AI 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.pydantic_ai_integration import SignetCapability
+
+agent = SigningAgent("my-agent")
+capability = SignetCapability(agent)
+
+pydantic_agent = Agent(model, capabilities=[capability])
+```
+
+#### Google ADK 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.google_adk import SignetPlugin
+
+agent = SigningAgent("my-agent")
+plugin = SignetPlugin(agent)
+
+# 作为 callback 传给 ADK agent
+```
+
+#### Smolagents 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.smolagents import signet_step_callback
+
+agent = SigningAgent("my-agent")
+callback = signet_step_callback(agent)
+
+bot = CodeAgent(tools=[...], model=model, step_callbacks=[callback])
+```
+
+#### OpenAI Agents SDK 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.openai_agents import SignetAgentHooks
+
+agent = SigningAgent("my-agent")
+
+oai_agent = Agent(
+    name="assistant",
+    hooks=SignetAgentHooks(agent),
+    tools=[...],
+)
+```
+
+> **注意：** 工具调用参数目前不在 hook API 中暴露（[issue #939](https://github.com/openai/openai-agents-python/issues/939)），仅签名工具名称。
+
 #### 底层 API
 
 ```python
@@ -259,6 +346,27 @@ bilateral = sign_bilateral(
 )
 assert verify_bilateral(bilateral, server_kp.public_key)
 assert bilateral.v == 3  # v3 = 双边收据
+```
+
+### Vercel AI SDK 集成
+
+```typescript
+import { generateText } from "ai";
+import { generateKeypair } from "@signet-auth/core";
+import { createSignetCallbacks } from "@signet-auth/vercel-ai";
+
+const { secretKey } = generateKeypair();
+const callbacks = createSignetCallbacks(secretKey, "my-agent");
+
+const result = await generateText({
+  model: openai("gpt-4"),
+  tools: { myTool },
+  ...callbacks,
+  prompt: "...",
+});
+
+// 每次工具调用都会被签名
+console.log(callbacks.receipts);
 ```
 
 ### 服务端验证（TypeScript）
@@ -374,6 +482,7 @@ signet/
 │   ├── signet-core/          @signet-auth/core — TypeScript 封装
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport 中间件
 │   ├── signet-mcp-server/    @signet-auth/mcp-server — 服务端验证
+│   ├── signet-vercel-ai/     @signet-auth/vercel-ai — Vercel AI SDK 中间件
 │   └── signet-mcp-tools/     @signet-auth/mcp-tools — 独立 MCP 签名服务
 ├── examples/
 │   ├── wasm-roundtrip/       WASM 验证测试
@@ -406,6 +515,7 @@ cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
 cd packages/signet-mcp-server && npm run build
 cd packages/signet-mcp-tools && npm run build
+cd packages/signet-vercel-ai && npm run build
 ```
 
 ```bash
@@ -421,7 +531,7 @@ maturin develop
 # Rust 测试（95 个）
 cargo test --workspace
 
-# Python 测试（135 个）
+# Python 测试（160 个）
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM 往返测试（8 个）
@@ -432,6 +542,9 @@ cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
+
+# Vercel AI SDK 测试（5 个）
+cd packages/signet-vercel-ai && npm test
 
 # 插件测试（54 个）
 cd plugins/claude-code && npm test

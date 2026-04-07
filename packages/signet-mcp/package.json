@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp",
-  "version": "0.4.0",
+  "version": "0.4.4",
   "description": "MCP middleware for Signet cryptographic action receipts",
   "type": "module",
   "main": "dist/src/index.js",
@@ -11,7 +11,7 @@
     "test": "npx tsc && node --test dist/tests/mcp.test.js"
   },
   "dependencies": {
-    "@signet-auth/core": "^0.4.1"
+    "@signet-auth/core": "^0.4.4"
   },
   "devDependencies": {
     "@types/node": "^22",

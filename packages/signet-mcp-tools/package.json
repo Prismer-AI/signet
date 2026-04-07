@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp-tools",
-  "version": "0.4.1",
+  "version": "0.4.4",
   "description": "MCP server exposing Signet cryptographic signing, verification, and audit tools",
   "keywords": [
     "mcp",
@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
-    "@signet-auth/core": "^0.4.1"
+    "@signet-auth/core": "^0.4.4"
   },
   "devDependencies": {
     "@types/node": "^22",

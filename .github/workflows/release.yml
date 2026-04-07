@@ -198,13 +198,21 @@ jobs:
           npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Build and publish @signet-auth/mcp-tools
+        run: |
+          cd packages/signet-mcp-tools
+          npm install
+          tsc
+          npm publish --access public || true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Post-publish smoke test (npm)
         run: |
           echo "Waiting 30s for npm registry propagation..."
           sleep 30
           mkdir /tmp/npm-smoke && cd /tmp/npm-smoke
           npm init -y > /dev/null 2>&1
-          npm install @signet-auth/core @signet-auth/mcp @signet-auth/mcp-server
+          npm install @signet-auth/core @signet-auth/mcp @signet-auth/mcp-server @signet-auth/mcp-tools
           node -e "
             const { generateKeypair, sign, verify } = require('@signet-auth/core');
             const kp = generateKeypair();

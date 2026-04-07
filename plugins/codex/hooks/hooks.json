@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "node \"$HOME/.codex/plugins/signet/bin/sign.cjs\"",
+          "timeout": 5
+        }]
+      }
+    ]
+  }
+}

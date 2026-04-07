@@ -4,20 +4,54 @@ Cryptographic signing for every tool call in Claude Code. Ed25519 receipts + has
 
 ## Install
 
-```
+### Option A: Plugin from marketplace
+
+```bash
 claude plugin add signet
 ```
 
-Or clone and register manually:
+### Option B: Plugin from Git
+
+```bash
+claude plugin add --from https://github.com/Prismer-AI/signet
+```
+
+Or clone and install locally:
+
 ```bash
 git clone https://github.com/Prismer-AI/signet.git
-cd signet/plugins/claude-code
-claude plugin add .
+claude plugin add ./signet/plugins/claude-code
 ```
+
+### Option C: Hook only (no plugin system needed)
+
+Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/signet/plugins/claude-code/bin/sign.cjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Adjust the path to wherever you cloned the repo.
 
 ## What It Does
 
 Every tool call Claude Code makes is automatically:
+
 1. **Signed** with an Ed25519 key (auto-generated on first use)
 2. **Logged** to a hash-chained audit trail at `~/.signet/audit/`
 
@@ -26,11 +60,13 @@ No configuration needed. Signing starts immediately after installation.
 ## Audit
 
 View raw logs:
+
 ```bash
 cat ~/.signet/audit/$(date +%Y-%m-%d).jsonl | jq '.receipt.action.tool'
 ```
 
 With [signet CLI](https://github.com/Prismer-AI/signet) (optional):
+
 ```bash
 signet audit --since 1h
 signet audit --verify   # verify hash chain integrity

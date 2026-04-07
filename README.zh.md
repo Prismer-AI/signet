@@ -38,9 +38,81 @@ pip install signet-auth
 
 # TypeScript（MCP 中间件）
 npm install @signet-auth/core @signet-auth/mcp
+
+# TypeScript（MCP 服务端验证）
+npm install @signet-auth/mcp-server
+
+# TypeScript（独立 MCP 签名服务）
+npx @signet-auth/mcp-tools
 ```
 
 ## 快速开始
+
+### Claude Code Plugin
+
+在 [Claude Code](https://claude.ai/code) 中自动签名每次工具调用，零配置：
+
+```bash
+# 从 marketplace 安装（如已上架）
+claude plugin add signet
+
+# 或从 Git 安装
+claude plugin add --from https://github.com/Prismer-AI/signet
+
+# 或通过 CLI
+signet claude install
+```
+
+每次工具调用都会用 Ed25519 签名，并记录到 `~/.signet/audit/` 的哈希链审计日志中。
+
+也可以不用 plugin 系统，直接在 `~/.claude/settings.json` 中配置 hook：
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "node ~/signet/plugins/claude-code/bin/sign.cjs",
+        "timeout": 5
+      }]
+    }]
+  }
+}
+```
+
+### Codex Plugin
+
+在 [Codex CLI](https://github.com/openai/codex) 中自动签名 Bash 工具调用：
+
+```bash
+git clone https://github.com/Prismer-AI/signet.git
+cp -r signet/plugins/codex ~/.codex/plugins/signet
+```
+
+然后在 `~/.codex/hooks.json` 中添加 hook：
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "node \"$HOME/.codex/plugins/signet/bin/sign.cjs\"",
+        "timeout": 5
+      }]
+    }]
+  }
+}
+```
+
+或使用 MCP Server 接入：
+
+```bash
+codex mcp add signet -- npx @signet-auth/mcp-tools
+```
 
 ### CLI
 
@@ -142,6 +214,21 @@ install_hooks(agent)
 crew.kickoff()
 ```
 
+#### AutoGen 集成
+
+```python
+from signet_auth import SigningAgent
+from signet_auth.autogen import signed_tool, sign_tools
+
+agent = SigningAgent("my-agent")
+
+# 包装单个工具
+wrapped = signed_tool(tool, agent)
+
+# 或批量包装
+wrapped_tools = sign_tools([tool1, tool2], agent)
+```
+
 #### 底层 API
 
 ```python
@@ -151,6 +238,45 @@ kp = generate_keypair()
 action = Action("github_create_issue", params={"title": "fix bug"})
 receipt = sign(kp.secret_key, action, "my-agent", "willamhou")
 assert verify(receipt, kp.public_key)
+```
+
+#### 双边收据（服务端联合签名）
+
+```python
+from signet_auth import generate_keypair, sign, sign_bilateral, verify_bilateral, Action
+
+# Agent 签名工具调用
+agent_kp = generate_keypair()
+action = Action("github_create_issue", params={"title": "fix bug"})
+agent_receipt = sign(agent_kp.secret_key, action, "my-agent")
+
+# 服务端联合签名响应
+server_kp = generate_keypair()
+bilateral = sign_bilateral(
+    server_kp.secret_key, agent_receipt,
+    {"content": [{"type": "text", "text": "issue #42 created"}]},
+    "github-server",
+)
+assert verify_bilateral(bilateral, server_kp.public_key)
+assert bilateral.v == 3  # v3 = 双边收据
+```
+
+### 服务端验证（TypeScript）
+
+MCP Server 可以验证客户端签名：
+
+```typescript
+import { verifyRequest } from "@signet-auth/mcp-server";
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const verified = verifyRequest(request, {
+    trustedKeys: ["ed25519:..."],
+    maxAge: 300,
+  });
+  if (!verified.ok) return { content: [{ type: "text", text: verified.error }], isError: true };
+  console.log(`验证通过: ${verified.signerName}`);
+  // 处理工具调用...
+});
 ```
 
 ## 工作原理
@@ -215,6 +341,8 @@ SigningTransport（包装任意 MCP transport）
 | `signet audit --tool <substring>` | 按工具名过滤 |
 | `signet audit --verify` | 验证所有收据签名 |
 | `signet audit --export <file>` | 导出记录为 JSON |
+| `signet claude install` | 安装 Claude Code 插件（PostToolUse 签名 hook） |
+| `signet claude uninstall` | 卸载 Claude Code 插件 |
 
 密码短语通过交互提示输入，或通过 `SIGNET_PASSPHRASE` 环境变量设置（用于 CI）。
 
@@ -239,9 +367,14 @@ signet/
 ├── bindings/
 │   ├── signet-ts/            WASM 绑定（wasm-bindgen）
 │   └── signet-py/            Python 绑定（PyO3 + maturin）
+├── plugins/
+│   ├── claude-code/          Claude Code 插件（WASM 签名 + 审计）
+│   └── codex/                Codex CLI 插件（WASM 签名 + 审计）
 ├── packages/
 │   ├── signet-core/          @signet-auth/core — TypeScript 封装
-│   └── signet-mcp/           @signet-auth/mcp — MCP SigningTransport 中间件
+│   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport 中间件
+│   ├── signet-mcp-server/    @signet-auth/mcp-server — 服务端验证
+│   └── signet-mcp-tools/     @signet-auth/mcp-tools — 独立 MCP 签名服务
 ├── examples/
 │   ├── wasm-roundtrip/       WASM 验证测试
 │   └── mcp-agent/            MCP agent + echo server 示例
@@ -271,6 +404,8 @@ wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/sign
 # TypeScript 包
 cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
+cd packages/signet-mcp-server && npm run build
+cd packages/signet-mcp-tools && npm run build
 ```
 
 ```bash
@@ -283,18 +418,24 @@ maturin develop
 ### 测试
 
 ```bash
-# Rust 测试（68 个）
+# Rust 测试（95 个）
 cargo test --workspace
 
-# Python 测试（85 个）
+# Python 测试（135 个）
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM 往返测试（8 个）
 node examples/wasm-roundtrip/test.mjs
 
-# TypeScript 测试（11 个）
+# TypeScript 测试（26 个）
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
+cd packages/signet-mcp-server && npm test
+cd packages/signet-mcp-tools && npm test
+
+# 插件测试（54 个）
+cd plugins/claude-code && npm test
+cd plugins/codex && npm test
 ```
 
 ## 安全性
@@ -313,8 +454,8 @@ cd packages/signet-mcp && npm test
 
 ### Signet 目前不能证明的
 
-- MCP Server 是否接收或执行了操作（v2：服务端收据）
-- signer.owner 是否真正控制该密钥（v2：身份注册中心）
+- MCP Server 是否执行了操作（使用双边收据 `signResponse()` 实现服务端联合签名 — 已在 v0.4 发布）
+- signer.owner 是否真正控制该密钥（计划中：身份注册中心）
 
 Signet 是证明工具（证明发生了什么），不是防护工具（阻止坏操作）。它与策略引擎、防火墙等工具互补。
 

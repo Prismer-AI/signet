@@ -61,10 +61,66 @@ npm install @signet-auth/mcp-server
 Auto-sign every tool call in [Claude Code](https://claude.ai/code) with zero configuration:
 
 ```bash
+# From marketplace (if available)
+claude plugin add signet
+
+# Or from Git
+claude plugin add --from https://github.com/Prismer-AI/signet
+
+# Or via CLI
 signet claude install
 ```
 
-Every tool call is signed with Ed25519 and logged to a hash-chained audit trail at `~/.signet/audit/`. Uninstall with `signet claude uninstall`.
+Every tool call is signed with Ed25519 and logged to a hash-chained audit trail at `~/.signet/audit/`.
+
+Alternative: add a hook directly to `~/.claude/settings.json` without the plugin system:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "node ~/signet/plugins/claude-code/bin/sign.cjs",
+        "timeout": 5
+      }]
+    }]
+  }
+}
+```
+
+### Codex Plugin
+
+Auto-sign every Bash tool call in [Codex CLI](https://github.com/openai/codex):
+
+```bash
+git clone https://github.com/Prismer-AI/signet.git
+cp -r signet/plugins/codex ~/.codex/plugins/signet
+```
+
+Then add the hook to `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "node \"$HOME/.codex/plugins/signet/bin/sign.cjs\"",
+        "timeout": 5
+      }]
+    }]
+  }
+}
+```
+
+Or use the MCP server for on-demand signing tools:
+
+```bash
+codex mcp add signet -- npx @signet-auth/mcp-tools
+```
 
 ### CLI
 
@@ -158,6 +214,16 @@ Environment variables:
 - `SIGNET_REQUIRE_SIGNATURE` — `true` or `false` (default `false`)
 - `SIGNET_MAX_AGE` — max receipt age in seconds (default `300`)
 - `SIGNET_EXPECTED_TARGET` — optional expected `receipt.action.target`
+
+### Standalone MCP Signing Server
+
+`@signet-auth/mcp-tools` exposes Signet signing, verification, and audit as MCP tools — plug into any MCP-compatible client:
+
+```bash
+npx @signet-auth/mcp-tools
+```
+
+Available tools: `signet_sign`, `signet_verify`, `signet_audit`, `signet_identity`.
 
 ### Python (LangChain / CrewAI / AutoGen)
 
@@ -347,7 +413,8 @@ signet/
 │   ├── signet-ts/            WASM binding (wasm-bindgen)
 │   └── signet-py/            Python binding (PyO3 + maturin)
 ├── plugins/
-│   └── claude-code/          Claude Code plugin (WASM signing + audit)
+│   ├── claude-code/          Claude Code plugin (WASM signing + audit)
+│   └── codex/                Codex CLI plugin (WASM signing + audit)
 ├── packages/
 │   ├── signet-core/          @signet-auth/core — TypeScript wrapper
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
@@ -395,10 +462,10 @@ maturin develop
 ### Test
 
 ```bash
-# Rust tests (80 tests)
+# Rust tests (95 tests)
 cargo test --workspace
 
-# Python tests (73 tests)
+# Python tests (135 tests)
 cd bindings/signet-py && pytest tests/ -v
 
 # WASM roundtrip (8 tests)
@@ -409,6 +476,10 @@ cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
+
+# Plugin tests (54 tests)
+cd plugins/claude-code && npm test
+cd plugins/codex && npm test
 
 # Reference verifier server smoke test
 cd examples/mcp-agent && npm run smoke
@@ -430,8 +501,8 @@ Keys stored at `~/.signet/keys/` with `0600` permissions. Override with `SIGNET_
 
 ### What Signet does NOT prove (yet)
 
-- That the MCP server executed the action (server can verify the request via `@signet-auth/mcp-server`, but execution proof requires server co-signing — v0.4)
-- That signer.owner actually controls the key (v2: identity registry)
+- That the MCP server executed the action (use bilateral receipts with `signResponse()` for server co-signing — shipped in v0.4)
+- That signer.owner actually controls the key (planned: identity registry)
 
 Signet is an attestation tool (proving what happened), not a prevention tool (blocking bad actions). It complements policy enforcement tools like firewalls and gateways.
 

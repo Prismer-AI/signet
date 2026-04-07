@@ -125,7 +125,7 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install "maturin>=1.5,<2" "pytest>=8"
+          pip install "maturin>=1.5,<2" "pytest>=8" "pytest-asyncio>=0.23"
 
       - name: Build and test
         run: |

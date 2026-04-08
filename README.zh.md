@@ -10,21 +10,30 @@
 
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
-[![npm](https://img.shields.io/npm/v/@signet-auth/mcp.svg)](https://www.npmjs.com/package/@signet-auth/mcp)
 [![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
+[![npm packages](https://img.shields.io/badge/npm-5%20packages-cb3837.svg)](https://www.npmjs.com/org/signet-auth)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
 [![Stars](https://img.shields.io/github/stars/Prismer-AI/signet.svg)](https://github.com/Prismer-AI/signet/stargazers)
+
+TypeScript 包：
+[`@signet-auth/core`](https://www.npmjs.com/package/@signet-auth/core) ·
+[`@signet-auth/mcp`](https://www.npmjs.com/package/@signet-auth/mcp) ·
+[`@signet-auth/mcp-server`](https://www.npmjs.com/package/@signet-auth/mcp-server) ·
+[`@signet-auth/mcp-tools`](https://www.npmjs.com/package/@signet-auth/mcp-tools) ·
+[`@signet-auth/vercel-ai`](https://www.npmjs.com/package/@signet-auth/vercel-ai)
 
 AI Agent 现在可以提工单、调用 MCP 工具、执行 shell 命令、直接发版，但几乎没有内建问责能力。Signet 为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，并让客户端或服务端在信任请求前验证它到底发送了什么。
 
 如果 Signet 对你有帮助，点个 ⭐ 让更多人发现它，感谢！
+
+先看下面这张 CLI 流程图，理解 Signet 如何给一次工具调用签名并留下审计收据；再跳到后面的 [看它如何拒绝非法请求](#execution-boundary-demo)，看执行端如何在真正运行前拦住未签名、被篡改、过期或目标错误的请求。
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet 演示" width="820">
 </p>
 
 <p align="center">
-  <sub>也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
+  <sub>这张图先展示签名与审计收据。也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
 </p>
 
 ## 为什么是 Signet
@@ -61,6 +70,7 @@ print(receipt.id)
 - [**MCP 客户端**](#mcp-client-integration)：最适合你已经控制 MCP client 或 transport 的情况。用 `new SigningTransport(inner, secretKey, "my-agent")` 包住 transport。5 分钟后你会得到带 `params._meta._signet` 收据的签名 `tools/call` 请求。
 - [**MCP 服务端**](#mcp-server-verification)：最适合你希望在执行前做验证。先在处理函数里调用 `verifyRequest(request, {...})`。5 分钟后你会得到发生在执行边界的服务端校验：签名者、freshness、target binding，以及 tool/params match。
 
+<a id="execution-boundary-demo"></a>
 ## 看它如何拒绝非法请求
 
 运行最短的 execution-boundary demo：

@@ -15,8 +15,19 @@
 <p align="center">
   <img src="https://img.shields.io/badge/SDKs-333?style=flat-square" alt="SDKs">
   <a href="https://crates.io/crates/signet-core"><img src="https://img.shields.io/crates/v/signet-core?style=flat-square&labelColor=black&color=dea584&logo=rust&logoColor=white&label=signet--core" alt="crates.io"></a>
-  <a href="https://www.npmjs.com/package/@signet-auth/mcp"><img src="https://img.shields.io/npm/v/@signet-auth/mcp?style=flat-square&labelColor=black&color=cb3837&logo=npm&logoColor=white&label=mcp" alt="npm"></a>
   <a href="https://pypi.org/project/signet-auth/"><img src="https://img.shields.io/pypi/v/signet-auth?style=flat-square&labelColor=black&color=3775A9&logo=python&logoColor=white&label=signet--auth" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/org/signet-auth"><img src="https://img.shields.io/badge/npm-5%20packages-cb3837?style=flat-square&labelColor=black&logo=npm&logoColor=white" alt="npm packages"></a>
+</p>
+
+<p align="center">
+  <sub>
+    TypeScript packages:
+    <a href="https://www.npmjs.com/package/@signet-auth/core"><code>@signet-auth/core</code></a> ·
+    <a href="https://www.npmjs.com/package/@signet-auth/mcp"><code>@signet-auth/mcp</code></a> ·
+    <a href="https://www.npmjs.com/package/@signet-auth/mcp-server"><code>@signet-auth/mcp-server</code></a> ·
+    <a href="https://www.npmjs.com/package/@signet-auth/mcp-tools"><code>@signet-auth/mcp-tools</code></a> ·
+    <a href="https://www.npmjs.com/package/@signet-auth/vercel-ai"><code>@signet-auth/vercel-ai</code></a>
+  </sub>
 </p>
 
 <p align="center">
@@ -28,12 +39,14 @@ AI agents can open tickets, call MCP tools, run shell commands, and ship code wi
 
 If Signet is useful to you, star this repo to help more teams find it.
 
+Start with the CLI flow below to see how Signet signs and audits a tool call. Then jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the execution side block unsigned, tampered, stale, or mis-targeted requests before they run.
+
 <p align="center">
   <img src="demo-cli.svg" alt="Signet demo" width="820">
 </p>
 
 <p align="center">
-  <sub>See also the <a href="./demo-mcp.svg">MCP flow diagram</a>.</sub>
+  <sub>This first demo shows signing + audit receipts. See also the <a href="./demo-mcp.svg">MCP flow diagram</a>.</sub>
 </p>
 
 ## Why Signet
@@ -70,6 +83,7 @@ If you're new, start with one of these four paths:
 - [**MCP clients**](#mcp-client-integration): Best if you control an MCP client or transport. Wrap your transport with `new SigningTransport(inner, secretKey, "my-agent")`. In 5 minutes you'll have signed `tools/call` requests with receipts in `params._meta._signet`.
 - [**MCP servers**](#mcp-server-verification): Best if you want verification before execution. Call `verifyRequest(request, {...})` in your tool handler. In 5 minutes you'll have signer, freshness, target-binding, and tool/params checks at the execution boundary.
 
+<a id="execution-boundary-demo"></a>
 ## See It Reject Bad Requests
 
 Run the shortest execution-boundary demo:

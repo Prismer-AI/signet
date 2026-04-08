@@ -1,6 +1,6 @@
 {
   "name": "signet-codex-plugin",
-  "version": "0.4.1",
+  "version": "0.4.5",
   "type": "commonjs",
   "private": true,
   "scripts": {

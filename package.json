@@ -1,4 +1,9 @@
 {
   "private": true,
-  "workspaces": ["packages/*"]
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "version:check": "node scripts/version-sync.mjs check",
+    "version:sync": "node scripts/version-sync.mjs sync",
+    "version:set": "node scripts/version-sync.mjs set"
+  }
 }

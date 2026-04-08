@@ -40,7 +40,8 @@ Roadmap.md
 Roadmap-zh.md
 output/
 tmp/
-scripts/
+scripts/*
+!scripts/version-sync.mjs
 .codex
 
 # Recordings (large binaries)

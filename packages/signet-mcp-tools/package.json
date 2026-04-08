@@ -20,12 +20,16 @@
     "url": "git+https://github.com/Prismer-AI/signet.git",
     "directory": "packages/signet-mcp-tools"
   },
-  "mcpName": "io.github.Prismer-AI/signet-mcp-tools",
+  "mcpName": "io.github.prismer-ai/signet-mcp-tools",
   "type": "module",
   "bin": {
     "signet-mcp-tools": "dist/server.js"
   },
-  "files": ["dist/"],
+  "files": [
+    "dist/",
+    "server.json",
+    "README.md"
+  ],
   "scripts": {
     "build": "npx tsc",
     "test": "npx tsc -p tsconfig.test.json && node --test dist-test/tests/tools.test.js",

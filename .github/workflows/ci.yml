@@ -9,8 +9,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  versioning:
+    name: Versioning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check managed versions
+        run: node scripts/version-sync.mjs check
+
   rust:
     name: Rust (clippy + test + no-unsafe check)
+    needs: versioning
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +51,7 @@ jobs:
 
   wasm:
     name: WASM (build + roundtrip test)
+    needs: versioning
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -139,7 +152,7 @@ jobs:
 
   python-binding:
     name: Python binding (build + test)
-    needs: rust
+    needs: [versioning, rust]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

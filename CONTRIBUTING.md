@@ -71,6 +71,33 @@ signet/
 4. Commit with conventional commits (`feat:`, `fix:`, `test:`, `docs:`)
 5. Open a PR against `main`
 
+## Versioning And Releases
+
+`VERSION` at the repo root is the single source of truth for Signet release versions. Rust crates, Python metadata, TypeScript packages, MCP server metadata, plugin manifests, and the checked-in `package-lock.json` workspace entries are synced from that file.
+
+Use these commands before cutting a release:
+
+```bash
+# Check that every managed file matches VERSION
+npm run version:check
+
+# Re-write all managed manifests from VERSION
+npm run version:sync
+
+# Bump VERSION and sync every managed manifest
+npm run version:set -- 0.4.6
+```
+
+Release flow:
+
+1. Run `npm run version:set -- <next-version>`
+2. Review the manifest changes and commit them
+3. Push the commit
+4. Create the matching git tag: `git tag v<next-version>`
+5. Push the tag so the release workflow can publish artifacts
+
+CI now checks version consistency on every PR, and the release workflow refuses to publish unless the pushed tag exactly matches `VERSION`.
+
 ## Commit Messages
 
 We use [Conventional Commits](https://www.conventionalcommits.org/):

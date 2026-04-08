@@ -9,8 +9,20 @@ permissions:
   contents: write
 
 jobs:
+  validate-version:
+    name: Validate tag and managed versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check VERSION and tag
+        run: node scripts/version-sync.mjs check --tag "${GITHUB_REF_NAME}"
+
   build:
     name: Build ${{ matrix.target }}
+    needs: validate-version
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -56,6 +68,7 @@ jobs:
 
   python:
     name: Python wheels (${{ matrix.target }})
+    needs: validate-version
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -87,6 +100,7 @@ jobs:
 
   python-sdist:
     name: Python sdist
+    needs: validate-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -140,7 +154,7 @@ jobs:
 
   crates:
     name: Publish to crates.io
-    needs: build
+    needs: [validate-version, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -176,6 +190,7 @@ jobs:
 
   npm:
     name: Publish to npm
+    needs: validate-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

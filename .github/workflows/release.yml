@@ -29,8 +29,9 @@ jobs:
             artifact: signet-darwin-arm64
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-04-08
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cross-compilation tools
@@ -143,7 +144,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-08
       - name: Publish signet-core
         run: |
           cargo publish -p signet-core --allow-dirty 2>&1 | tee /tmp/publish-core.log || {
@@ -176,8 +179,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-04-08
           targets: wasm32-unknown-unknown
       - uses: actions/setup-node@v4
         with:
@@ -282,7 +286,9 @@ jobs:
     needs: crates
     runs-on: ubuntu-latest
     steps:
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-08
       - name: Smoke test cargo install
         run: |
           echo "Waiting 60s for crates.io index propagation..."

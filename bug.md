@@ -30,7 +30,7 @@ Legend: CONFIRMED / PARTIALLY / FALSE POSITIVE | severity from original review, 
   - 额外: `audit.rs:346` 同样存在 v3 receipt self-trust 路径（Codex 新发现）
   - Codex: **CONFIRMED** — severity 同意
 
-- [ ] **CI 用 nightly Rust 不锁版本** — nightly 破坏可能导致发布失败
+- [x] ~~**CI 用 nightly Rust 不锁版本**~~ — 锁定 `nightly-2026-04-08`，加 `rust-toolchain.toml`（2026-04-08）
   - 位置: `.github/workflows/ci.yml:19`, `.github/workflows/release.yml:33`
   - Codex: **CONFIRMED** — severity 降级（认为是低风险，非 HIGH）
 

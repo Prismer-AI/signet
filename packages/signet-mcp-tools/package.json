@@ -1,13 +1,14 @@
 {
   "name": "@signet-auth/mcp-tools",
-  "version": "0.4.4",
-  "description": "MCP server exposing Signet cryptographic signing, verification, and audit tools",
+  "version": "0.4.5",
+  "description": "Standalone MCP server exposing Signet signing, verification, and content hash tools",
   "keywords": [
     "mcp",
     "model-context-protocol",
     "signet",
     "signing",
-    "audit",
+    "verification",
+    "content-hash",
     "cryptography"
   ],
   "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-mcp-tools#readme",
@@ -35,7 +36,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
-    "@signet-auth/core": "^0.4.4"
+    "@signet-auth/core": "^0.4.5"
   },
   "devDependencies": {
     "@types/node": "^22",

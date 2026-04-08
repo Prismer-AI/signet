@@ -1,7 +1,24 @@
 {
   "name": "@signet-auth/mcp",
-  "version": "0.4.4",
-  "description": "MCP middleware for Signet cryptographic action receipts",
+  "version": "0.4.5",
+  "description": "Client-side MCP signing transport for Signet receipts",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "signet",
+    "transport",
+    "client",
+    "signing"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-mcp"
+  },
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -10,8 +27,11 @@
     "build": "npx tsc",
     "test": "npx tsc && node --test dist/tests/mcp.test.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@signet-auth/core": "^0.4.4"
+    "@signet-auth/core": "^0.4.5"
   },
   "devDependencies": {
     "@types/node": "^22",

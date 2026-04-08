@@ -327,13 +327,13 @@ Environment variables:
 
 ### Standalone MCP Signing Server
 
-`@signet-auth/mcp-tools` exposes Signet signing, verification, and audit as MCP tools — plug into any MCP-compatible client:
+`@signet-auth/mcp-tools` exposes Signet signing, verification, and content hashing as MCP tools — plug into any MCP-compatible client:
 
 ```bash
 npx @signet-auth/mcp-tools
 ```
 
-Available tools: `signet_sign`, `signet_verify`, `signet_audit`, `signet_identity`.
+Available tools: `signet_generate_keypair`, `signet_sign`, `signet_verify`, `signet_content_hash`.
 
 ### Python (LangChain / CrewAI / AutoGen + 6 more)
 

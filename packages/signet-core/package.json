@@ -1,7 +1,24 @@
 {
   "name": "@signet-auth/core",
-  "version": "0.4.4",
-  "description": "Cryptographic action receipts for AI agents",
+  "version": "0.4.5",
+  "description": "Core Signet primitives for TypeScript: Ed25519 receipts, hashes, and verification",
+  "keywords": [
+    "signet",
+    "ed25519",
+    "cryptography",
+    "receipts",
+    "audit",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-core#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-core"
+  },
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -12,6 +29,9 @@
   "scripts": {
     "build": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/",
     "test": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/ && node --test dist/tests/core.test.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0 OR MIT",
   "devDependencies": {

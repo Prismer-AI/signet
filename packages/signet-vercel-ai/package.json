@@ -1,7 +1,24 @@
 {
   "name": "@signet-auth/vercel-ai",
-  "version": "0.4.4",
-  "description": "Signet signing middleware for Vercel AI SDK",
+  "version": "0.4.5",
+  "description": "Vercel AI SDK callbacks for signing Signet tool-call receipts",
+  "keywords": [
+    "signet",
+    "vercel-ai-sdk",
+    "ai-sdk",
+    "tool-calls",
+    "receipts",
+    "signing"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-vercel-ai#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-vercel-ai"
+  },
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -14,7 +31,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@signet-auth/core": "^0.4.4"
+    "@signet-auth/core": "^0.4.5"
   },
   "devDependencies": {
     "@types/node": "^22",

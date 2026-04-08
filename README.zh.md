@@ -289,13 +289,13 @@ npm run verifier-server
 
 ### 独立 MCP 签名服务
 
-`@signet-auth/mcp-tools` 将 Signet 的签名、验证、审计能力暴露成 MCP 工具，可直接接到任何 MCP-compatible client：
+`@signet-auth/mcp-tools` 将 Signet 的签名、验证、内容哈希能力暴露成 MCP 工具，可直接接到任何 MCP-compatible client：
 
 ```bash
 npx @signet-auth/mcp-tools
 ```
 
-可用工具：`signet_sign`、`signet_verify`、`signet_audit`、`signet_identity`。
+可用工具：`signet_generate_keypair`、`signet_sign`、`signet_verify`、`signet_content_hash`。
 
 ### Python（LangChain / CrewAI / AutoGen + 6 more）
 

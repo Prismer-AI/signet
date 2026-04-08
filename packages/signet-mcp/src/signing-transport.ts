@@ -42,6 +42,7 @@ export class SigningTransport implements Transport {
     string | number,
     { action: SignetAction; tsRequest: string; timer: ReturnType<typeof setTimeout> }
   >();
+  private warnedNoTrustAnchors = false;
 
   constructor(
     inner: Transport,
@@ -128,8 +129,11 @@ export class SigningTransport implements Transport {
                   this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
                 }
               } else {
-                // Sig valid but no trust anchors configured — accept but warn
-                this.onerror?.(new Error('bilateral receipt accepted without trustedServerKeys — set trustedServerKeys to verify server identity'));
+                // Sig valid but no trust anchors configured — accept but warn once
+                if (!this.warnedNoTrustAnchors) {
+                  this.warnedNoTrustAnchors = true;
+                  this.onerror?.(new Error('bilateral receipt accepted without trustedServerKeys — set trustedServerKeys to verify server identity'));
+                }
                 this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
               }
             }

@@ -362,9 +362,10 @@ mod fs_tests {
             serde_json::from_str(&fs::read_to_string(&pub_path).unwrap()).unwrap();
         pub_file.name = "attacker".to_string();
         fs::write(&pub_path, serde_json::to_string_pretty(&pub_file).unwrap()).unwrap();
-        // load_key_info still reads the raw file, which now has name="attacker"
-        let info = load_key_info(dir.path(), "eve").unwrap();
-        assert_eq!(info.name, "attacker"); // reflects what's on disk
+        // load_key_info should now reject the tampered file
+        let result = load_key_info(dir.path(), "eve");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("does not match filename"));
     }
 
     #[test]

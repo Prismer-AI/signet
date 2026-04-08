@@ -16,7 +16,7 @@ fn validate_params_hash(hash: &str) -> Result<(), SignetError> {
         return Ok(());
     }
     if let Some(hex_part) = hash.strip_prefix("sha256:") {
-        if hex_part.len() == 64 && hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+        if hex_part.len() == 64 && hex_part.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
             return Ok(());
         }
     }
@@ -284,7 +284,7 @@ mod tests {
         let action = Action {
             tool: "test".to_string(),
             params: serde_json::Value::Null,
-            params_hash: "sha256:abc123".to_string(),
+            params_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
             target: "mcp://test".to_string(),
             transport: "stdio".to_string(),
             session: None,
@@ -292,7 +292,7 @@ mod tests {
             response_hash: None,
         };
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
-        assert_eq!(receipt.action.params_hash, "sha256:abc123");
+        assert_eq!(receipt.action.params_hash, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     #[test]

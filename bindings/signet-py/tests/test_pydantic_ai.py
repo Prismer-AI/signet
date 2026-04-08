@@ -1,27 +1,11 @@
-"""Tests for Pydantic AI integration (mock-based)."""
+"""Tests for Pydantic AI integration (middleware-based)."""
 
-import sys
-import types
 import tempfile
+
 import pytest
 
-
-# Mock pydantic_ai
-def _setup_mocks():
-    pydantic_ai = types.ModuleType("pydantic_ai")
-
-    class AbstractCapability:
-        pass
-
-    pydantic_ai.AbstractCapability = AbstractCapability
-    sys.modules["pydantic_ai"] = pydantic_ai
-    return AbstractCapability
-
-
-_AbstractCapability = _setup_mocks()
-
-import signet_auth  # noqa: E402
-from signet_auth.pydantic_ai_integration import SignetCapability  # noqa: E402
+import signet_auth
+from signet_auth.pydantic_ai_integration import SignetMiddleware
 
 
 @pytest.fixture
@@ -32,30 +16,57 @@ def agent():
         )
 
 
+def test_middleware_wraps_sync_function(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def calculator(expression: str = "") -> str:
+        return f"result: {expression}"
+
+    result = calculator(expression="2+2")
+    assert result == "result: 2+2"
+    assert len(mw.receipts) == 1
+    assert mw.receipts[0].action.tool == "calculator"
+
+
 @pytest.mark.asyncio
-async def test_capability_signs_tool_call(agent):
-    cap = SignetCapability(agent)
+async def test_middleware_wraps_async_function(agent):
+    mw = SignetMiddleware(agent)
 
-    class FakeTool:
-        name = "calculator"
+    @mw.wrap_async
+    async def search(query: str = "") -> str:
+        return f"found: {query}"
 
-    await cap.before_tool_execute(FakeTool(), {"expression": "2+2"})
-    assert len(cap.receipts) == 1
-    assert cap.receipts[0].action.tool == "calculator"
-
-
-@pytest.mark.asyncio
-async def test_capability_signs_multiple_calls(agent):
-    cap = SignetCapability(agent)
-
-    for name in ["search", "write", "read"]:
-        tool = type("T", (), {"name": name})()
-        await cap.before_tool_execute(tool, {"q": name})
-
-    assert len(cap.receipts) == 3
-    assert [r.action.tool for r in cap.receipts] == ["search", "write", "read"]
+    result = await search(query="signet")
+    assert result == "found: signet"
+    assert len(mw.receipts) == 1
+    assert mw.receipts[0].action.tool == "search"
 
 
-def test_capability_is_abstract_capability(agent):
-    cap = SignetCapability(agent)
-    assert isinstance(cap, _AbstractCapability)
+def test_middleware_multiple_calls(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def tool_a(x: int = 0) -> int:
+        return x + 1
+
+    @mw.wrap
+    def tool_b(y: str = "") -> str:
+        return y.upper()
+
+    tool_a(x=1)
+    tool_b(y="hello")
+    tool_a(x=2)
+
+    assert len(mw.receipts) == 3
+    assert [r.action.tool for r in mw.receipts] == ["tool_a", "tool_b", "tool_a"]
+
+
+def test_middleware_preserves_function_name(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def my_special_tool() -> str:
+        return "ok"
+
+    assert my_special_tool.__name__ == "my_special_tool"

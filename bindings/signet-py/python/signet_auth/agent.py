@@ -6,6 +6,7 @@ from typing import Any
 from signet_auth._signet import (
     Action,
     AuditRecord,
+    BilateralReceipt,
     ChainStatus,
     KeyInfo,
     Receipt,
@@ -20,7 +21,9 @@ from signet_auth._signet import (
     load_signing_key,
     load_verifying_key,
     sign as _sign,
+    sign_bilateral as _sign_bilateral,
     verify as _verify,
+    verify_bilateral as _verify_bilateral,
 )
 
 
@@ -97,9 +100,45 @@ class SigningAgent:
     def __exit__(self, *args: object) -> None:
         self.close()
 
+    def sign_bilateral(
+        self,
+        agent_receipt: Receipt,
+        response_content: Any = None,
+    ) -> BilateralReceipt:
+        """Co-sign an agent's receipt as a server.
+
+        Use this when this agent acts as a server verifying and co-signing
+        another agent's tool call receipt, creating a bilateral receipt
+        where both sides have cryptographic proof.
+
+        Args:
+            agent_receipt: The v1 receipt from the calling agent.
+            response_content: The response data to bind into the receipt.
+        """
+        if self._secret_key is None:
+            raise RuntimeError("SigningAgent has been closed")
+        return _sign_bilateral(
+            self._secret_key,
+            agent_receipt,
+            response_content if response_content is not None else {},
+            self._name,
+        )
+
     def verify(self, receipt: Receipt) -> bool:
         """Verify a receipt against this agent's public key."""
         return _verify(receipt, self._public_key)
+
+    def verify_bilateral_receipt(
+        self,
+        receipt: BilateralReceipt,
+    ) -> bool:
+        """Verify a bilateral receipt against this agent's public key (as server)."""
+        return _verify_bilateral(receipt, self._public_key)
+
+    @staticmethod
+    def verify_bilateral_with_key(receipt: BilateralReceipt, server_public_key: str) -> bool:
+        """Verify a bilateral receipt against any server public key."""
+        return _verify_bilateral(receipt, server_public_key)
 
     @staticmethod
     def verify_with_key(receipt: Receipt, public_key: str) -> bool:

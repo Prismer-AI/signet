@@ -28,6 +28,8 @@ class SignetPlugin:
     """Google ADK plugin that signs tool calls with Signet.
 
     Works in observe mode (returns None) — does not modify tool behavior.
+    Uses duck-typed callbacks (before_tool_callback / after_tool_callback)
+    matching Google ADK's plugin convention. No framework imports required.
     """
 
     def __init__(

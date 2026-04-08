@@ -18,6 +18,29 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
+[project.optional-dependencies]
+langchain = ["langchain-core>=0.2"]
+langgraph = ["langchain-core>=0.2"]
+llamaindex = ["llama-index-core>=0.10"]
+google-adk = ["google-adk>=0.1"]
+pydantic-ai = ["pydantic-ai>=0.1"]
+semantic-kernel = ["semantic-kernel>=1.0"]
+smolagents = ["smolagents>=0.1"]
+openai-agents = ["openai-agents>=0.1"]
+autogen = ["autogen-agentchat>=0.2"]
+crewai = ["crewai>=0.1"]
+all = [
+    "langchain-core>=0.2",
+    "llama-index-core>=0.10",
+    "google-adk>=0.1",
+    "pydantic-ai>=0.1",
+    "semantic-kernel>=1.0",
+    "smolagents>=0.1",
+    "openai-agents>=0.1",
+    "autogen-agentchat>=0.2",
+    "crewai>=0.1",
+]
+
 [tool.maturin]
 features = ["pyo3/extension-module", "pyo3/abi3-py310"]
 python-source = "python"

@@ -35,6 +35,17 @@ print(receipt.id)
 | AutoGen | `from signet_auth.autogen import SignetAutogenHook` |
 | CrewAI | `from signet_auth.crewai import SignetCrewCallback` |
 
+Install with framework extras:
+
+```bash
+pip install signet-auth[langchain]     # LangChain / LangGraph
+pip install signet-auth[llamaindex]    # LlamaIndex
+pip install signet-auth[google-adk]    # Google ADK
+pip install signet-auth[pydantic-ai]   # Pydantic AI
+pip install signet-auth[semantic-kernel] # Semantic Kernel
+pip install signet-auth[all]           # All frameworks
+```
+
 ## Links
 
 - [Full documentation & source](https://github.com/Prismer-AI/signet)

@@ -428,12 +428,14 @@ print(handler.receipts)
 
 ```python
 from signet_auth import SigningAgent
-from signet_auth.pydantic_ai_integration import SignetCapability
+from signet_auth.pydantic_ai_integration import SignetMiddleware
 
 agent = SigningAgent("my-agent")
-capability = SignetCapability(agent)
+middleware = SignetMiddleware(agent)
 
-pydantic_agent = Agent(model, capabilities=[capability])
+@middleware.wrap
+def my_tool(query: str) -> str:
+    return f"result: {query}"
 ```
 
 #### Google ADK Integration

@@ -1,5 +1,5 @@
 import pytest
-from signet_auth import SigningAgent, KeyNotFoundError, Receipt, SignetIOError
+from signet_auth import SigningAgent, BilateralReceipt, KeyNotFoundError, Receipt, SignetIOError
 
 
 def test_create_agent(tmp_path):
@@ -123,3 +123,58 @@ def test_agent_context_manager(tmp_path):
         assert receipt.action.tool == "tool"
     with pytest.raises(RuntimeError, match="closed"):
         agent.sign("tool", audit=False)
+
+
+def test_sign_bilateral_roundtrip(tmp_path):
+    client = SigningAgent.create("client-agent", signet_dir=str(tmp_path))
+    server = SigningAgent.create("server-agent", signet_dir=str(tmp_path))
+
+    agent_receipt = client.sign("web_search", params={"query": "signet"}, audit=False)
+    bilateral = server.sign_bilateral(agent_receipt, response_content={"results": ["a", "b"]})
+
+    assert isinstance(bilateral, BilateralReceipt)
+    assert bilateral.v == 3
+    assert bilateral.server.name == "server-agent"
+    assert bilateral.agent_receipt.action.tool == "web_search"
+
+
+def test_verify_bilateral_receipt(tmp_path):
+    client = SigningAgent.create("c", signet_dir=str(tmp_path))
+    server = SigningAgent.create("s", signet_dir=str(tmp_path))
+
+    agent_receipt = client.sign("tool", audit=False)
+    bilateral = server.sign_bilateral(agent_receipt, response_content={"ok": True})
+
+    assert server.verify_bilateral_receipt(bilateral) is True
+
+
+def test_verify_bilateral_wrong_key(tmp_path):
+    client = SigningAgent.create("c2", signet_dir=str(tmp_path))
+    server = SigningAgent.create("s2", signet_dir=str(tmp_path))
+    other = SigningAgent.create("other", signet_dir=str(tmp_path))
+
+    agent_receipt = client.sign("tool", audit=False)
+    bilateral = server.sign_bilateral(agent_receipt)
+
+    assert other.verify_bilateral_receipt(bilateral) is False
+
+
+def test_verify_bilateral_with_key_static(tmp_path):
+    client = SigningAgent.create("c3", signet_dir=str(tmp_path))
+    server = SigningAgent.create("s3", signet_dir=str(tmp_path))
+
+    agent_receipt = client.sign("tool", audit=False)
+    bilateral = server.sign_bilateral(agent_receipt, response_content={})
+
+    assert SigningAgent.verify_bilateral_with_key(bilateral, server.public_key) is True
+
+
+def test_sign_bilateral_after_close(tmp_path):
+    client = SigningAgent.create("c4", signet_dir=str(tmp_path))
+    server = SigningAgent.create("s4", signet_dir=str(tmp_path))
+
+    agent_receipt = client.sign("tool", audit=False)
+    server.close()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        server.sign_bilateral(agent_receipt)

@@ -4,10 +4,13 @@ Cryptographic signing for every tool call in Claude Code. Ed25519 receipts + has
 
 ## Install
 
-From the official Claude Code plugin marketplace:
-
 ```bash
-/plugin install signet
+# Option A: From the official Anthropic plugin marketplace
+/plugin install signet@claude-plugins-official
+
+# Option B: Add Signet as a marketplace source, then install
+/plugin marketplace add Prismer-AI/signet
+/plugin install signet@signet
 ```
 
 Alternative install methods:

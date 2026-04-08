@@ -82,7 +82,7 @@ If you're new, start with one of these four paths:
 
 ## Choose Your Path
 
-- [**Claude Code**](#claude-code-plugin): Best for the fastest first run in a coding agent. Run `/plugin install signet` in Claude Code. In 5 minutes you'll have signed tool calls and a local audit log at `~/.signet/audit/`.
+- [**Claude Code**](#claude-code-plugin): Best for the fastest first run in a coding agent. Run `/plugin install signet@claude-plugins-official` in Claude Code. In 5 minutes you'll have signed tool calls and a local audit log at `~/.signet/audit/`.
 - [**Codex CLI**](#codex-plugin): Best for signing Bash tool calls in Codex. Copy `plugins/codex/` into `~/.codex/plugins/signet` and add one `PostToolUse` hook. In 5 minutes you'll have signed Bash actions in Codex using the same audit trail.
 - [**MCP clients**](#mcp-client-integration): Best if you control an MCP client or transport. Wrap your transport with `new SigningTransport(inner, secretKey, "my-agent")`. In 5 minutes you'll have signed `tools/call` requests with receipts in `params._meta._signet`.
 - [**MCP servers**](#mcp-server-verification): Best if you want verification before execution. Call `verifyRequest(request, {...})` in your tool handler. In 5 minutes you'll have signer, freshness, target-binding, and tool/params checks at the execution boundary.
@@ -148,8 +148,12 @@ npm install @signet-auth/vercel-ai
 Auto-sign every tool call in [Claude Code](https://claude.ai/code) with zero configuration:
 
 ```bash
-# From the official Claude Code plugin marketplace
-/plugin install signet
+# Option A: From the official Anthropic plugin marketplace
+/plugin install signet@claude-plugins-official
+
+# Option B: Add Signet as a marketplace source, then install
+/plugin marketplace add Prismer-AI/signet
+/plugin install signet@signet
 ```
 
 Every tool call is signed with Ed25519 and logged to a hash-chained audit trail at `~/.signet/audit/`.

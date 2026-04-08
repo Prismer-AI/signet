@@ -26,9 +26,8 @@ pub fn dashboard(args: DashboardArgs) -> Result<()> {
 }
 
 async fn run_server(args: DashboardArgs) -> Result<()> {
-    let signet_dir = signet_core::default_signet_dir();
     let state = dashboard::AppState {
-        signet_dir: std::path::PathBuf::from(signet_dir),
+        signet_dir: signet_core::default_signet_dir(),
         dev: args.dev,
     };
     let app = dashboard::router(state);

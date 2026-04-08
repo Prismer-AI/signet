@@ -13,7 +13,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> axum::Router {
     let shared = Arc::new(state);
     axum::Router::new()
-        .nest("/api", api::routes(shared.clone()))
+        .nest("/api", api::routes())
         .fallback(static_files::handler)
         .with_state(shared)
 }

@@ -7,11 +7,12 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+
 use signet_core::audit::{self, AuditFilter};
 
 use super::AppState;
 
-pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/records", get(get_records))
         .route("/chain-status", get(get_chain_status))
@@ -146,8 +147,14 @@ impl IntoResponse for AppError {
     }
 }
 
-impl<E: Into<anyhow::Error>> From<E> for AppError {
-    fn from(err: E) -> Self {
+impl From<signet_core::SignetError> for AppError {
+    fn from(err: signet_core::SignetError) -> Self {
+        AppError(anyhow::anyhow!("{err}"))
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
         AppError(err.into())
     }
 }

@@ -123,10 +123,10 @@ async fn get_stats(
             *by_version.entry(format!("v{v}")).or_default() += 1;
         }
         if let Some(ts) = r.get("ts").and_then(|t| t.as_str()) {
-            if earliest.as_ref().map_or(true, |e| ts < e.as_str()) {
+            if earliest.as_ref().is_none_or( |e| ts < e.as_str()) {
                 earliest = Some(ts.to_string());
             }
-            if latest.as_ref().map_or(true, |l| ts > l.as_str()) {
+            if latest.as_ref().is_none_or( |l| ts > l.as_str()) {
                 latest = Some(ts.to_string());
             }
         }

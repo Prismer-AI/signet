@@ -69,7 +69,7 @@ print(receipt.id)
 
 ## 选择你的入口
 
-- [**Claude Code**](#claude-code-plugin)：最适合最快跑通第一次体验。先用 `signet claude install`。5 分钟后你会得到自动签名的工具调用，以及写入 `~/.signet/audit/` 的本地审计日志。
+- [**Claude Code**](#claude-code-plugin)：最适合最快跑通第一次体验。在 Claude Code 中运行 `/plugin install signet`。5 分钟后你会得到自动签名的工具调用，以及写入 `~/.signet/audit/` 的本地审计日志。
 - [**Codex CLI**](#codex-plugin)：最适合给 Codex 的 Bash 工具调用补签名。把 `plugins/codex/` 复制到 `~/.codex/plugins/signet`，再加一个 `PostToolUse` hook。5 分钟后你会得到写入同一条 Signet 审计轨迹的 Codex Bash 行为记录。
 - [**MCP 客户端**](#mcp-client-integration)：最适合你已经控制 MCP client 或 transport 的情况。用 `new SigningTransport(inner, secretKey, "my-agent")` 包住 transport。5 分钟后你会得到带 `params._meta._signet` 收据的签名 `tools/call` 请求。
 - [**MCP 服务端**](#mcp-server-verification)：最适合你希望在执行前做验证。先在处理函数里调用 `verifyRequest(request, {...})`。5 分钟后你会得到发生在执行边界的服务端校验：签名者、freshness、target binding，以及 tool/params match。
@@ -138,33 +138,20 @@ npx @signet-auth/mcp-tools
 在 [Claude Code](https://claude.ai/code) 中自动签名每次工具调用，零配置：
 
 ```bash
-# 从 marketplace 安装（如已上架）
-claude plugin add signet
-
-# 或从 Git 安装
-claude plugin add --from https://github.com/Prismer-AI/signet
-
-# 或通过 CLI
-signet claude install
+# 从官方 Claude Code 插件市场安装
+/plugin install signet
 ```
 
 每次工具调用都会用 Ed25519 签名，并记录到 `~/.signet/audit/` 的哈希链审计日志中。
 
-也可以不用 plugin 系统，直接在 `~/.claude/settings.json` 中配置 hook：
+其他安装方式：
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "node ~/signet/plugins/claude-code/bin/sign.cjs",
-        "timeout": 5
-      }]
-    }]
-  }
-}
+```bash
+# 从 Git 安装
+claude plugin add --from https://github.com/Prismer-AI/signet
+
+# 通过 signet CLI
+signet claude install
 ```
 
 <a id="codex-plugin"></a>

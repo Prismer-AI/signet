@@ -4,49 +4,22 @@ Cryptographic signing for every tool call in Claude Code. Ed25519 receipts + has
 
 ## Install
 
-### Option A: Plugin from marketplace
+From the official Claude Code plugin marketplace:
 
 ```bash
-claude plugin add signet
+/plugin install signet
 ```
 
-### Option B: Plugin from Git
+Alternative install methods:
 
 ```bash
+# From Git
 claude plugin add --from https://github.com/Prismer-AI/signet
-```
 
-Or clone and install locally:
-
-```bash
+# Clone and install locally
 git clone https://github.com/Prismer-AI/signet.git
 claude plugin add ./signet/plugins/claude-code
 ```
-
-### Option C: Hook only (no plugin system needed)
-
-Add this to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ~/signet/plugins/claude-code/bin/sign.cjs",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Adjust the path to wherever you cloned the repo.
 
 ## What It Does
 

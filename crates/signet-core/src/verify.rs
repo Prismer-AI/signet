@@ -93,12 +93,19 @@ pub struct BilateralVerifyOptions {
     /// Maximum allowed seconds between agent signing and server response.
     /// Default: 300 (5 minutes). Set to 0 to disable time window check.
     pub max_time_window_secs: u64,
+
+    /// Optional trusted agent public key. When set, the embedded agent pubkey
+    /// in the receipt is checked against this key. Without this, the function
+    /// only verifies self-consistency (the agent receipt is valid under *its own*
+    /// embedded key) but cannot confirm the agent's identity is authorized.
+    pub trusted_agent_pubkey: Option<VerifyingKey>,
 }
 
 impl Default for BilateralVerifyOptions {
     fn default() -> Self {
         Self {
             max_time_window_secs: 300,
+            trusted_agent_pubkey: None,
         }
     }
 }
@@ -172,6 +179,15 @@ pub fn verify_bilateral_with_options(
         .map_err(|_| SignetError::InvalidReceipt("agent pubkey not 32 bytes".to_string()))?;
     let agent_vk = VerifyingKey::from_bytes(&agent_pubkey_arr)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
+
+    // 2a. If a trusted agent key was supplied, ensure the receipt's agent key matches
+    if let Some(ref trusted) = options.trusted_agent_pubkey {
+        if agent_vk.as_bytes() != trusted.as_bytes() {
+            return Err(SignetError::InvalidReceipt(
+                "agent pubkey in receipt does not match trusted_agent_pubkey".to_string(),
+            ));
+        }
+    }
 
     verify(&receipt.agent_receipt, &agent_vk)?;
 
@@ -602,6 +618,7 @@ mod tests {
         let (bilateral, server_vk) = make_bilateral_with_ts(&future);
         let opts = BilateralVerifyOptions {
             max_time_window_secs: 1200,
+            ..Default::default()
         };
         assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
     }
@@ -614,6 +631,7 @@ mod tests {
         let (bilateral, server_vk) = make_bilateral_with_ts(&future);
         let opts = BilateralVerifyOptions {
             max_time_window_secs: 0,
+            ..Default::default()
         };
         assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
     }

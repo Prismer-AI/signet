@@ -1,8 +1,10 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use fs2::FileExt;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -167,35 +169,48 @@ pub fn append(dir: &Path, receipt: &serde_json::Value) -> Result<AuditRecord, Si
     let filename = format!("{}.jsonl", date);
     let filepath = adir.join(&filename);
 
-    let prev_hash = if filepath.exists() {
-        let content = fs::read_to_string(&filepath)?;
-        if let Some(last_line) = content.lines().rev().find(|l| !l.trim().is_empty()) {
-            let record: AuditRecord = serde_json::from_str(last_line)
-                .map_err(|e| SignetError::CorruptedRecord(format!("{filename}: {e}")))?;
-            record.record_hash
+    // Acquire an exclusive lock on a .lock file to prevent concurrent writers
+    // from corrupting the hash chain.
+    let lock_path = adir.join(format!("{filename}.lock"));
+    let lock_file = File::create(&lock_path)?;
+    lock_file.lock_exclusive()?;
+
+    let result = (|| -> Result<AuditRecord, SignetError> {
+        let prev_hash = if filepath.exists() {
+            let content = fs::read_to_string(&filepath)?;
+            if let Some(last_line) = content.lines().rev().find(|l| !l.trim().is_empty()) {
+                let record: AuditRecord = serde_json::from_str(last_line)
+                    .map_err(|e| SignetError::CorruptedRecord(format!("{filename}: {e}")))?;
+                record.record_hash
+            } else {
+                last_record_hash(dir)?
+            }
         } else {
             last_record_hash(dir)?
-        }
-    } else {
-        last_record_hash(dir)?
-    };
+        };
 
-    let record_hash = compute_record_hash(receipt, &prev_hash)?;
+        let record_hash = compute_record_hash(receipt, &prev_hash)?;
 
-    let record = AuditRecord {
-        receipt: receipt.clone(),
-        prev_hash,
-        record_hash,
-    };
+        let record = AuditRecord {
+            receipt: receipt.clone(),
+            prev_hash,
+            record_hash,
+        };
 
-    let json = serde_json::to_string(&record)?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&filepath)?;
-    writeln!(file, "{json}")?;
+        let json = serde_json::to_string(&record)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&filepath)?;
+        writeln!(file, "{json}")?;
 
-    Ok(record)
+        Ok(record)
+    })();
+
+    // Always release the lock
+    let _ = lock_file.unlock();
+
+    result
 }
 
 pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, SignetError> {

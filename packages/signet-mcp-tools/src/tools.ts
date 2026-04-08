@@ -19,7 +19,7 @@ import {
 
 export function createSignetToolsServer(): Server {
   const server = new Server(
-    { name: 'signet-mcp-tools', version: '0.4.0' },
+    { name: 'signet-mcp-tools', version: '0.4.5' },
     { capabilities: { tools: {} } },
   );
 
@@ -27,44 +27,43 @@ export function createSignetToolsServer(): Server {
     tools: [
       {
         name: 'signet_generate_keypair',
-        description: 'Generate a new Ed25519 keypair. Returns only the public key. Use Signet CLI to manage secret keys securely.',
+        description: 'Create a fresh Ed25519 identity for demos, tests, or agent bootstrapping. Returns JSON with {public_key, note}. The secret key is intentionally not returned by this MCP tool, so use Signet CLI or your own secure key storage for long-lived identities.',
         inputSchema: { type: 'object' as const, properties: {} },
       },
       {
         name: 'signet_sign',
-        description: 'Sign an action (tool call) with an Ed25519 key, producing a cryptographic receipt. Uses SIGNET_SECRET_KEY env var if set, otherwise requires secret_key argument.',
+        description: 'Create a Signet receipt for a tool call before execution. The secret key is read from the SIGNET_SECRET_KEY environment variable (never passed as an argument). Returns the full signed receipt JSON.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            secret_key: { type: 'string', description: 'Base64 secret key (optional if SIGNET_SECRET_KEY env is set)' },
-            tool: { type: 'string', description: 'Tool name being called' },
-            params: { description: 'Tool parameters (any JSON value)' },
-            signer_name: { type: 'string', description: 'Agent name' },
-            signer_owner: { type: 'string', description: 'Agent owner (optional)' },
-            target: { type: 'string', description: 'Target MCP server URI' },
+            tool: { type: 'string', description: 'Name of the tool or action being attested, for example github_create_issue or file_write.' },
+            params: { description: 'Exact JSON arguments to bind into the receipt. Changing this JSON later will change the params hash and invalidate verification expectations.' },
+            signer_name: { type: 'string', description: 'Stable signer or agent name that will appear in the receipt, such as ci-agent or research-bot.' },
+            signer_owner: { type: 'string', description: 'Optional human, team, or org that owns the signer identity.' },
+            target: { type: 'string', description: 'Optional target URI for the system where the action will run, such as mcp://github.local.' },
           },
           required: ['tool', 'signer_name'],
         },
       },
       {
         name: 'signet_verify',
-        description: 'Verify a Signet receipt signature. Returns {valid: true/false}. Accepts both bare base64 and ed25519:-prefixed public keys.',
+        description: 'Verify that a receipt was signed by the expected public key. Use this to validate receipts from agents, logs, tests, or exchanged MCP metadata. Returns JSON {valid: boolean}. This checks signature validity against the supplied key; it does not enforce freshness, authorization, or policy decisions.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            receipt_json: { type: 'string', description: 'Receipt JSON string' },
-            public_key: { type: 'string', description: 'Public key (base64 or ed25519:base64)' },
+            receipt_json: { type: 'string', description: 'Serialized receipt JSON to verify. This should be the full receipt object as a string.' },
+            public_key: { type: 'string', description: 'Expected signer public key, either bare base64 or ed25519:base64.' },
           },
           required: ['receipt_json', 'public_key'],
         },
       },
       {
         name: 'signet_content_hash',
-        description: 'Compute SHA-256 hash of canonical JSON (RFC 8785 JCS). Accepts any JSON value.',
+        description: 'Compute a deterministic SHA-256 hash over canonical JSON using RFC 8785 JCS. Use this when you need a stable digest for receipt params, audit records, or comparing semantically identical JSON with different formatting or key order. Returns JSON {hash: string}.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            content: { description: 'JSON content to hash (object, array, string, number, boolean, or null)' },
+            content: { description: 'Any JSON value to hash: object, array, string, number, boolean, or null.' },
           },
           required: ['content'],
         },
@@ -86,10 +85,10 @@ export function createSignetToolsServer(): Server {
         }
 
         case 'signet_sign': {
-          const secretKey = (args?.secret_key as string) ?? process.env.SIGNET_SECRET_KEY;
+          const secretKey = process.env.SIGNET_SECRET_KEY;
           if (!secretKey) {
             return {
-              content: [{ type: 'text', text: 'Error: no secret key. Set SIGNET_SECRET_KEY env var or pass secret_key argument.' }],
+              content: [{ type: 'text', text: 'Error: SIGNET_SECRET_KEY environment variable is not set. Set it before starting the server.' }],
               isError: true,
             };
           }

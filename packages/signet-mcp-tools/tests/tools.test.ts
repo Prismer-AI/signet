@@ -5,7 +5,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { generateKeypair } from '@signet-auth/core';
 import { createSignetToolsServer } from '../src/tools.js';
 
-async function createClient(): Promise<Client> {
+async function createClient(opts?: { secretKey?: string }): Promise<Client> {
+  if (opts?.secretKey) {
+    process.env.SIGNET_SECRET_KEY = opts.secretKey;
+  }
   const server = createSignetToolsServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -38,12 +41,11 @@ describe('@signet-auth/mcp-tools', () => {
   });
 
   it('signet_sign produces valid receipt', async () => {
-    const client = await createClient();
     const kp = generateKeypair();
+    const client = await createClient({ secretKey: kp.secretKey });
     const result = await client.callTool({
       name: 'signet_sign',
       arguments: {
-        secret_key: kp.secretKey,
         tool: 'echo',
         params: { message: 'hello' },
         signer_name: 'test-agent',
@@ -62,7 +64,8 @@ describe('@signet-auth/mcp-tools', () => {
     assert(receipt.action.params_hash.startsWith('sha256:'));
   });
 
-  it('signet_sign without key returns error', async () => {
+  it('signet_sign without SIGNET_SECRET_KEY returns error', async () => {
+    delete process.env.SIGNET_SECRET_KEY;
     const client = await createClient();
     const result = await client.callTool({
       name: 'signet_sign',
@@ -70,15 +73,15 @@ describe('@signet-auth/mcp-tools', () => {
     });
     assert.strictEqual(result.isError, true);
     const text = (result.content as Array<{ type: string; text: string }>)[0].text;
-    assert(text.includes('no secret key'));
+    assert(text.includes('SIGNET_SECRET_KEY'));
   });
 
   it('signet_sign without required fields returns error', async () => {
-    const client = await createClient();
     const kp = generateKeypair();
+    const client = await createClient({ secretKey: kp.secretKey });
     const result = await client.callTool({
       name: 'signet_sign',
-      arguments: { secret_key: kp.secretKey },
+      arguments: {},
     });
     assert.strictEqual(result.isError, true);
     const text = (result.content as Array<{ type: string; text: string }>)[0].text;
@@ -86,14 +89,13 @@ describe('@signet-auth/mcp-tools', () => {
   });
 
   it('signet_verify with valid receipt returns valid: true', async () => {
-    const client = await createClient();
     const kp = generateKeypair();
+    const client = await createClient({ secretKey: kp.secretKey });
 
     // Sign first
     const signResult = await client.callTool({
       name: 'signet_sign',
       arguments: {
-        secret_key: kp.secretKey,
         tool: 'echo',
         params: { msg: 'test' },
         signer_name: 'agent',
@@ -111,14 +113,13 @@ describe('@signet-auth/mcp-tools', () => {
   });
 
   it('signet_verify with wrong key returns valid: false', async () => {
-    const client = await createClient();
     const kp1 = generateKeypair();
     const kp2 = generateKeypair();
+    const client = await createClient({ secretKey: kp1.secretKey });
 
     const signResult = await client.callTool({
       name: 'signet_sign',
       arguments: {
-        secret_key: kp1.secretKey,
         tool: 'echo',
         params: {},
         signer_name: 'agent',
@@ -135,13 +136,12 @@ describe('@signet-auth/mcp-tools', () => {
   });
 
   it('signet_verify accepts ed25519:-prefixed public key', async () => {
-    const client = await createClient();
     const kp = generateKeypair();
+    const client = await createClient({ secretKey: kp.secretKey });
 
     const signResult = await client.callTool({
       name: 'signet_sign',
       arguments: {
-        secret_key: kp.secretKey,
         tool: 'echo',
         params: {},
         signer_name: 'agent',
@@ -200,14 +200,13 @@ describe('@signet-auth/mcp-tools', () => {
   });
 
   it('sign → verify full roundtrip via MCP', async () => {
-    const client = await createClient();
     const kp = generateKeypair();
+    const client = await createClient({ secretKey: kp.secretKey });
 
     // Generate, sign, verify — all through the MCP server
     const signResult = await client.callTool({
       name: 'signet_sign',
       arguments: {
-        secret_key: kp.secretKey,
         tool: 'github_create_issue',
         params: { title: 'fix bug', body: 'details' },
         signer_name: 'ci-agent',

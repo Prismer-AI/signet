@@ -2,10 +2,8 @@
 /**
  * @signet-auth/mcp-tools — Standalone MCP server exposing Signet crypto tools.
  *
- * Security note: signet_sign requires a secret key as input. This is inherent
- * to the signing operation. In production, use SIGNET_SECRET_KEY env var instead
- * of passing keys through tool arguments. The generate_keypair tool only returns
- * the public key — secret keys should be managed via the Signet CLI keystore.
+ * signet_sign reads the secret key from the SIGNET_SECRET_KEY environment
+ * variable. Keys are never accepted as tool arguments.
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createSignetToolsServer } from './tools.js';

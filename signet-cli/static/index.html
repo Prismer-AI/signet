@@ -111,7 +111,7 @@ const h = (tag, attrs, ...kids) => {
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v);
   });
-  kids.flat().forEach(c => el.append(typeof c === 'string' ? c : c));
+  kids.flat().forEach(c => { if (c != null) el.append(c); });
   return el;
 };
 
@@ -119,8 +119,28 @@ let state = { view: 'timeline', expandedRow: null };
 
 async function fetchJSON(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${res.status}`);
+  }
   return res.json();
+}
+
+// Extract fields from any receipt version (v1/v2/v3)
+function receiptTime(r) {
+  const v = r.v || 1;
+  if (v === 1) return r.ts;
+  if (v === 2) return r.ts_request;
+  return r.ts_response; // v3+
+}
+function receiptTool(r) {
+  return r.action?.tool || r.agent_receipt?.action?.tool || '';
+}
+function receiptSigner(r) {
+  return r.signer?.name || r.agent_receipt?.signer?.name || '';
+}
+function receiptTarget(r) {
+  return r.action?.target || r.agent_receipt?.action?.target || '';
 }
 
 function navigate(view) {
@@ -186,11 +206,11 @@ async function renderTimeline() {
         const r = rec.receipt;
         const v = r.v || 1;
         const row = h('tr', {style: 'cursor:pointer', onclick: () => toggleRow(i, rec)},
-          h('td', {class: 'mono'}, fmtTime(r.ts)),
+          h('td', {class: 'mono'}, fmtTime(receiptTime(r))),
           h('td', null, h('span', {class: `badge badge-v${v}`}, `v${v}`)),
-          h('td', null, r.signer?.name || ''),
-          h('td', {class: 'mono'}, r.action?.tool || ''),
-          h('td', {class: 'mono'}, truncate(r.action?.target, 24)),
+          h('td', null, receiptSigner(r)),
+          h('td', {class: 'mono'}, receiptTool(r)),
+          h('td', {class: 'mono'}, truncate(receiptTarget(r), 24)),
           h('td', {class: 'mono'}, truncate(r.id, 16))
         );
         const detail = h('tr', {id: `detail-${i}`, style: 'display:none'},
@@ -336,12 +356,15 @@ async function renderStats() {
       );
     };
 
-    app.replaceChildren(
-      cards,
-      makeChart('By Tool', stats.by_tool),
-      makeChart('By Signer', stats.by_signer),
-      makeChart('By Version', stats.by_version)
-    );
+    const parts = [cards];
+    if (stats.truncated) {
+      parts.push(h('div', {style: 'color:var(--yellow);margin-bottom:12px;padding:8px 12px;background:var(--bg2);border:1px solid var(--yellow);border-radius:6px'},
+        `Showing stats for first ${stats.total_records} records (log has more — results are truncated).`));
+    }
+    parts.push(makeChart('By Tool', stats.by_tool));
+    parts.push(makeChart('By Signer', stats.by_signer));
+    parts.push(makeChart('By Version', stats.by_version));
+    app.replaceChildren(...parts);
   } catch (e) {
     app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));
   }

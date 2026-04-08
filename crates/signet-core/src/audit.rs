@@ -65,7 +65,7 @@ fn audit_dir(base: &Path) -> PathBuf {
     base.join("audit")
 }
 
-fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
+pub fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
     // v1/v2: receipt.action.tool
     receipt
         .get("action")
@@ -81,7 +81,7 @@ fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
         })
 }
 
-fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
+pub fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
     let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
     match version {
         1 => receipt.get("ts").and_then(|t| t.as_str()),
@@ -90,7 +90,7 @@ fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
     }
 }
 
-fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
+pub fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
     // v1/v2: receipt.signer.name
     receipt
         .get("signer")

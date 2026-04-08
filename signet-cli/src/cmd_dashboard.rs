@@ -36,7 +36,9 @@ async fn run_server(args: DashboardArgs) -> Result<()> {
     eprintln!("Signet Dashboard: http://localhost:{}", args.port);
 
     if args.open {
-        let _ = open::that(format!("http://localhost:{}", args.port));
+        if let Err(e) = open::that(format!("http://localhost:{}", args.port)) {
+            eprintln!("Warning: could not open browser: {e}");
+        }
     }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

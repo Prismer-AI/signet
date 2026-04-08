@@ -117,16 +117,16 @@ async fn get_stats(
 
     for record in &records {
         let r = &record.receipt;
-        if let Some(tool) = r.get("action").and_then(|a| a.get("tool")).and_then(|t| t.as_str()) {
+        if let Some(tool) = audit::extract_tool(r) {
             *by_tool.entry(tool.to_string()).or_default() += 1;
         }
-        if let Some(name) = r.get("signer").and_then(|s| s.get("name")).and_then(|n| n.as_str()) {
+        if let Some(name) = audit::extract_signer_name(r) {
             *by_signer.entry(name.to_string()).or_default() += 1;
         }
         if let Some(v) = r.get("v").and_then(|v| v.as_u64()) {
             *by_version.entry(format!("v{v}")).or_default() += 1;
         }
-        if let Some(ts) = r.get("ts").and_then(|t| t.as_str()) {
+        if let Some(ts) = audit::extract_timestamp(r) {
             if earliest.as_ref().is_none_or(|e| ts < e.as_str()) {
                 earliest = Some(ts.to_string());
             }

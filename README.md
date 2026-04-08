@@ -1,8 +1,8 @@
 <h1 align="center">Signet</h1>
 
 <p align="center">
-  <strong>Signed audit trails for AI agent tool calls</strong><br/>
-  <sub>See exactly which agent called which tool, when, and with what params hash. Verify offline in 3 lines.</sub>
+  <strong>Make AI agent tool calls verifiable at the execution boundary</strong><br/>
+  <sub>See which agent called which tool, when, and with what params hash. Verify offline or before execution in 3 lines.</sub>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
   <a href="./README.zh.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
 </p>
 
-AI agents can open tickets, call MCP tools, run shell commands, and ship code with almost no built-in accountability. Signet gives each agent an Ed25519 identity, signs every tool call, writes a hash-chained audit log, and lets you verify receipts offline.
+AI agents can open tickets, call MCP tools, run shell commands, and ship code with almost no built-in accountability. Signet gives each agent an Ed25519 identity, signs every tool call, writes a hash-chained audit log, and lets clients or servers verify what was actually sent before trusting it.
 
 If Signet is useful to you, star this repo to help more teams find it.
 
@@ -61,7 +61,33 @@ assert agent.verify(receipt)
 print(receipt.id)
 ```
 
-Prefer a different entry point? See the sections below for Claude Code, Codex CLI, the CLI, MCP integration, Python frameworks, and Vercel AI SDK.
+If you're new, start with one of these four paths:
+
+## Choose Your Path
+
+- [**Claude Code**](#claude-code-plugin): Best for the fastest first run in a coding agent. Run `signet claude install`. In 5 minutes you'll have signed tool calls and a local audit log at `~/.signet/audit/`.
+- [**Codex CLI**](#codex-plugin): Best for signing Bash tool calls in Codex. Copy `plugins/codex/` into `~/.codex/plugins/signet` and add one `PostToolUse` hook. In 5 minutes you'll have signed Bash actions in Codex using the same audit trail.
+- [**MCP clients**](#mcp-client-integration): Best if you control an MCP client or transport. Wrap your transport with `new SigningTransport(inner, secretKey, "my-agent")`. In 5 minutes you'll have signed `tools/call` requests with receipts in `params._meta._signet`.
+- [**MCP servers**](#mcp-server-verification): Best if you want verification before execution. Call `verifyRequest(request, {...})` in your tool handler. In 5 minutes you'll have signer, freshness, target-binding, and tool/params checks at the execution boundary.
+
+## See It Reject Bad Requests
+
+Run the shortest execution-boundary demo:
+
+```bash
+cd examples/mcp-agent
+npm run execution-boundary-demo
+```
+
+<p align="center">
+  <img src="demo-execution-boundary.svg" alt="Execution-boundary demo showing invalid requests rejected before execution" width="820">
+</p>
+
+<p align="center">
+  <sub>Prefer motion? Watch the <a href="./demo-execution-boundary.mp4">MP4</a> or <a href="./demo-execution-boundary.gif">GIF</a>.</sub>
+</p>
+
+See [examples/mcp-agent/demo-execution-boundary.mjs](./examples/mcp-agent/demo-execution-boundary.mjs) for the demo source.
 
 ## When Teams Reach For Signet
 
@@ -98,6 +124,7 @@ npm install @signet-auth/vercel-ai
 
 ## Quick Start
 
+<a id="claude-code-plugin"></a>
 ### Claude Code Plugin
 
 Auto-sign every tool call in [Claude Code](https://claude.ai/code) with zero configuration:
@@ -132,6 +159,7 @@ Alternative: add a hook directly to `~/.claude/settings.json` without the plugin
 }
 ```
 
+<a id="codex-plugin"></a>
 ### Codex Plugin
 
 Auto-sign every Bash tool call in [Codex CLI](https://github.com/openai/codex):
@@ -184,7 +212,8 @@ signet audit --since 24h
 signet verify --chain
 ```
 
-### MCP Integration (TypeScript)
+<a id="mcp-client-integration"></a>
+### MCP Client Integration (TypeScript)
 
 <p align="center">
   <img src="demo-mcp.svg" alt="Signet MCP bilateral flow demo" width="820">
@@ -214,7 +243,11 @@ const result = await client.callTool({
 ```
 
 Every `tools/call` request gets a signed receipt injected into `params._meta._signet`.
-MCP servers can optionally verify these signatures:
+
+<a id="mcp-server-verification"></a>
+### MCP Server Verification
+
+If you control the MCP server too, verify requests before execution:
 
 ```typescript
 import { verifyRequest } from "@signet-auth/mcp-server";

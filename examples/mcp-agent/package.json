@@ -5,6 +5,7 @@
   "scripts": {
     "agent": "npx tsx agent.ts",
     "echo-server": "npx tsx echo-server.ts",
+    "execution-boundary-demo": "node demo-execution-boundary.mjs",
     "verifier-server": "node verifier-server.mjs",
     "smoke": "node --test verifier-server.test.mjs"
   },

@@ -24,6 +24,8 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 dirs = "5"
 regex = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 fs2 = "0.4"
 
 [dev-dependencies]

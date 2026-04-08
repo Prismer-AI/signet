@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ fn build_filter(q: &RecordQuery) -> Result<AuditFilter, AppError> {
         .as_deref()
         .map(audit::parse_since)
         .transpose()
-        .map_err(|e| AppError(anyhow::anyhow!("{e}")))?;
+        .map_err(|e| AppError(format!("{e}")))?;
     Ok(AuditFilter {
         since,
         tool: q.tool.clone(),
@@ -51,8 +51,9 @@ async fn get_records(
     let filter = build_filter(&q)?;
     let records = tokio::task::spawn_blocking(move || audit::query(&dir, &filter))
         .await
-        .map_err(|e| AppError(anyhow::anyhow!("task join: {e}")))??;
-    Ok(Json(serde_json::to_value(records)?))
+        .map_err(|e| AppError(format!("task join: {e}")))?
+        .map_err(|e| AppError(format!("{e}")))?;
+    Ok(Json(serde_json::to_value(records).map_err(|e| AppError(format!("{e}")))?))
 }
 
 async fn get_chain_status(
@@ -61,8 +62,9 @@ async fn get_chain_status(
     let dir = state.signet_dir.clone();
     let status = tokio::task::spawn_blocking(move || audit::verify_chain(&dir))
         .await
-        .map_err(|e| AppError(anyhow::anyhow!("task join: {e}")))??;
-    Ok(Json(serde_json::to_value(status)?))
+        .map_err(|e| AppError(format!("task join: {e}")))?
+        .map_err(|e| AppError(format!("{e}")))?;
+    Ok(Json(serde_json::to_value(status).map_err(|e| AppError(format!("{e}")))?))
 }
 
 async fn get_verify_signatures(
@@ -73,8 +75,9 @@ async fn get_verify_signatures(
     let filter = build_filter(&q)?;
     let result = tokio::task::spawn_blocking(move || audit::verify_signatures(&dir, &filter))
         .await
-        .map_err(|e| AppError(anyhow::anyhow!("task join: {e}")))??;
-    Ok(Json(serde_json::to_value(result)?))
+        .map_err(|e| AppError(format!("task join: {e}")))?
+        .map_err(|e| AppError(format!("{e}")))?;
+    Ok(Json(serde_json::to_value(result).map_err(|e| AppError(format!("{e}")))?))
 }
 
 #[derive(Serialize)]
@@ -82,7 +85,7 @@ struct Stats {
     total_records: usize,
     by_tool: HashMap<String, usize>,
     by_signer: HashMap<String, usize>,
-    by_version: HashMap<u8, usize>,
+    by_version: HashMap<String, usize>,
     earliest: Option<String>,
     latest: Option<String>,
 }
@@ -99,11 +102,12 @@ async fn get_stats(
         audit::query(&dir, &filter)
     })
     .await
-    .map_err(|e| AppError(anyhow::anyhow!("task join: {e}")))??;
+    .map_err(|e| AppError(format!("task join: {e}")))?
+    .map_err(|e| AppError(format!("{e}")))?;
 
     let mut by_tool: HashMap<String, usize> = HashMap::new();
     let mut by_signer: HashMap<String, usize> = HashMap::new();
-    let mut by_version: HashMap<u8, usize> = HashMap::new();
+    let mut by_version: HashMap<String, usize> = HashMap::new();
     let mut earliest: Option<String> = None;
     let mut latest: Option<String> = None;
 
@@ -116,7 +120,7 @@ async fn get_stats(
             *by_signer.entry(name.to_string()).or_default() += 1;
         }
         if let Some(v) = r.get("v").and_then(|v| v.as_u64()) {
-            *by_version.entry(v as u8).or_default() += 1;
+            *by_version.entry(format!("v{v}")).or_default() += 1;
         }
         if let Some(ts) = r.get("ts").and_then(|t| t.as_str()) {
             if earliest.as_ref().map_or(true, |e| ts < e.as_str()) {
@@ -138,23 +142,11 @@ async fn get_stats(
     }))
 }
 
-struct AppError(anyhow::Error);
+struct AppError(String);
 
 impl IntoResponse for AppError {
-    fn into_response(self) -> axum::response::Response {
-        let body = serde_json::json!({ "error": self.0.to_string() });
+    fn into_response(self) -> Response {
+        let body = serde_json::json!({ "error": self.0 });
         (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
-    }
-}
-
-impl From<signet_core::SignetError> for AppError {
-    fn from(err: signet_core::SignetError) -> Self {
-        AppError(anyhow::anyhow!("{err}"))
-    }
-}
-
-impl From<serde_json::Error> for AppError {
-    fn from(err: serde_json::Error) -> Self {
-        AppError(err.into())
     }
 }

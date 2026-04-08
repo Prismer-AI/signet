@@ -22,6 +22,10 @@ pub mod fs_ops {
     use serde_json::Value;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::LazyLock;
+
+    static KEY_NAME_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").expect("regex is valid"));
 
     /// Basic info about a stored key (from the .pub file).
     #[derive(Debug, Clone)]
@@ -34,8 +38,7 @@ pub mod fs_ops {
 
     /// Validate a key name: must match `[a-zA-Z0-9_-]+`.
     pub fn validate_key_name(name: &str) -> Result<(), SignetError> {
-        let re = Regex::new(r"^[a-zA-Z0-9_-]+$").expect("regex is valid");
-        if re.is_match(name) {
+        if KEY_NAME_RE.is_match(name) {
             Ok(())
         } else {
             Err(SignetError::InvalidName(name.to_string()))
@@ -141,6 +144,12 @@ pub mod fs_ops {
         let json = fs::read_to_string(&pub_path)?;
         let file: PubKeyFile = serde_json::from_str(&json)
             .map_err(|e| SignetError::CorruptedFile(format!("invalid .pub file: {e}")))?;
+        if file.name != name {
+            return Err(SignetError::CorruptedFile(format!(
+                "{name}.pub: name field '{}' does not match filename",
+                file.name,
+            )));
+        }
         Ok(KeyInfo {
             name: file.name,
             owner: file.owner,

@@ -80,7 +80,7 @@ export function createSignetToolsServer(): Server {
           const kp = generateKeypair();
           // Only return public key — secret key management via CLI/env
           return {
-            content: [{ type: 'text', text: JSON.stringify({ public_key: kp.publicKey, note: 'Secret key generated but not returned. Use Signet CLI for key management.' }) }],
+            content: [{ type: 'text', text: JSON.stringify({ public_key: kp.publicKey, note: 'This is an ephemeral keypair for demos/tests. The secret key was not returned for security. For persistent identities, use: signet identity generate --name <name>' }) }],
           };
         }
 

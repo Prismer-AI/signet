@@ -6,10 +6,15 @@ export class NonceCache {
   private seen = new Map<string, number>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private ttlMs: number;
+  private maxSize: number;
 
-  /** @param ttlMs Time-to-live for nonce entries in milliseconds. Default: 300_000 (5 min). */
-  constructor(ttlMs = 300_000) {
+  /**
+   * @param ttlMs Time-to-live for nonce entries in milliseconds. Default: 300_000 (5 min).
+   * @param maxSize Maximum number of entries before oldest are evicted. Default: 100_000.
+   */
+  constructor(ttlMs = 300_000, maxSize = 100_000) {
     this.ttlMs = ttlMs;
+    this.maxSize = maxSize;
     this.cleanupTimer = setInterval(() => this.prune(), ttlMs);
     this.cleanupTimer.unref();
   }
@@ -25,6 +30,15 @@ export class NonceCache {
       return false;
     }
     this.seen.set(nonce, now + this.ttlMs);
+    // Evict oldest entries if over capacity
+    if (this.seen.size > this.maxSize) {
+      const toRemove = this.seen.size - this.maxSize;
+      const iter = this.seen.keys();
+      for (let i = 0; i < toRemove; i++) {
+        const key = iter.next().value;
+        if (key !== undefined) this.seen.delete(key);
+      }
+    }
     return true;
   }
 

@@ -11,8 +11,23 @@ use crate::receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };
 
+fn validate_params_hash(hash: &str) -> Result<(), SignetError> {
+    if hash.is_empty() {
+        return Ok(());
+    }
+    if let Some(hex_part) = hash.strip_prefix("sha256:") {
+        if hex_part.len() == 64 && hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(());
+        }
+    }
+    Err(SignetError::InvalidReceipt(format!(
+        "params_hash must be empty or match sha256:[0-9a-f]{{64}}, got: {hash}"
+    )))
+}
+
 fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
     if action.params.is_null() && !action.params_hash.is_empty() {
+        validate_params_hash(&action.params_hash)?;
         return Ok(action.params_hash.clone());
     }
     let params_to_hash = if action.params.is_null() {

@@ -35,6 +35,8 @@ export interface SignetCallbackOptions {
   target?: string;
   /** Whether to include tool args hash in the receipt (default: true). */
   hashArgs?: boolean;
+  /** Custom warning logger. Defaults to console.warn. Set to `() => {}` to silence. */
+  onWarn?: (message: string, error: unknown) => void;
 }
 
 /**
@@ -53,6 +55,7 @@ export function createSignetCallbacks(
   const signerOwner = options.signerOwner ?? "";
   const target = options.target ?? "vercel-ai://local";
   const hashArgs = options.hashArgs ?? true;
+  const warn = options.onWarn ?? ((msg: string, err: unknown) => console.warn(msg, err));
   const receipts: ToolCallReceipt[] = [];
 
   return {
@@ -79,7 +82,7 @@ export function createSignetCallbacks(
         receipts.push({ toolName, toolCallId, receipt });
       } catch (err) {
         // Never block tool execution, but log for debugging
-        console.warn("[signet] Failed to sign tool call:", err);
+        warn("[signet] Failed to sign tool call:", err);
       }
     },
 

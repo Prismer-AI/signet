@@ -61,7 +61,6 @@ __pycache__/
 # Environment
 .env
 .env.*
-package-lock.json
 node_modules/
 .mcpregistry_github_token
 .mcpregistry_registry_token

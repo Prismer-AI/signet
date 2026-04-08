@@ -128,7 +128,8 @@ export class SigningTransport implements Transport {
                   this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
                 }
               } else {
-                // Sig valid + no trust anchors configured
+                // Sig valid but no trust anchors configured — accept but warn
+                this.onerror?.(new Error('bilateral receipt accepted without trustedServerKeys — set trustedServerKeys to verify server identity'));
                 this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
               }
             }
@@ -138,7 +139,9 @@ export class SigningTransport implements Transport {
         }
       }
 
-      // Forward message to outer onmessage only after bilateral checks pass
+      // Forward message to outer onmessage regardless of bilateral check outcome.
+      // Bilateral errors are reported via onerror but do not block message delivery,
+      // since the underlying tool call has already executed on the server.
       this.onmessage?.(msg, extra);
     };
 

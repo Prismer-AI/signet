@@ -6,9 +6,11 @@ use clap::{Parser, Subcommand};
 
 mod cmd_audit;
 mod cmd_claude;
+mod cmd_dashboard;
 mod cmd_identity;
 mod cmd_sign;
 mod cmd_verify;
+mod dashboard;
 
 #[derive(Parser)]
 #[command(name = "signet", about = "Cryptographic action receipts for AI agents")]
@@ -35,6 +37,8 @@ enum Commands {
         #[command(subcommand)]
         action: cmd_claude::ClaudeAction,
     },
+    /// Start the audit log dashboard (local web viewer)
+    Dashboard(cmd_dashboard::DashboardArgs),
 }
 
 #[derive(Subcommand)]
@@ -85,6 +89,7 @@ fn run() -> Result<()> {
         Commands::Verify(args) => cmd_verify::verify(args)?,
         Commands::Audit(args) => cmd_audit::audit(args)?,
         Commands::Claude { action } => cmd_claude::run(action)?,
+        Commands::Dashboard(args) => cmd_dashboard::dashboard(args)?,
     }
     Ok(())
 }

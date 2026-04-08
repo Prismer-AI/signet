@@ -31,14 +31,14 @@ pub struct AuditFilter {
     pub limit: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ChainStatus {
     pub total_records: usize,
     pub valid: bool,
     pub break_point: Option<ChainBreak>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ChainBreak {
     pub file: String,
     pub line: usize,
@@ -46,14 +46,14 @@ pub struct ChainBreak {
     pub actual_hash: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct VerifyResult {
     pub total: usize,
     pub valid: usize,
     pub failures: Vec<VerifyFailure>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct VerifyFailure {
     pub file: String,
     pub line: usize,

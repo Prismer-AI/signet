@@ -24,6 +24,10 @@ base64 = "0.22"
 ed25519-dalek = "2"
 dirs = "5"
 chrono = "0.4"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tower-http = { version = "0.6", features = ["cors"] }
+open = "5"
 
 [dev-dependencies]
 assert_cmd = "2"

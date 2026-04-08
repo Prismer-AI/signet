@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signet Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+  --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
+  --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px; }
+a { color: var(--blue); text-decoration: none; }
+nav {
+  display: flex; align-items: center; gap: 0; padding: 0 16px;
+  background: var(--bg2); border-bottom: 1px solid var(--bg3); height: 48px;
+}
+nav .logo { font-weight: 700; font-size: 16px; margin-right: 24px; color: var(--fg); }
+nav .logo span { color: var(--yellow); }
+nav button {
+  background: none; border: none; color: var(--fg2); font-size: 14px;
+  padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent;
+  font-family: var(--sans); height: 48px;
+}
+nav button:hover { color: var(--fg); }
+nav button.active { color: var(--fg); border-bottom-color: var(--yellow); }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+.filters {
+  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.filters select, .filters input {
+  background: var(--bg2); border: 1px solid var(--bg3); color: var(--fg);
+  padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: var(--sans);
+}
+.filters input { width: 160px; }
+.filters button {
+  background: var(--bg3); border: 1px solid var(--fg3); color: var(--fg);
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.filters button:hover { background: var(--fg3); }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; color: var(--fg2); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px;
+  border-bottom: 1px solid var(--bg3); }
+td { padding: 10px 12px; border-bottom: 1px solid var(--bg3); font-size: 13px; }
+tr:hover { background: var(--bg2); }
+.badge {
+  display: inline-block; padding: 2px 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; font-family: var(--mono);
+}
+.badge-v1 { background: #1f3a5f; color: var(--blue); }
+.badge-v2 { background: #2d1f3f; color: #bc8cff; }
+.badge-v3 { background: #1f3f2d; color: var(--green); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.status-card {
+  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 8px;
+  padding: 24px; text-align: center; margin-bottom: 16px;
+}
+.status-icon { font-size: 48px; margin-bottom: 8px; }
+.status-label { font-size: 20px; font-weight: 600; }
+.status-detail { color: var(--fg2); margin-top: 8px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.stat-card {
+  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 8px; padding: 16px;
+}
+.stat-card .label { color: var(--fg2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+.bar-chart { margin-top: 16px; }
+.bar-row { display: flex; align-items: center; margin-bottom: 6px; }
+.bar-label { width: 140px; font-size: 12px; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.bar-fill { height: 20px; background: var(--blue); border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+.bar-count { margin-left: 8px; font-size: 12px; color: var(--fg2); }
+.receipt-detail {
+  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 6px;
+  padding: 12px; margin: 4px 0 8px; font-family: var(--mono); font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; color: var(--fg2);
+  max-height: 400px; overflow-y: auto;
+}
+.break-info {
+  background: #3d1f1f; border: 1px solid var(--red); border-radius: 8px;
+  padding: 16px; margin-top: 16px;
+}
+.break-info h3 { color: var(--red); margin-bottom: 8px; }
+.break-info code { font-family: var(--mono); font-size: 12px; }
+.progress-bar { background: var(--bg3); border-radius: 4px; height: 24px; overflow: hidden; margin: 12px 0; }
+.progress-fill { height: 100%; background: var(--green); transition: width 0.3s; }
+.loading { color: var(--fg2); text-align: center; padding: 48px; }
+.empty { color: var(--fg3); text-align: center; padding: 48px; font-style: italic; }
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo"><span>S</span>ignet Dashboard</div>
+  <button onclick="navigate('timeline')" id="nav-timeline">Timeline</button>
+  <button onclick="navigate('chain')" id="nav-chain">Chain Integrity</button>
+  <button onclick="navigate('signatures')" id="nav-signatures">Signatures</button>
+  <button onclick="navigate('stats')" id="nav-stats">Stats</button>
+</nav>
+<main id="app"><div class="loading">Loading...</div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+const h = (tag, attrs, ...kids) => {
+  const el = document.createElement(tag);
+  if (attrs) Object.entries(attrs).forEach(([k, v]) => {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  });
+  kids.flat().forEach(c => el.append(typeof c === 'string' ? c : c));
+  return el;
+};
+
+let state = { view: 'timeline', expandedRow: null };
+
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function navigate(view) {
+  state.view = view;
+  state.expandedRow = null;
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  const btn = $(`#nav-${view}`);
+  if (btn) btn.classList.add('active');
+  render();
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
+
+function truncate(s, n) {
+  return s && s.length > n ? s.slice(0, n) + '...' : (s || '');
+}
+
+// ── Timeline ──
+
+async function renderTimeline() {
+  const app = $('#app');
+  const since = $('#f-since')?.value || '24h';
+  const tool = $('#f-tool')?.value || '';
+  const signer = $('#f-signer')?.value || '';
+
+  const filters = h('div', {class: 'filters'},
+    h('select', {id: 'f-since', onchange: () => renderTimeline()},
+      ...['1h','24h','7d','30d','all'].map(v =>
+        Object.assign(h('option', {value: v === 'all' ? '' : v}, v === 'all' ? 'All time' : `Last ${v}`),
+          {selected: (v === 'all' ? '' : v) === since})
+      )
+    ),
+    h('input', {id: 'f-tool', placeholder: 'Filter by tool...', value: tool}),
+    h('input', {id: 'f-signer', placeholder: 'Filter by signer...', value: signer}),
+    h('button', {onclick: () => renderTimeline()}, 'Apply')
+  );
+
+  app.replaceChildren(filters, h('div', {class: 'loading'}, 'Loading records...'));
+
+  let params = new URLSearchParams();
+  if (since) params.set('since', since);
+  if (tool) params.set('tool', tool);
+  if (signer) params.set('signer', signer);
+  params.set('limit', '200');
+
+  try {
+    const records = await fetchJSON(`/api/records?${params}`);
+    if (!records.length) {
+      app.replaceChildren(filters, h('div', {class: 'empty'}, 'No audit records found.'));
+      return;
+    }
+
+    const table = h('table', null,
+      h('thead', null, h('tr', null,
+        h('th', null, 'Time'), h('th', null, 'Ver'), h('th', null, 'Signer'),
+        h('th', null, 'Tool'), h('th', null, 'Target'), h('th', null, 'Receipt ID')
+      )),
+      h('tbody', null, ...records.map((rec, i) => {
+        const r = rec.receipt;
+        const v = r.v || 1;
+        const row = h('tr', {style: 'cursor:pointer', onclick: () => toggleRow(i, rec)},
+          h('td', {class: 'mono'}, fmtTime(r.ts)),
+          h('td', null, h('span', {class: `badge badge-v${v}`}, `v${v}`)),
+          h('td', null, r.signer?.name || ''),
+          h('td', {class: 'mono'}, r.action?.tool || ''),
+          h('td', {class: 'mono'}, truncate(r.action?.target, 24)),
+          h('td', {class: 'mono'}, truncate(r.id, 16))
+        );
+        const detail = h('tr', {id: `detail-${i}`, style: 'display:none'},
+          h('td', {colspan: '6'},
+            h('pre', {class: 'receipt-detail'}, JSON.stringify(r, null, 2))
+          )
+        );
+        return [row, detail];
+      }).flat())
+    );
+
+    app.replaceChildren(filters, table);
+  } catch (e) {
+    app.replaceChildren(filters, h('div', {class: 'empty'}, `Error: ${e.message}`));
+  }
+}
+
+function toggleRow(i, rec) {
+  const el = $(`#detail-${i}`);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// ── Chain Integrity ──
+
+async function renderChain() {
+  const app = $('#app');
+  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying chain integrity...'));
+
+  try {
+    const status = await fetchJSON('/api/chain-status');
+    const card = h('div', {class: 'status-card'},
+      h('div', {class: 'status-icon'}, status.valid ? '\u2705' : '\u274C'),
+      h('div', {class: 'status-label', style: `color:${status.valid ? 'var(--green)' : 'var(--red)'}`},
+        status.valid ? 'Chain Intact' : 'Chain Broken'),
+      h('div', {class: 'status-detail'}, `${status.total_records} records verified`)
+    );
+
+    const parts = [card];
+
+    if (status.break_point) {
+      const bp = status.break_point;
+      parts.push(h('div', {class: 'break-info'},
+        h('h3', null, 'Break Point'),
+        h('p', null, `File: `, h('code', null, bp.file)),
+        h('p', null, `Line: `, h('code', null, String(bp.line))),
+        h('p', null, `Expected: `, h('code', null, truncate(bp.expected_hash, 32))),
+        h('p', null, `Actual: `, h('code', null, truncate(bp.actual_hash, 32)))
+      ));
+    }
+
+    app.replaceChildren(...parts);
+  } catch (e) {
+    app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));
+  }
+}
+
+// ── Signature Verification ──
+
+async function renderSignatures() {
+  const app = $('#app');
+  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying signatures...'));
+
+  try {
+    const result = await fetchJSON('/api/verify-signatures');
+    const pct = result.total > 0 ? (result.valid / result.total * 100) : 100;
+    const allValid = result.valid === result.total;
+
+    const card = h('div', {class: 'status-card'},
+      h('div', {class: 'status-icon'}, allValid ? '\u2705' : '\u26A0\uFE0F'),
+      h('div', {class: 'status-label', style: `color:${allValid ? 'var(--green)' : 'var(--yellow)'}`},
+        `${result.valid} / ${result.total} Valid`),
+      h('div', {class: 'progress-bar'},
+        h('div', {class: 'progress-fill', style: `width:${pct}%;background:${allValid ? 'var(--green)' : 'var(--yellow)'}`})
+      )
+    );
+
+    const parts = [card];
+
+    if (result.failures && result.failures.length > 0) {
+      const table = h('table', null,
+        h('thead', null, h('tr', null,
+          h('th', null, 'Receipt ID'), h('th', null, 'File'), h('th', null, 'Line'), h('th', null, 'Reason')
+        )),
+        h('tbody', null, ...result.failures.map(f =>
+          h('tr', null,
+            h('td', {class: 'mono'}, truncate(f.receipt_id, 20)),
+            h('td', {class: 'mono'}, f.file),
+            h('td', null, String(f.line)),
+            h('td', null, f.reason)
+          )
+        ))
+      );
+      parts.push(table);
+    }
+
+    app.replaceChildren(...parts);
+  } catch (e) {
+    app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));
+  }
+}
+
+// ── Stats ──
+
+async function renderStats() {
+  const app = $('#app');
+  app.replaceChildren(h('div', {class: 'loading'}, 'Loading stats...'));
+
+  try {
+    const stats = await fetchJSON('/api/stats');
+
+    const cards = h('div', {class: 'stat-grid'},
+      h('div', {class: 'stat-card'},
+        h('div', {class: 'label'}, 'Total Records'),
+        h('div', {class: 'value'}, String(stats.total_records))
+      ),
+      h('div', {class: 'stat-card'},
+        h('div', {class: 'label'}, 'Earliest'),
+        h('div', {class: 'value', style: 'font-size:14px'}, fmtTime(stats.earliest))
+      ),
+      h('div', {class: 'stat-card'},
+        h('div', {class: 'label'}, 'Latest'),
+        h('div', {class: 'value', style: 'font-size:14px'}, fmtTime(stats.latest))
+      ),
+      h('div', {class: 'stat-card'},
+        h('div', {class: 'label'}, 'Tools'),
+        h('div', {class: 'value'}, String(Object.keys(stats.by_tool).length))
+      )
+    );
+
+    const makeChart = (title, data) => {
+      const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+      const max = entries.length > 0 ? entries[0][1] : 1;
+      return h('div', null,
+        h('h3', {style: 'color:var(--fg2);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px'}, title),
+        h('div', {class: 'bar-chart'}, ...entries.slice(0, 15).map(([name, count]) =>
+          h('div', {class: 'bar-row'},
+            h('div', {class: 'bar-label'}, name),
+            h('div', {class: 'bar-fill', style: `width:${count / max * 100}%`}),
+            h('div', {class: 'bar-count'}, String(count))
+          )
+        ))
+      );
+    };
+
+    app.replaceChildren(
+      cards,
+      makeChart('By Tool', stats.by_tool),
+      makeChart('By Signer', stats.by_signer),
+      makeChart('By Version', stats.by_version)
+    );
+  } catch (e) {
+    app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));
+  }
+}
+
+// ── Router ──
+
+function render() {
+  switch (state.view) {
+    case 'timeline': renderTimeline(); break;
+    case 'chain': renderChain(); break;
+    case 'signatures': renderSignatures(); break;
+    case 'stats': renderStats(); break;
+  }
+}
+
+navigate('timeline');
+</script>
+</body>
+</html>

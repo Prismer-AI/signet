@@ -3,7 +3,7 @@
   "name": "io.github.prismer-ai/signet-mcp-tools",
   "title": "Signet MCP Tools",
   "description": "MCP server exposing Signet cryptographic signing, verification, and content hash tools over stdio.",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "repository": {
     "url": "https://github.com/Prismer-AI/signet",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "npm",
       "identifier": "@signet-auth/mcp-tools",
-      "version": "0.4.5",
+      "version": "0.4.6",
       "transport": {
         "type": "stdio"
       }

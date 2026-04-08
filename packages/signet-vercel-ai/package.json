@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/vercel-ai",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Vercel AI SDK callbacks for signing Signet tool-call receipts",
   "keywords": [
     "signet",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@signet-auth/core": "^0.4.5"
+    "@signet-auth/core": "^0.4.6"
   },
   "devDependencies": {
     "@types/node": "^22",

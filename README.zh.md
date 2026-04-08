@@ -22,11 +22,15 @@ TypeScript 包：
 [`@signet-auth/mcp-tools`](https://www.npmjs.com/package/@signet-auth/mcp-tools) ·
 [`@signet-auth/vercel-ai`](https://www.npmjs.com/package/@signet-auth/vercel-ai)
 
-AI Agent 现在可以提工单、调用 MCP 工具、执行 shell 命令、直接发版，但几乎没有内建问责能力。Signet 为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，并让客户端或服务端在信任请求前验证它到底发送了什么。
+**你的 AI Agent 刚调用了一个工具。你能证明它到底做了什么吗？**
 
-如果 Signet 对你有帮助，点个 ⭐ 让更多人发现它，感谢！
+大多数 Agent 栈在事后记录动作，但从不验证实际发送的内容。如果请求被重放、篡改或伪造，执行端根本无从得知。
 
-先看下面这张 CLI 流程图，理解 Signet 如何给一次工具调用签名并留下审计收据；再跳到后面的 [看它如何拒绝非法请求](#execution-boundary-demo)，看执行端如何在真正运行前拦住未签名、被篡改、过期或目标错误的请求。
+Signet 解决这个问题：为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，客户端或服务端可以在信任请求前验证它到底发送了什么。3 行签名，3 行验证，开源。
+
+如果 Signet 对你有帮助，[点个 Star](https://github.com/Prismer-AI/signet) 让更多人发现它。
+
+先看下面这张 CLI 流程图，理解签名的工作方式；再跳到 [看它如何拒绝非法请求](#execution-boundary-demo)，看服务端如何在真正执行前拦住未签名、被篡改、过期或目标错误的请求。
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet 演示" width="820">

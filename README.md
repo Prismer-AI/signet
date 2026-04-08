@@ -35,11 +35,15 @@
   <a href="./README.zh.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
 </p>
 
-AI agents can open tickets, call MCP tools, run shell commands, and ship code with almost no built-in accountability. Signet gives each agent an Ed25519 identity, signs every tool call, writes a hash-chained audit log, and lets clients or servers verify what was actually sent before trusting it.
+**Your AI agent just called a tool. Can you prove what it did?**
 
-If Signet is useful to you, star this repo to help more teams find it.
+Most agent stacks log actions after the fact but never verify what was actually sent. If a request is replayed, tampered with, or forged, the execution side has no way to know.
 
-Start with the CLI flow below to see how Signet signs and audits a tool call. Then jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the execution side block unsigned, tampered, stale, or mis-targeted requests before they run.
+Signet fixes this: each agent gets an Ed25519 identity, every tool call is signed, a hash-chained audit log records what happened, and clients or servers can verify the request before trusting it. 3 lines to sign. 3 lines to verify. Open source.
+
+If Signet is useful to you, [star this repo](https://github.com/Prismer-AI/signet) to help more teams find it.
+
+Start with the CLI flow below to see signing in action, then jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the server block unsigned, tampered, stale, or mis-targeted requests before they run.
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet demo" width="820">

@@ -112,8 +112,9 @@ class SigningAgent:
         where both sides have cryptographic proof.
 
         Args:
-            agent_receipt: The v1 receipt from the calling agent.
+            agent_receipt: The unilateral (dispatch) receipt from the calling agent.
             response_content: The response data to bind into the receipt.
+                Defaults to ``{}`` if None.
         """
         if self._secret_key is None:
             raise RuntimeError("SigningAgent has been closed")

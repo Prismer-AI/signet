@@ -70,3 +70,53 @@ def test_middleware_preserves_function_name(agent):
         return "ok"
 
     assert my_special_tool.__name__ == "my_special_tool"
+
+
+def test_middleware_positional_args(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def calculator(expression: str) -> str:
+        return f"result: {expression}"
+
+    result = calculator("2+2")
+    assert result == "result: 2+2"
+    assert len(mw.receipts) == 1
+    assert mw.receipts[0].action.tool == "calculator"
+
+
+def test_middleware_mixed_args(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def search(query: str, limit: int = 10) -> str:
+        return f"{query}:{limit}"
+
+    result = search("signet", limit=5)
+    assert result == "signet:5"
+    assert len(mw.receipts) == 1
+
+
+def test_middleware_no_args(agent):
+    mw = SignetMiddleware(agent)
+
+    @mw.wrap
+    def ping() -> str:
+        return "pong"
+
+    result = ping()
+    assert result == "pong"
+    assert len(mw.receipts) == 1
+
+
+def test_middleware_signing_failure_still_executes(agent):
+    mw = SignetMiddleware(agent)
+    agent.close()  # signing will fail
+
+    @mw.wrap
+    def my_tool() -> str:
+        return "executed"
+
+    result = my_tool()
+    assert result == "executed"
+    assert len(mw.receipts) == 0  # no receipt due to closed agent

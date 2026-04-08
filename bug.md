@@ -138,7 +138,7 @@ Legend: CONFIRMED / PARTIALLY / FALSE POSITIVE | severity from original review, 
 - MEDIUM: load_key_info 文件名不校验 → 加一致性检查
 - MEDIUM: params_hash 不校验格式 → 加 sha256 格式校验
 - MEDIUM: generate_keypair 丢弃 key → 改善 UX 消息
-- MEDIUM: NonceCache 无上限 → maxSize 100k + LRU 淘汰
+- MEDIUM: NonceCache 无上限 → maxSize 100k + FIFO 淘汰
 - MEDIUM: signing-transport 注释不一致 → 更新注释
 - LOW: unsafe grep → cargo clippy -D unsafe_code
 - LOW: Regex 每次编译 → LazyLock

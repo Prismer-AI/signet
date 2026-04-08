@@ -86,9 +86,10 @@ def test_sign_owner_none_normalizes():
 
 def test_sign_hash_only_mode():
     kp = signet_auth.generate_keypair()
-    action = signet_auth.Action.hash_only("test_tool", "sha256:abc123")
+    valid_hash = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    action = signet_auth.Action.hash_only("test_tool", valid_hash)
     receipt = signet_auth.sign(kp.secret_key, action, "agent", "owner")
-    assert receipt.action.params_hash == "sha256:abc123"
+    assert receipt.action.params_hash == valid_hash
 
 
 def test_verify_valid():

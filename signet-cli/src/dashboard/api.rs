@@ -41,7 +41,7 @@ fn build_filter(q: &RecordQuery) -> Result<AuditFilter, AppError> {
         since,
         tool: q.tool.clone(),
         signer: q.signer.clone(),
-        limit: Some(q.limit.unwrap_or(200).min(MAX_LIMIT)),
+        limit: Some(q.limit.unwrap_or(200).clamp(1, MAX_LIMIT)),
     })
 }
 
@@ -97,9 +97,9 @@ async fn get_stats(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Stats>, AppError> {
     let dir = state.signet_dir.clone();
-    let records = tokio::task::spawn_blocking(move || {
+    let mut records = tokio::task::spawn_blocking(move || {
         let filter = AuditFilter {
-            limit: Some(MAX_LIMIT),
+            limit: Some(MAX_LIMIT + 1),
             ..Default::default()
         };
         audit::query(&dir, &filter)
@@ -108,7 +108,10 @@ async fn get_stats(
     .map_err(|e| AppError::internal(format!("task join: {e}")))?
     .map_err(|e| AppError::internal(format!("{e}")))?;
 
-    let truncated = records.len() >= MAX_LIMIT;
+    let truncated = records.len() > MAX_LIMIT;
+    if truncated {
+        records.truncate(MAX_LIMIT);
+    }
     let mut by_tool: HashMap<String, usize> = HashMap::new();
     let mut by_signer: HashMap<String, usize> = HashMap::new();
     let mut by_version: HashMap<String, usize> = HashMap::new();

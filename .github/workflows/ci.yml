@@ -28,9 +28,9 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      - name: Check no unsafe code
+      - name: Check no unsafe code in application crates
         run: |
-          if grep -r --include="*.rs" "unsafe" crates/ signet-cli/src/; then
+          if cargo clippy --workspace -- -D unsafe_code 2>&1 | grep "unsafe_code"; then
             echo "ERROR: unsafe code found"
             exit 1
           fi
@@ -103,6 +103,36 @@ jobs:
           cd packages/signet-mcp
           npx tsc
           node --test dist/tests/mcp.test.js
+
+      - name: Install @signet-auth/mcp-server dependencies
+        working-directory: packages/signet-mcp-server
+        run: npm install
+
+      - name: Build and test @signet-auth/mcp-server
+        run: |
+          cd packages/signet-mcp-server
+          npx tsc
+          node --test dist/tests/server.test.js
+
+      - name: Install @signet-auth/mcp-tools dependencies
+        working-directory: packages/signet-mcp-tools
+        run: npm install
+
+      - name: Build and test @signet-auth/mcp-tools
+        run: |
+          cd packages/signet-mcp-tools
+          npx tsc -p tsconfig.test.json
+          node --test dist-test/tests/tools.test.js
+
+      - name: Install @signet-auth/vercel-ai dependencies
+        working-directory: packages/signet-vercel-ai
+        run: npm install
+
+      - name: Build and test @signet-auth/vercel-ai
+        run: |
+          cd packages/signet-vercel-ai
+          npx tsc -p tsconfig.test.json
+          node --test dist-test/tests/vercel-ai.test.js
 
   python-binding:
     name: Python binding (build + test)

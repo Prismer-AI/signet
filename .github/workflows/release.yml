@@ -145,13 +145,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - name: Publish signet-core
-        run: cargo publish -p signet-core --allow-dirty || true
+        run: |
+          cargo publish -p signet-core --allow-dirty 2>&1 | tee /tmp/publish-core.log || {
+            if grep -q "already uploaded" /tmp/publish-core.log; then
+              echo "Version already published, skipping."
+            else
+              cat /tmp/publish-core.log
+              exit 1
+            fi
+          }
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
       - name: Wait for crates.io index
         run: sleep 30
       - name: Publish signet-cli
-        run: cargo publish -p signet-cli --allow-dirty || true
+        run: |
+          cargo publish -p signet-cli --allow-dirty 2>&1 | tee /tmp/publish-cli.log || {
+            if grep -q "already uploaded" /tmp/publish-cli.log; then
+              echo "Version already published, skipping."
+            else
+              cat /tmp/publish-cli.log
+              exit 1
+            fi
+          }
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
 
@@ -179,7 +195,13 @@ jobs:
           npm install
           tsc
           rsync -a --exclude='.gitignore' wasm/ dist/wasm/
-          npm publish --access public || true
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Build and publish @signet-auth/mcp
@@ -187,7 +209,13 @@ jobs:
           cd packages/signet-mcp
           npm install
           tsc
-          npm publish --access public || true
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Build and publish @signet-auth/mcp-server
@@ -195,7 +223,13 @@ jobs:
           cd packages/signet-mcp-server
           npm install
           tsc
-          npm publish --access public || true
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Build and publish @signet-auth/mcp-tools
@@ -203,7 +237,13 @@ jobs:
           cd packages/signet-mcp-tools
           npm install
           tsc
-          npm publish --access public || true
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Build and publish @signet-auth/vercel-ai
@@ -211,7 +251,13 @@ jobs:
           cd packages/signet-vercel-ai
           npm install
           npx tsc
-          npm publish --access public || true
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Post-publish smoke test (npm)
@@ -220,7 +266,7 @@ jobs:
           sleep 30
           mkdir /tmp/npm-smoke && cd /tmp/npm-smoke
           npm init -y > /dev/null 2>&1
-          npm install @signet-auth/core @signet-auth/mcp @signet-auth/mcp-server @signet-auth/mcp-tools
+          npm install @signet-auth/core @signet-auth/mcp @signet-auth/mcp-server @signet-auth/mcp-tools @signet-auth/vercel-ai
           node -e "
             const { generateKeypair, sign, verify } = require('@signet-auth/core');
             const kp = generateKeypair();

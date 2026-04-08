@@ -8,7 +8,7 @@ mod types;
 
 #[pymodule]
 fn _signet(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", "0.4.6")?;
+    m.add("__version__", "0.5.0")?;
     errors::register(m)?;
     types::register(m)?;
     core_fns::register(m)?;

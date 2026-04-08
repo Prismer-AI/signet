@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/core",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "description": "Core Signet primitives for TypeScript: Ed25519 receipts, hashes, and verification",
   "keywords": [
     "signet",

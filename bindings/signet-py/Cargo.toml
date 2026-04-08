@@ -1,6 +1,6 @@
 [package]
 name = "signet-python"
-version = "0.4.6"
+version = "0.5.0"
 edition = "2021"
 description = "Python bindings for signet-core"
 license = "Apache-2.0 OR MIT"

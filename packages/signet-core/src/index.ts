@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -135,4 +135,98 @@ export function verifyBilateral(receiptJson: string, serverPublicKey: string): b
 
 export function contentHash(value: unknown): string {
   return wasm_content_hash(JSON.stringify(value));
+}
+
+// ─── Delegation ─────────────────────────────────────────────────────────────
+
+export interface DelegationIdentity {
+  pubkey: string;
+  name: string;
+}
+
+export interface Scope {
+  tools: string[];
+  targets: string[];
+  max_depth: number;
+  expires?: string;
+  budget?: unknown;
+}
+
+export interface DelegationToken {
+  v: number;
+  id: string;
+  delegator: DelegationIdentity;
+  delegate: DelegationIdentity;
+  scope: Scope;
+  issued_at: string;
+  nonce: string;
+  sig: string;
+  correlation_id?: string;
+}
+
+export interface Authorization {
+  chain: DelegationToken[];
+  chain_hash: string;
+  root_pubkey: string;
+}
+
+export interface AuthorizedReceipt extends SignetReceipt {
+  authorization: Authorization;
+}
+
+export function signDelegation(
+  delegatorKey: string,
+  delegatorName: string,
+  delegatePubkey: string,
+  delegateName: string,
+  scope: Scope,
+  parentScope?: Scope,
+): DelegationToken {
+  const bare = delegatePubkey.startsWith('ed25519:')
+    ? delegatePubkey.slice('ed25519:'.length)
+    : delegatePubkey;
+  const json = wasm_sign_delegation(
+    delegatorKey,
+    delegatorName,
+    bare,
+    delegateName,
+    JSON.stringify(scope),
+    parentScope ? JSON.stringify(parentScope) : undefined,
+  );
+  return JSON.parse(json) as DelegationToken;
+}
+
+export function verifyDelegation(token: DelegationToken): boolean {
+  return wasm_verify_delegation(JSON.stringify(token));
+}
+
+export function signAuthorized(
+  key: string,
+  action: SignetAction,
+  signerName: string,
+  chain: DelegationToken[],
+): AuthorizedReceipt {
+  const json = wasm_sign_authorized(
+    key,
+    JSON.stringify(action),
+    signerName,
+    JSON.stringify(chain),
+  );
+  return JSON.parse(json) as AuthorizedReceipt;
+}
+
+export function verifyAuthorized(
+  receipt: AuthorizedReceipt,
+  trustedRoots: string[],
+  clockSkewSecs: number = 60,
+): Scope {
+  const bareRoots = trustedRoots.map(k =>
+    k.startsWith('ed25519:') ? k.slice('ed25519:'.length) : k,
+  );
+  const json = wasm_verify_authorized(
+    JSON.stringify(receipt),
+    JSON.stringify(bareRoots),
+    clockSkewSecs,
+  );
+  return JSON.parse(json) as Scope;
 }

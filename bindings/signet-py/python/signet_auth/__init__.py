@@ -19,6 +19,10 @@ from signet_auth._signet import (
     CorruptedRecordError,
     SignetIOError,
     UnsupportedFormatError,
+    ScopeViolationError,
+    ChainError,
+    DelegationExpiredError,
+    UnauthorizedError,
     # Types
     Action,
     Signer,
@@ -42,6 +46,11 @@ from signet_auth._signet import (
     verify_any,
     sign_bilateral,
     verify_bilateral,
+    # Delegation functions
+    sign_delegation,
+    verify_delegation,
+    sign_authorized,
+    verify_authorized,
     # Identity functions
     validate_key_name,
     default_signet_dir,
@@ -100,6 +109,11 @@ __all__ = [
     "verify_any",
     "sign_bilateral",
     "verify_bilateral",
+    # Delegation functions
+    "sign_delegation",
+    "verify_delegation",
+    "sign_authorized",
+    "verify_authorized",
     # Identity functions
     "validate_key_name",
     "default_signet_dir",

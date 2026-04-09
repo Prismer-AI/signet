@@ -188,6 +188,122 @@ fn verify_bilateral(
     }
 }
 
+/// Create a delegation token granting scoped authority.
+#[pyfunction]
+#[pyo3(signature = (delegator_key_b64, delegator_name, delegate_pubkey_b64, delegate_name, scope_json, parent_scope_json=None))]
+fn sign_delegation(
+    py: Python<'_>,
+    delegator_key_b64: &str,
+    delegator_name: String,
+    delegate_pubkey_b64: String,
+    delegate_name: String,
+    scope_json: String,
+    parent_scope_json: Option<String>,
+) -> PyResult<String> {
+    let delegator_key = parse_signing_key(delegator_key_b64)?;
+    let delegate_bytes = B64
+        .decode(&delegate_pubkey_b64)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid delegate pubkey: {e}")))?;
+    let delegate_arr: [u8; 32] = delegate_bytes
+        .try_into()
+        .map_err(|_| InvalidKeyError::new_err("delegate pubkey must be 32 bytes"))?;
+    let delegate_vk = VerifyingKey::from_bytes(&delegate_arr)
+        .map_err(|e| InvalidKeyError::new_err(format!("invalid delegate pubkey: {e}")))?;
+
+    let scope: signet_core::Scope =
+        serde_json::from_str(&scope_json).map_err(|e| to_py_err(e.into()))?;
+    let parent_scope: Option<signet_core::Scope> = parent_scope_json
+        .map(|s| serde_json::from_str(&s))
+        .transpose()
+        .map_err(|e| to_py_err(e.into()))?;
+
+    let token = py
+        .allow_threads(|| {
+            signet_core::sign_delegation(
+                &delegator_key,
+                &delegator_name,
+                &delegate_vk,
+                &delegate_name,
+                &scope,
+                parent_scope.as_ref(),
+            )
+        })
+        .map_err(to_py_err)?;
+
+    serde_json::to_string(&token).map_err(|e| to_py_err(e.into()))
+}
+
+/// Verify a delegation token's signature.
+#[pyfunction]
+fn verify_delegation(_py: Python<'_>, token_json: &str) -> PyResult<bool> {
+    let token: signet_core::DelegationToken =
+        serde_json::from_str(token_json).map_err(|e| to_py_err(e.into()))?;
+    match signet_core::verify_delegation(&token, None) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(signet_core::SignetError::DelegationExpired(_)) => Ok(false),
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
+/// Sign an action with a delegation chain (produces v4 receipt).
+#[pyfunction]
+fn sign_authorized(
+    py: Python<'_>,
+    key_b64: &str,
+    action_json: String,
+    signer_name: String,
+    chain_json: String,
+) -> PyResult<String> {
+    let signing_key = parse_signing_key(key_b64)?;
+    let action: signet_core::Action =
+        serde_json::from_str(&action_json).map_err(|e| to_py_err(e.into()))?;
+    let chain: Vec<signet_core::DelegationToken> =
+        serde_json::from_str(&chain_json).map_err(|e| to_py_err(e.into()))?;
+
+    let receipt = py
+        .allow_threads(|| signet_core::sign_authorized(&signing_key, &action, &signer_name, chain))
+        .map_err(to_py_err)?;
+
+    serde_json::to_string(&receipt).map_err(|e| to_py_err(e.into()))
+}
+
+/// Verify an authorized (v4) receipt against trusted root keys.
+#[pyfunction]
+#[pyo3(signature = (receipt_json, trusted_roots_b64, clock_skew_secs=60))]
+fn verify_authorized(
+    _py: Python<'_>,
+    receipt_json: &str,
+    trusted_roots_b64: Vec<String>,
+    clock_skew_secs: u64,
+) -> PyResult<String> {
+    let receipt: signet_core::Receipt =
+        serde_json::from_str(receipt_json).map_err(|e| to_py_err(e.into()))?;
+
+    let trusted_roots: Vec<VerifyingKey> = trusted_roots_b64
+        .iter()
+        .map(|k| {
+            let bytes = B64
+                .decode(k)
+                .map_err(|e| InvalidKeyError::new_err(format!("invalid root key: {e}")))?;
+            let arr: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| InvalidKeyError::new_err("root key must be 32 bytes"))?;
+            VerifyingKey::from_bytes(&arr)
+                .map_err(|e| InvalidKeyError::new_err(format!("invalid root key: {e}")))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
+    let opts = signet_core::AuthorizedVerifyOptions {
+        trusted_roots,
+        clock_skew_secs,
+        max_chain_depth: 16,
+    };
+
+    let scope = signet_core::verify_authorized(&receipt, &opts).map_err(to_py_err)?;
+    serde_json::to_string(&scope).map_err(|e| to_py_err(e.into()))
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign, m)?)?;
@@ -196,5 +312,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_any, m)?)?;
     m.add_function(wrap_pyfunction!(sign_bilateral, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_delegation, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_delegation, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_authorized, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_authorized, m)?)?;
     Ok(())
 }

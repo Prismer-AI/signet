@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 mod cmd_audit;
 mod cmd_claude;
 mod cmd_dashboard;
+mod cmd_delegate;
 mod cmd_identity;
 mod cmd_sign;
 mod cmd_verify;
@@ -39,6 +40,11 @@ enum Commands {
     },
     /// Start the audit log dashboard (local web viewer)
     Dashboard(cmd_dashboard::DashboardArgs),
+    /// Manage delegation chains for agent authorization
+    Delegate {
+        #[command(subcommand)]
+        action: cmd_delegate::DelegateAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -90,6 +96,7 @@ fn run() -> Result<()> {
         Commands::Audit(args) => cmd_audit::audit(args)?,
         Commands::Claude { action } => cmd_claude::run(action)?,
         Commands::Dashboard(args) => cmd_dashboard::dashboard(args)?,
+        Commands::Delegate { action } => cmd_delegate::run(action)?,
     }
     Ok(())
 }

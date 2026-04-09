@@ -476,9 +476,18 @@ fn test_sign_creates_audit_log() {
     let jsonl_files: Vec<_> = fs::read_dir(&audit_dir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "jsonl").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
         .collect();
-    assert_eq!(jsonl_files.len(), 1, "audit/ must have exactly 1 .jsonl file");
+    assert_eq!(
+        jsonl_files.len(),
+        1,
+        "audit/ must have exactly 1 .jsonl file"
+    );
 }
 
 #[test]

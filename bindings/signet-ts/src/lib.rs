@@ -3,6 +3,7 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 
+use signet_core::delegation::{DelegationToken, Scope};
 use signet_core::receipt::Action;
 use signet_core::{generate_keypair, sign, verify};
 
@@ -200,4 +201,116 @@ pub fn wasm_content_hash(json: &str) -> Result<String, JsError> {
         signet_core::canonical::canonicalize(&value).map_err(|e| JsError::new(&e.to_string()))?;
     let hash = Sha256::digest(canonical.as_bytes());
     Ok(format!("sha256:{}", hex::encode(hash)))
+}
+
+#[wasm_bindgen]
+pub fn wasm_sign_delegation(
+    delegator_key_b64: &str,
+    delegator_name: &str,
+    delegate_pubkey_b64: &str,
+    delegate_name: &str,
+    scope_json: &str,
+    parent_scope_json: Option<String>,
+) -> Result<String, JsError> {
+    let delegator_key = parse_signing_key(delegator_key_b64)?;
+
+    let delegate_bytes = BASE64
+        .decode(delegate_pubkey_b64)
+        .map_err(|e| JsError::new(&format!("invalid delegate pubkey base64: {e}")))?;
+    let delegate_arr: [u8; 32] = delegate_bytes
+        .try_into()
+        .map_err(|_| JsError::new("delegate pubkey must be 32 bytes"))?;
+    let delegate_vk = ed25519_dalek::VerifyingKey::from_bytes(&delegate_arr)
+        .map_err(|e| JsError::new(&format!("invalid delegate pubkey: {e}")))?;
+
+    let scope: Scope = serde_json::from_str(scope_json)
+        .map_err(|e| JsError::new(&format!("invalid scope JSON: {e}")))?;
+    let parent_scope: Option<Scope> = parent_scope_json
+        .map(|s| serde_json::from_str(&s))
+        .transpose()
+        .map_err(|e| JsError::new(&format!("invalid parent_scope JSON: {e}")))?;
+
+    let token = signet_core::sign_delegation(
+        &delegator_key,
+        delegator_name,
+        &delegate_vk,
+        delegate_name,
+        &scope,
+        parent_scope.as_ref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&token).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_verify_delegation(token_json: &str) -> Result<bool, JsError> {
+    let token: DelegationToken = serde_json::from_str(token_json)
+        .map_err(|e| JsError::new(&format!("invalid token JSON: {e}")))?;
+
+    match signet_core::verify_delegation(&token, None) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(signet_core::SignetError::DelegationExpired(_)) => Ok(false),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
+}
+
+#[wasm_bindgen]
+pub fn wasm_sign_authorized(
+    key_b64: &str,
+    action_json: &str,
+    signer_name: &str,
+    chain_json: &str,
+) -> Result<String, JsError> {
+    let signing_key = parse_signing_key(key_b64)?;
+
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+
+    let chain: Vec<DelegationToken> = serde_json::from_str(chain_json)
+        .map_err(|e| JsError::new(&format!("invalid chain JSON: {e}")))?;
+
+    let receipt = signet_core::sign_authorized(&signing_key, &action, signer_name, chain)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_verify_authorized(
+    receipt_json: &str,
+    trusted_roots_json: &str,
+    clock_skew_secs: u64,
+) -> Result<String, JsError> {
+    let receipt: signet_core::Receipt = serde_json::from_str(receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+    let root_keys: Vec<String> = serde_json::from_str(trusted_roots_json)
+        .map_err(|e| JsError::new(&format!("invalid trusted_roots JSON: {e}")))?;
+
+    let trusted_roots: Vec<ed25519_dalek::VerifyingKey> = root_keys
+        .iter()
+        .map(|k| {
+            let bytes = BASE64
+                .decode(k)
+                .map_err(|e| JsError::new(&format!("invalid root key base64: {e}")))?;
+            let arr: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| JsError::new("root key must be 32 bytes"))?;
+            ed25519_dalek::VerifyingKey::from_bytes(&arr)
+                .map_err(|e| JsError::new(&format!("invalid root key: {e}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let opts = signet_core::AuthorizedVerifyOptions {
+        trusted_roots,
+        clock_skew_secs,
+        max_chain_depth: 16,
+    };
+
+    let scope = signet_core::verify_authorized(&receipt, &opts)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&scope).map_err(|e| JsError::new(&e.to_string()))
 }

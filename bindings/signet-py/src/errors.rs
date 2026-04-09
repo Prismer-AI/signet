@@ -16,6 +16,10 @@ pyo3::create_exception!(signet_auth, CorruptedFileError, SignetError);
 pyo3::create_exception!(signet_auth, CorruptedRecordError, SignetError);
 pyo3::create_exception!(signet_auth, SignetIOError, SignetError);
 pyo3::create_exception!(signet_auth, UnsupportedFormatError, SignetError);
+pyo3::create_exception!(signet_auth, ScopeViolationError, SignetError);
+pyo3::create_exception!(signet_auth, ChainError, SignetError);
+pyo3::create_exception!(signet_auth, DelegationExpiredError, SignetError);
+pyo3::create_exception!(signet_auth, UnauthorizedError, SignetError);
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SignetError", m.py().get_type::<SignetError>())?;
@@ -47,6 +51,16 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "UnsupportedFormatError",
         m.py().get_type::<UnsupportedFormatError>(),
     )?;
+    m.add(
+        "ScopeViolationError",
+        m.py().get_type::<ScopeViolationError>(),
+    )?;
+    m.add("ChainError", m.py().get_type::<ChainError>())?;
+    m.add(
+        "DelegationExpiredError",
+        m.py().get_type::<DelegationExpiredError>(),
+    )?;
+    m.add("UnauthorizedError", m.py().get_type::<UnauthorizedError>())?;
     Ok(())
 }
 
@@ -60,6 +74,10 @@ pub fn to_py_err(err: signet_core::SignetError) -> PyErr {
         signet_core::SignetError::CanonicalizeError(msg) => CanonicalizeError::new_err(msg),
         signet_core::SignetError::InvalidReceipt(msg) => InvalidReceiptError::new_err(msg),
         signet_core::SignetError::SerializeError(e) => SerializeError::new_err(e.to_string()),
+        signet_core::SignetError::ScopeViolation(msg) => ScopeViolationError::new_err(msg),
+        signet_core::SignetError::ChainError(msg) => ChainError::new_err(msg),
+        signet_core::SignetError::DelegationExpired(msg) => DelegationExpiredError::new_err(msg),
+        signet_core::SignetError::Unauthorized(msg) => UnauthorizedError::new_err(msg),
         #[cfg(not(target_arch = "wasm32"))]
         signet_core::SignetError::KeyNotFound(msg) => KeyNotFoundError::new_err(msg),
         #[cfg(not(target_arch = "wasm32"))]

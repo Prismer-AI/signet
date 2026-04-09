@@ -5,7 +5,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 use crate::canonical;
 use crate::delegation::{
-    build_delegation_signable, build_v4_receipt_signable, validate_scope_narrowing,
+    build_delegation_signable, build_v4_receipt_signable, is_wildcard, validate_scope_narrowing,
     DelegationToken, Scope,
 };
 use crate::error::SignetError;
@@ -235,15 +235,14 @@ pub fn verify_authorized(
     }
 
     // 8. Check action is within scope
-    if effective_scope.tools != vec!["*".to_string()]
-        && !effective_scope.tools.contains(&receipt.action.tool)
+    if !is_wildcard(&effective_scope.tools) && !effective_scope.tools.contains(&receipt.action.tool)
     {
         return Err(SignetError::Unauthorized(format!(
             "tool '{}' not in scope",
             receipt.action.tool
         )));
     }
-    if effective_scope.targets != vec!["*".to_string()]
+    if !is_wildcard(&effective_scope.targets)
         && !effective_scope.targets.contains(&receipt.action.target)
     {
         return Err(SignetError::Unauthorized(format!(

@@ -110,12 +110,19 @@ fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<ed25519_dalek:
     Ok(ed25519_dalek::VerifyingKey::from_bytes(&arr)?)
 }
 
-fn parse_tools_targets(s: &str) -> Vec<String> {
+fn parse_tools_targets(s: &str) -> Result<Vec<String>> {
     if s == "*" {
-        vec!["*".to_string()]
-    } else {
-        s.split(',').map(|t| t.trim().to_string()).collect()
+        return Ok(vec!["*".to_string()]);
     }
+    let items: Vec<String> = s
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if items.is_empty() {
+        bail!("tools/targets cannot be empty");
+    }
+    Ok(items)
 }
 
 pub fn run(action: DelegateAction) -> Result<()> {
@@ -142,8 +149,8 @@ fn create(args: CreateArgs) -> Result<()> {
     let delegate_vk = resolve_pubkey(&dir, &args.to)?;
 
     let scope = signet_core::Scope {
-        tools: parse_tools_targets(&args.tools),
-        targets: parse_tools_targets(&args.targets),
+        tools: parse_tools_targets(&args.tools)?,
+        targets: parse_tools_targets(&args.targets)?,
         max_depth: args.max_depth,
         expires: args.expires,
         budget: None,

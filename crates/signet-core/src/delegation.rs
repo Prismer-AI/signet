@@ -1,5 +1,10 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use chrono::DateTime;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::SignetError;
 use crate::receipt::{Action, Signer};
@@ -44,12 +49,47 @@ pub struct Authorization {
     pub root_pubkey: String, // must match chain[0].delegator.pubkey
 }
 
+// ─── Shared Crypto Helpers ───────────────────────────────────────────────────
+
+/// Generate a cryptographically secure 128-bit nonce.
+pub(crate) fn generate_nonce() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    format!("rnd_{}", hex::encode(bytes))
+}
+
+/// Get current UTC timestamp in RFC 3339 format with milliseconds.
+pub(crate) fn current_timestamp() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Derive a receipt/token ID from a signature.
+pub(crate) fn derive_id(prefix: &str, sig_bytes: &[u8]) -> String {
+    let hash = Sha256::digest(sig_bytes);
+    format!("{}_{}", prefix, hex::encode(&hash[..16]))
+}
+
+/// Format an Ed25519 public key as "ed25519:<base64>".
+pub(crate) fn format_pubkey(bytes: &[u8]) -> String {
+    format!("ed25519:{}", BASE64.encode(bytes))
+}
+
+/// Format an Ed25519 signature as "ed25519:<base64>".
+pub(crate) fn format_sig(sig_bytes: &[u8]) -> String {
+    format!("ed25519:{}", BASE64.encode(sig_bytes))
+}
+
+/// Check if a scope list is a wildcard.
+pub(crate) fn is_wildcard(items: &[String]) -> bool {
+    items.len() == 1 && items[0] == "*"
+}
+
 // ─── Scope Narrowing ────────────────────────────────────────────────────────
 
 pub fn validate_scope_narrowing(child: &Scope, parent: &Scope) -> Result<(), SignetError> {
     // Tools
-    if parent.tools != vec!["*".to_string()] {
-        if child.tools == vec!["*".to_string()] {
+    if !is_wildcard(&parent.tools) {
+        if is_wildcard(&child.tools) {
             return Err(SignetError::ScopeViolation(
                 "child cannot have wildcard tools when parent has explicit tools".to_string(),
             ));
@@ -65,8 +105,8 @@ pub fn validate_scope_narrowing(child: &Scope, parent: &Scope) -> Result<(), Sig
     }
 
     // Targets
-    if parent.targets != vec!["*".to_string()] {
-        if child.targets == vec!["*".to_string()] {
+    if !is_wildcard(&parent.targets) {
+        if is_wildcard(&child.targets) {
             return Err(SignetError::ScopeViolation(
                 "child cannot have wildcard targets when parent has explicit targets".to_string(),
             ));

@@ -1,14 +1,12 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use chrono::Utc;
 use ed25519_dalek::{Signer as _, SigningKey, VerifyingKey};
-use rand::rngs::OsRng;
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::delegation::{
-    build_delegation_signable, build_v4_receipt_signable, validate_scope_narrowing, Authorization,
+    build_delegation_signable, build_v4_receipt_signable, current_timestamp, derive_id,
+    format_pubkey, format_sig, generate_nonce, validate_scope_narrowing, Authorization,
     DelegationIdentity, DelegationToken, Scope,
 };
 use crate::error::SignetError;
@@ -49,6 +47,17 @@ pub fn sign_delegation(
         chrono::DateTime::parse_from_rfc3339(expires)
             .map_err(|e| SignetError::ScopeViolation(format!("invalid expires format: {e}")))?;
     }
+    // Reject mixed wildcards (e.g. ["*", "Bash"])
+    if scope.tools.contains(&"*".to_string()) && scope.tools.len() > 1 {
+        return Err(SignetError::ScopeViolation(
+            "tools cannot mix wildcard '*' with explicit values".into(),
+        ));
+    }
+    if scope.targets.contains(&"*".to_string()) && scope.targets.len() > 1 {
+        return Err(SignetError::ScopeViolation(
+            "targets cannot mix wildcard '*' with explicit values".into(),
+        ));
+    }
 
     // 1. Validate scope narrowing if parent provided
     if let Some(ps) = parent_scope {
@@ -57,22 +66,17 @@ pub fn sign_delegation(
 
     // 2. Build identities
     let delegator = DelegationIdentity {
-        pubkey: format!(
-            "ed25519:{}",
-            BASE64.encode(delegator_key.verifying_key().to_bytes())
-        ),
+        pubkey: format_pubkey(&delegator_key.verifying_key().to_bytes()),
         name: delegator_name.to_string(),
     };
     let delegate = DelegationIdentity {
-        pubkey: format!("ed25519:{}", BASE64.encode(delegate_pubkey.to_bytes())),
+        pubkey: format_pubkey(&delegate_pubkey.to_bytes()),
         name: delegate_name.to_string(),
     };
 
     // 3. Generate nonce + timestamp
-    let mut nonce_bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
-    let issued_at = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let nonce = generate_nonce();
+    let issued_at = current_timestamp();
 
     // 4. Build signable, canonicalize, sign
     let signable = build_delegation_signable(&delegator, &delegate, scope, &issued_at, &nonce);
@@ -80,8 +84,7 @@ pub fn sign_delegation(
     let signature = delegator_key.sign(canonical_bytes.as_bytes());
 
     // 5. Derive ID
-    let sig_hash = Sha256::digest(signature.to_bytes());
-    let id = format!("del_{}", hex::encode(&sig_hash[..16]));
+    let id = derive_id("del", &signature.to_bytes());
 
     Ok(DelegationToken {
         v: 1,
@@ -91,7 +94,7 @@ pub fn sign_delegation(
         scope: scope.clone(),
         issued_at,
         nonce,
-        sig: format!("ed25519:{}", BASE64.encode(signature.to_bytes())),
+        sig: format_sig(&signature.to_bytes()),
         correlation_id: None,
     })
 }
@@ -106,6 +109,14 @@ pub fn sign_authorized(
     if chain.is_empty() {
         return Err(SignetError::ChainError(
             "chain must contain at least one token".into(),
+        ));
+    }
+
+    // Verify signing key matches final delegate in chain
+    let expected_pubkey = format!("ed25519:{}", BASE64.encode(key.verifying_key().to_bytes()));
+    if expected_pubkey != chain.last().unwrap().delegate.pubkey {
+        return Err(SignetError::ChainError(
+            "signing key does not match final delegate in chain".into(),
         ));
     }
 
@@ -127,7 +138,7 @@ pub fn sign_authorized(
     };
 
     let signer = Signer {
-        pubkey: format!("ed25519:{}", BASE64.encode(key.verifying_key().to_bytes())),
+        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner,
     };
@@ -146,10 +157,8 @@ pub fn sign_authorized(
     };
 
     // Generate nonce + timestamp
-    let mut nonce_bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
-    let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let nonce = generate_nonce();
+    let ts = current_timestamp();
 
     // Build v4 signable (signs chain_hash, NOT full chain)
     let signable = build_v4_receipt_signable(
@@ -163,9 +172,8 @@ pub fn sign_authorized(
     let canonical_bytes = canonical::canonicalize(&signable)?;
     let signature = key.sign(canonical_bytes.as_bytes());
 
-    let sig_hash = Sha256::digest(signature.to_bytes());
-    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
-    let sig = format!("ed25519:{}", BASE64.encode(signature.to_bytes()));
+    let id = derive_id("rec", &signature.to_bytes());
+    let sig = format_sig(&signature.to_bytes());
 
     Ok(Receipt {
         v: 4,
@@ -416,5 +424,69 @@ mod tests {
         let sig_hash = Sha256::digest(&sig_bytes);
         let expected_id = format!("del_{}", hex::encode(&sig_hash[..16]));
         assert_eq!(token.id, expected_id);
+    }
+
+    #[test]
+    fn test_sign_delegation_mixed_wildcard_rejected() {
+        let delegator_key = SigningKey::generate(&mut OsRng);
+        let delegate_key = SigningKey::generate(&mut OsRng);
+        let scope = Scope {
+            tools: vec!["Bash".to_string(), "*".to_string()],
+            targets: vec!["*".to_string()],
+            max_depth: 1,
+            expires: None,
+            budget: None,
+        };
+
+        let err = sign_delegation(
+            &delegator_key,
+            "alice",
+            &delegate_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot mix wildcard"));
+    }
+
+    #[test]
+    fn test_sign_authorized_key_mismatch_rejected() {
+        use crate::sign_delegation::sign_authorized;
+        let root_key = SigningKey::generate(&mut OsRng);
+        let agent_key = SigningKey::generate(&mut OsRng);
+        let wrong_key = SigningKey::generate(&mut OsRng);
+        let scope = Scope {
+            tools: vec!["*".into()],
+            targets: vec!["*".into()],
+            max_depth: 0,
+            expires: None,
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+        };
+
+        // Sign with wrong_key (not the delegate in the chain)
+        let err = sign_authorized(&wrong_key, &action, "bot", vec![token]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("signing key does not match final delegate"));
     }
 }

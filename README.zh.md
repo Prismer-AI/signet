@@ -2,13 +2,11 @@
 
 <p align="center">
   <strong>让 AI Agent 的工具调用在执行边界可验证</strong><br/>
-  <sub>精确知道哪个 Agent 在什么时间调用了哪个工具，以及参数哈希是什么。3 行代码即可离线验证或在执行前校验。</sub>
+  <sub>证明你的 AI Agent 到底发出了什么。3 行代码即可离线验证或在执行前校验。</sub>
 </p>
 
-[![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
-[![简体中文](https://img.shields.io/badge/简体中文-lightgrey?style=flat-square)](README.zh.md)
-
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Prismer-AI/signet?style=flat-square&label=release)](https://github.com/Prismer-AI/signet/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
 [![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
 [![npm packages](https://img.shields.io/badge/npm-5%20packages-cb3837.svg)](https://www.npmjs.com/org/signet-auth)
@@ -22,22 +20,37 @@ TypeScript 包：
 [`@signet-auth/mcp-tools`](https://www.npmjs.com/package/@signet-auth/mcp-tools) ·
 [`@signet-auth/vercel-ai`](https://www.npmjs.com/package/@signet-auth/vercel-ai)
 
+[![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
+[![简体中文](https://img.shields.io/badge/简体中文-lightgrey?style=flat-square)](README.zh.md)
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=7OiGV_pyZas">
+    <img src="https://img.youtube.com/vi/7OiGV_pyZas/maxresdefault.jpg" alt="Signet 演示 — 签名和验证 AI Agent 工具调用" width="820">
+  </a>
+</p>
+
+<p align="center">
+  <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ 观看：Signet 如何签名和验证 AI Agent 工具调用（2 分钟）</a></sub>
+</p>
+
 **你的 AI Agent 刚调用了一个工具。你能证明它到底做了什么吗？**
 
-大多数 Agent 栈在事后记录动作，但从不验证实际发送的内容。如果请求被重放、篡改或伪造，执行端根本无从得知。
+日志只能告诉你事后发生了什么；Signet 让你证明 Agent 当时到底发出了什么。
 
-Signet 解决这个问题：为每个 Agent 分配 Ed25519 身份，对每次工具调用签名，写入哈希链审计日志，客户端或服务端可以在信任请求前验证它到底发送了什么。3 行签名，3 行验证，开源。
+每个 Agent 都有自己的 Ed25519 身份，每次工具调用都会被签名，并写入哈希链审计日志。
+
+客户端和服务端都可以用 3 行代码在离线或执行前验证收据，所以重放、篡改、伪造、过期或发错目标的请求，会在被信任之前先被识别出来。
 
 如果 Signet 对你有帮助，[点个 Star](https://github.com/Prismer-AI/signet) 让更多人发现它。
 
-先看下面这张 CLI 流程图，理解签名的工作方式；再跳到 [看它如何拒绝非法请求](#execution-boundary-demo)，看服务端如何在真正执行前拦住未签名、被篡改、过期或目标错误的请求。
+上面的视频展示完整流程。下面这张 SVG 展示 CLI 签名的细节，也可以跳到 [看它如何拒绝非法请求](#execution-boundary-demo) 看服务端如何拦住非法请求。
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet 演示" width="820">
 </p>
 
 <p align="center">
-  <sub>这张图先展示签名与审计收据。也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
+  <sub>这个 demo 展示签名与审计收据。也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
 </p>
 
 ## 为什么是 Signet

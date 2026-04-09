@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Make AI agent tool calls verifiable at the execution boundary</strong><br/>
-  <sub>See which agent called which tool, when, and with what params hash. Verify offline or before execution in 3 lines.</sub>
+  <sub>Prove what your AI agent actually sent. Verify tool calls offline or before execution in 3 lines.</sub>
 </p>
 
 <p align="center">
@@ -35,15 +35,27 @@
   <a href="./README.zh.md"><img alt="简体中文" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
 </p>
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=7OiGV_pyZas">
+    <img src="https://img.youtube.com/vi/7OiGV_pyZas/maxresdefault.jpg" alt="Watch the Signet walkthrough on YouTube" width="820">
+  </a>
+</p>
+
+<p align="center">
+  <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Watch the YouTube walkthrough</a></sub>
+</p>
+
 **Your AI agent just called a tool. Can you prove what it did?**
 
-Most agent stacks log actions after the fact but never verify what was actually sent. If a request is replayed, tampered with, or forged, the execution side has no way to know.
+Logs tell you what happened later; Signet lets you prove what the agent actually sent.
 
-Signet fixes this: each agent gets an Ed25519 identity, every tool call is signed, a hash-chained audit log records what happened, and clients or servers can verify the request before trusting it. 3 lines to sign. 3 lines to verify. Open source.
+Each agent gets an Ed25519 identity, every tool call is signed, and a hash-chained audit trail records the receipt.
+
+Clients and servers can verify receipts offline or before execution in 3 lines, so replayed, tampered, forged, stale, or mis-targeted requests get caught before they are trusted.
 
 If Signet is useful to you, [star this repo](https://github.com/Prismer-AI/signet) to help more teams find it.
 
-Start with the CLI flow below to see signing in action, then jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the server block unsigned, tampered, stale, or mis-targeted requests before they run.
+The video above shows the full flow. The SVG below shows the CLI signing details, or jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the server block bad requests before they run.
 
 <p align="center">
   <img src="demo-cli.svg" alt="Signet demo" width="820">
@@ -102,7 +114,7 @@ npm run execution-boundary-demo
 </p>
 
 <p align="center">
-  <sub>Prefer motion? Watch the <a href="https://www.youtube.com/watch?v=7OiGV_pyZas">YouTube walkthrough</a>, <a href="./demo-execution-boundary.mp4">MP4</a>, or <a href="./demo-execution-boundary.gif">GIF</a>.</sub>
+  <sub>Prefer motion? Download the <a href="./demo-execution-boundary.mp4">MP4</a> or <a href="./demo-execution-boundary.gif">GIF</a>.</sub>
 </p>
 
 See [examples/mcp-agent/demo-execution-boundary.mjs](./examples/mcp-agent/demo-execution-boundary.mjs) for the demo source.
@@ -271,10 +283,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // process tool call...
 });
 ```
-
-<p align="center">
-  <img src="demo-mcp.svg" alt="Signet MCP end-to-end demo" width="820">
-</p>
 
 ### Vercel AI SDK Integration
 

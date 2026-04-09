@@ -102,7 +102,7 @@ npm run execution-boundary-demo
 </p>
 
 <p align="center">
-  <sub>Prefer motion? Watch the <a href="./demo-execution-boundary.mp4">MP4</a> or <a href="./demo-execution-boundary.gif">GIF</a>.</sub>
+  <sub>Prefer motion? Watch the <a href="https://www.youtube.com/watch?v=7OiGV_pyZas">YouTube walkthrough</a>, <a href="./demo-execution-boundary.mp4">MP4</a>, or <a href="./demo-execution-boundary.gif">GIF</a>.</sub>
 </p>
 
 See [examples/mcp-agent/demo-execution-boundary.mjs](./examples/mcp-agent/demo-execution-boundary.mjs) for the demo source.

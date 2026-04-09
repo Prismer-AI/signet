@@ -490,10 +490,13 @@ async function renderTimeline() {
             nodes.push(h('span', {class: 'chain-node'}, tok.delegate.name));
           }
           const sc = chain[chain.length - 1].scope;
-          const scopeStr = `tools: [${sc.tools.join(', ')}]  targets: [${sc.targets.join(', ')}]  depth: ${sc.max_depth}`;
+          const rootPk = r.authorization?.root_pubkey || '';
+          const scopeParts = [`tools: [${sc.tools.join(', ')}]`, `targets: [${sc.targets.join(', ')}]`, `depth: ${sc.max_depth}`];
+          if (sc.expires) scopeParts.push(`expires: ${sc.expires}`);
           detailParts.push(h('div', {class: 'chain-viz'},
             h('div', null, h('strong', null, 'Delegation Chain: '), ...nodes),
-            h('span', {class: 'chain-scope'}, scopeStr)
+            h('span', {class: 'chain-scope'}, `Scope: ${scopeParts.join('  ')}`),
+            rootPk ? h('span', {class: 'chain-scope'}, `Root: ${rootPk.slice(0, 24)}\u2026`) : null
           ));
         }
         detailParts.push(h('pre', {class: 'receipt-detail'}, JSON.stringify(r, null, 2)));

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+import json as _json
+
 from signet_auth._signet import (
     Action,
     AuditRecord,
@@ -22,8 +24,12 @@ from signet_auth._signet import (
     load_verifying_key,
     sign as _sign,
     sign_bilateral as _sign_bilateral,
+    sign_delegation as _sign_delegation,
+    sign_authorized as _sign_authorized,
     verify as _verify,
+    verify_authorized as _verify_authorized,
     verify_bilateral as _verify_bilateral,
+    verify_delegation as _verify_delegation,
 )
 
 
@@ -84,6 +90,106 @@ class SigningAgent:
         if audit:
             audit_append(self._signet_dir, receipt)
         return receipt
+
+    def delegate(
+        self,
+        delegate_pubkey: str,
+        delegate_name: str,
+        *,
+        tools: list[str] | None = None,
+        targets: list[str] | None = None,
+        max_depth: int = 0,
+        expires: str | None = None,
+    ) -> str:
+        """Create a delegation token granting scoped authority to another agent.
+
+        Args:
+            delegate_pubkey: Base64-encoded Ed25519 public key of the delegate.
+            delegate_name: Display name of the delegate agent.
+            tools: Allowed tool names, or None for wildcard ["*"].
+            targets: Allowed targets, or None for wildcard ["*"].
+            max_depth: How many levels the delegate can re-delegate. 0 = cannot.
+            expires: Optional RFC 3339 expiry (e.g. "2026-12-31T23:59:59Z").
+
+        Returns:
+            JSON string of the signed DelegationToken.
+        """
+        if self._secret_key is None:
+            raise RuntimeError("SigningAgent has been closed")
+        scope = {
+            "tools": tools or ["*"],
+            "targets": targets or ["*"],
+            "max_depth": max_depth,
+        }
+        if expires is not None:
+            scope["expires"] = expires
+        return _sign_delegation(
+            self._secret_key,
+            self._name,
+            delegate_pubkey,
+            delegate_name,
+            _json.dumps(scope),
+        )
+
+    def sign_authorized(
+        self,
+        tool: str,
+        params: Any | None = None,
+        target: str = "",
+        transport: str = "stdio",
+        *,
+        chain_json: str,
+    ) -> str:
+        """Sign an action with a delegation chain (produces v4 receipt).
+
+        Args:
+            tool: Tool name.
+            params: Tool parameters.
+            target: Target URI.
+            transport: Transport type.
+            chain_json: JSON string of the delegation chain array.
+
+        Returns:
+            JSON string of the v4 Receipt.
+        """
+        if self._secret_key is None:
+            raise RuntimeError("SigningAgent has been closed")
+        action = {
+            "tool": tool,
+            "params": params if params is not None else {},
+            "params_hash": "",
+            "target": target,
+            "transport": transport,
+        }
+        return _sign_authorized(
+            self._secret_key,
+            _json.dumps(action),
+            self._name,
+            chain_json,
+        )
+
+    @staticmethod
+    def verify_delegation(token_json: str) -> bool:
+        """Verify a delegation token's signature."""
+        return _verify_delegation(token_json)
+
+    @staticmethod
+    def verify_authorized(
+        receipt_json: str,
+        trusted_roots: list[str],
+        clock_skew_secs: int = 60,
+    ) -> str:
+        """Verify an authorized (v4) receipt against trusted root keys.
+
+        Args:
+            receipt_json: JSON string of the v4 receipt.
+            trusted_roots: List of base64-encoded root public keys.
+            clock_skew_secs: Clock skew tolerance in seconds.
+
+        Returns:
+            JSON string of the effective Scope.
+        """
+        return _verify_authorized(receipt_json, trusted_roots, clock_skew_secs)
 
     def close(self) -> None:
         """Drop references to secret key material.

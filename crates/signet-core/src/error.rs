@@ -15,6 +15,18 @@ pub enum SignetError {
     #[error("serialization error: {0}")]
     SerializeError(#[from] serde_json::Error),
 
+    #[error("delegation scope violation: {0}")]
+    ScopeViolation(String),
+
+    #[error("delegation chain invalid: {0}")]
+    ChainError(String),
+
+    #[error("delegation token expired at {0}")]
+    DelegationExpired(String),
+
+    #[error("action not authorized: {0}")]
+    Unauthorized(String),
+
     #[cfg(not(target_arch = "wasm32"))]
     #[error("key not found: {0}")]
     KeyNotFound(String),

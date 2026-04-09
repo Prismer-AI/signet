@@ -84,9 +84,10 @@ pub fn extract_tool(receipt: &serde_json::Value) -> Option<&str> {
 pub fn extract_timestamp(receipt: &serde_json::Value) -> Option<&str> {
     let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
     match version {
-        1 => receipt.get("ts").and_then(|t| t.as_str()),
+        1 | 4 => receipt.get("ts").and_then(|t| t.as_str()),
         2 => receipt.get("ts_request").and_then(|t| t.as_str()),
-        _ => receipt.get("ts_response").and_then(|t| t.as_str()), // v3+
+        3 => receipt.get("ts_response").and_then(|t| t.as_str()),
+        _ => None,
     }
 }
 

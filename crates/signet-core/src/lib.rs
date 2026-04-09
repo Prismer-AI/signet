@@ -1,9 +1,12 @@
 pub mod canonical;
+pub mod delegation;
 pub mod error;
 pub mod identity;
 pub mod receipt;
 pub mod sign;
+pub mod sign_delegation;
 pub mod verify;
+pub mod verify_delegation;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod keystore;
@@ -11,15 +14,23 @@ pub mod keystore;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audit;
 
+pub use delegation::{
+    validate_scope_narrowing, Authorization, DelegationIdentity, DelegationToken, Scope,
+};
 pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };
 pub use sign::{sign, sign_bilateral, sign_compound};
+pub use sign_delegation::{sign_authorized, sign_delegation};
 pub use verify::{
     verify, verify_any, verify_bilateral, verify_bilateral_with_options, verify_compound,
     BilateralVerifyOptions,
+};
+pub use verify_delegation::{
+    verify_authorized, verify_chain as verify_delegation_chain, verify_delegation,
+    AuthorizedVerifyOptions,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

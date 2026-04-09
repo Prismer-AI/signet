@@ -82,6 +82,19 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
         3 => Err(SignetError::InvalidReceipt(
             "v3 bilateral receipts require verify_bilateral(), not verify_any()".to_string(),
         )),
+        4 => {
+            let receipt: Receipt = serde_json::from_value(raw)
+                .map_err(|e| SignetError::InvalidReceipt(format!("v4 parse: {e}")))?;
+            // Check provided pubkey matches receipt's signer
+            let expected_pubkey = format!(
+                "ed25519:{}",
+                base64::engine::general_purpose::STANDARD.encode(pubkey.to_bytes())
+            );
+            if receipt.signer.pubkey != expected_pubkey {
+                return Err(SignetError::SignatureMismatch);
+            }
+            crate::verify_delegation::verify_v4_signature_only(&receipt)
+        }
         _ => Err(SignetError::InvalidReceipt(format!(
             "unsupported version: {version}"
         ))),
@@ -416,8 +429,7 @@ mod tests {
         let action = test_action();
         let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
         let response = json!({"content": [{"type": "text", "text": "issue #42"}]});
-        let ts_response = chrono::Utc::now()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts_response = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let bilateral = sign::sign_bilateral(
             &server_key,
             &agent_receipt,
@@ -546,14 +558,11 @@ mod tests {
 
     // --- Bilateral timestamp ordering tests ---
 
-    fn make_bilateral_with_ts(
-        ts_response: &str,
-    ) -> (BilateralReceipt, VerifyingKey) {
+    fn make_bilateral_with_ts(ts_response: &str) -> (BilateralReceipt, VerifyingKey) {
         let (agent_key, _) = generate_keypair();
         let (server_key, server_vk) = generate_keypair();
         let action = test_action();
-        let agent_receipt =
-            sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
         let response = json!({"content": [{"type": "text", "text": "ok"}]});
         let bilateral = sign::sign_bilateral(
             &server_key,

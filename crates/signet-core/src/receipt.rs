@@ -1,3 +1,4 @@
+use crate::delegation::Authorization;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +29,8 @@ pub struct Receipt {
     pub id: String,
     pub action: Action,
     pub signer: Signer,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<Authorization>,
     pub ts: String,
     pub nonce: String,
     pub sig: String,

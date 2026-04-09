@@ -365,7 +365,10 @@ mod fs_tests {
         // load_key_info should now reject the tampered file
         let result = load_key_info(dir.path(), "eve");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("does not match filename"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("does not match filename"));
     }
 
     #[test]

@@ -1399,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "signet-cli"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1423,7 +1423,7 @@ dependencies = [
 
 [[package]]
 name = "signet-core"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "base64",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "signet-python"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "signet-wasm"
-version = "0.4.6"
+version = "0.5.0"
 dependencies = [
  "base64",
  "ed25519-dalek",

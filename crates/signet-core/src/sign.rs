@@ -11,12 +11,16 @@ use crate::receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };
 
-fn validate_params_hash(hash: &str) -> Result<(), SignetError> {
+pub(crate) fn validate_params_hash(hash: &str) -> Result<(), SignetError> {
     if hash.is_empty() {
         return Ok(());
     }
     if let Some(hex_part) = hash.strip_prefix("sha256:") {
-        if hex_part.len() == 64 && hex_part.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) {
+        if hex_part.len() == 64
+            && hex_part
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
             return Ok(());
         }
     }
@@ -25,7 +29,7 @@ fn validate_params_hash(hash: &str) -> Result<(), SignetError> {
     )))
 }
 
-fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
+pub(crate) fn compute_params_hash(action: &Action) -> Result<String, SignetError> {
     if action.params.is_null() && !action.params_hash.is_empty() {
         validate_params_hash(&action.params_hash)?;
         return Ok(action.params_hash.clone());
@@ -101,6 +105,7 @@ pub fn sign(
         id,
         action: signed_action,
         signer,
+        authorization: None,
         ts,
         nonce,
         sig,
@@ -284,7 +289,8 @@ mod tests {
         let action = Action {
             tool: "test".to_string(),
             params: serde_json::Value::Null,
-            params_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string(),
+            params_hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .to_string(),
             target: "mcp://test".to_string(),
             transport: "stdio".to_string(),
             session: None,
@@ -292,7 +298,10 @@ mod tests {
             response_hash: None,
         };
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
-        assert_eq!(receipt.action.params_hash, "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            receipt.action.params_hash,
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 
     #[test]

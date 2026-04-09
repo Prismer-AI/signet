@@ -55,7 +55,9 @@ async fn get_records(
         .await
         .map_err(|e| AppError::internal(format!("task join: {e}")))?
         .map_err(|e| AppError::internal(format!("{e}")))?;
-    Ok(Json(serde_json::to_value(records).map_err(|e| AppError::internal(format!("{e}")))?))
+    Ok(Json(
+        serde_json::to_value(records).map_err(|e| AppError::internal(format!("{e}")))?,
+    ))
 }
 
 async fn get_chain_status(
@@ -66,7 +68,9 @@ async fn get_chain_status(
         .await
         .map_err(|e| AppError::internal(format!("task join: {e}")))?
         .map_err(|e| AppError::internal(format!("{e}")))?;
-    Ok(Json(serde_json::to_value(status).map_err(|e| AppError::internal(format!("{e}")))?))
+    Ok(Json(
+        serde_json::to_value(status).map_err(|e| AppError::internal(format!("{e}")))?,
+    ))
 }
 
 async fn get_verify_signatures(
@@ -79,7 +83,9 @@ async fn get_verify_signatures(
         .await
         .map_err(|e| AppError::internal(format!("task join: {e}")))?
         .map_err(|e| AppError::internal(format!("{e}")))?;
-    Ok(Json(serde_json::to_value(result).map_err(|e| AppError::internal(format!("{e}")))?))
+    Ok(Json(
+        serde_json::to_value(result).map_err(|e| AppError::internal(format!("{e}")))?,
+    ))
 }
 
 #[derive(Serialize)]
@@ -89,13 +95,12 @@ struct Stats {
     by_tool: HashMap<String, usize>,
     by_signer: HashMap<String, usize>,
     by_version: HashMap<String, usize>,
+    by_authorization: HashMap<String, usize>,
     earliest: Option<String>,
     latest: Option<String>,
 }
 
-async fn get_stats(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Stats>, AppError> {
+async fn get_stats(State(state): State<Arc<AppState>>) -> Result<Json<Stats>, AppError> {
     let dir = state.signet_dir.clone();
     let mut records = tokio::task::spawn_blocking(move || {
         let filter = AuditFilter {
@@ -115,6 +120,7 @@ async fn get_stats(
     let mut by_tool: HashMap<String, usize> = HashMap::new();
     let mut by_signer: HashMap<String, usize> = HashMap::new();
     let mut by_version: HashMap<String, usize> = HashMap::new();
+    let mut by_authorization: HashMap<String, usize> = HashMap::new();
     let mut earliest: Option<String> = None;
     let mut latest: Option<String> = None;
 
@@ -129,6 +135,10 @@ async fn get_stats(
         if let Some(v) = r.get("v").and_then(|v| v.as_u64()) {
             *by_version.entry(format!("v{v}")).or_default() += 1;
         }
+        // Track delegated vs direct signing
+        let has_auth = r.get("authorization").is_some();
+        let auth_label = if has_auth { "delegated" } else { "direct" };
+        *by_authorization.entry(auth_label.to_string()).or_default() += 1;
         if let Some(ts) = audit::extract_timestamp(r) {
             if earliest.as_ref().is_none_or(|e| ts < e.as_str()) {
                 earliest = Some(ts.to_string());
@@ -145,6 +155,7 @@ async fn get_stats(
         by_tool,
         by_signer,
         by_version,
+        by_authorization,
         earliest,
         latest,
     }))
@@ -157,11 +168,17 @@ struct AppError {
 
 impl AppError {
     fn bad_request(message: String) -> Self {
-        Self { status: StatusCode::BAD_REQUEST, message }
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message,
+        }
     }
 
     fn internal(message: String) -> Self {
-        Self { status: StatusCode::INTERNAL_SERVER_ERROR, message }
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message,
+        }
     }
 }
 

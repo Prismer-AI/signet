@@ -3,104 +3,357 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Signet Dashboard</title>
+<title>Signet Audit Ledger</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
-  --fg: #c9d1d9; --fg2: #8b949e; --fg3: #484f58;
-  --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
-  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --paper: #f8f5f0;
+  --paper2: #f0ebe3;
+  --ink: #1a1a1a;
+  --ink2: #555;
+  --ink3: #999;
+  --rule: #d4cdc4;
+  --rule2: #e8e2d9;
+  --accent: #c41e1e;
+  --accent2: #8b1a1a;
+  --green: #2d6a2d;
+  --green-bg: #e8f0e8;
+  --red-bg: #f5e8e8;
+  --blue: #1a4a7a;
+  --yellow: #8a6d00;
+  --yellow-bg: #f5f0dd;
+  --serif: 'Playfair Display', 'Georgia', serif;
+  --body: 'Source Serif 4', 'Georgia', serif;
+  --mono: 'IBM Plex Mono', 'Menlo', monospace;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px; }
-a { color: var(--blue); text-decoration: none; }
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Masthead ── */
+header {
+  border-bottom: 3px double var(--ink);
+  padding: 20px 0 16px;
+  text-align: center;
+  margin: 0 auto;
+  max-width: 1100px;
+}
+header h1 {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 36px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+header .dateline {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink3);
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+header .rule { border: none; border-top: 1px solid var(--rule); margin: 12px 0 0; }
+
+/* ── Nav ── */
 nav {
-  display: flex; align-items: center; gap: 0; padding: 0 16px;
-  background: var(--bg2); border-bottom: 1px solid var(--bg3); height: 48px;
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  max-width: 1100px;
+  margin: 0 auto;
+  border-bottom: 1px solid var(--rule);
 }
-nav .logo { font-weight: 700; font-size: 16px; margin-right: 24px; color: var(--fg); }
-nav .logo span { color: var(--yellow); }
 nav button {
-  background: none; border: none; color: var(--fg2); font-size: 14px;
-  padding: 12px 16px; cursor: pointer; border-bottom: 2px solid transparent;
-  font-family: var(--sans); height: 48px;
+  background: none;
+  border: none;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink3);
+  padding: 10px 24px;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s;
 }
-nav button:hover { color: var(--fg); }
-nav button.active { color: var(--fg); border-bottom-color: var(--yellow); }
-main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+nav button:hover { color: var(--ink); }
+nav button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Main ── */
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+/* ── Section headings ── */
+.section-head {
+  font-family: var(--serif);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink3);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 6px;
+  margin-bottom: 16px;
+}
+
+/* ── Filters ── */
 .filters {
-  display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+  display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;
+  align-items: center;
 }
 .filters select, .filters input {
-  background: var(--bg2); border: 1px solid var(--bg3); color: var(--fg);
-  padding: 6px 10px; border-radius: 6px; font-size: 13px; font-family: var(--sans);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  padding: 7px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
 }
 .filters input { width: 160px; }
+.filters input::placeholder { color: var(--ink3); }
 .filters button {
-  background: var(--bg3); border: 1px solid var(--fg3); color: var(--fg);
-  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  background: var(--ink);
+  border: none;
+  color: var(--paper);
+  padding: 7px 18px;
+  cursor: pointer;
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background 0.15s;
 }
-.filters button:hover { background: var(--fg3); }
+.filters button:hover { background: var(--accent2); }
+
+/* ── Table ── */
 table { width: 100%; border-collapse: collapse; }
-th { text-align: left; color: var(--fg2); font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 12px;
-  border-bottom: 1px solid var(--bg3); }
-td { padding: 10px 12px; border-bottom: 1px solid var(--bg3); font-size: 13px; }
-tr:hover { background: var(--bg2); }
+th {
+  text-align: left;
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink3);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--ink);
+}
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule2);
+  font-size: 13px;
+}
+tr { transition: background 0.1s; }
+tr:hover { background: var(--paper2); }
+
+/* ── Badges ── */
 .badge {
-  display: inline-block; padding: 2px 6px; border-radius: 4px;
-  font-size: 11px; font-weight: 600; font-family: var(--mono);
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  border: 1px solid;
 }
-.badge-v1 { background: #1f3a5f; color: var(--blue); }
-.badge-v2 { background: #2d1f3f; color: #bc8cff; }
-.badge-v3 { background: #1f3f2d; color: var(--green); }
+.badge-v1 { color: var(--blue); border-color: var(--blue); }
+.badge-v2 { color: #6a3d8a; border-color: #6a3d8a; }
+.badge-v3 { color: var(--green); border-color: var(--green); }
+.badge-v4 { color: var(--accent); border-color: var(--accent); }
+
 .mono { font-family: var(--mono); font-size: 12px; }
+
+/* ── Delegation chain ── */
+.chain-viz {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: var(--yellow-bg);
+  border-left: 3px solid var(--yellow);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.chain-arrow { color: var(--accent); margin: 0 6px; font-weight: 700; }
+.chain-node { color: var(--ink); font-weight: 500; }
+.chain-scope { color: var(--ink3); font-size: 11px; display: block; margin-top: 4px; }
+
+/* ── Status cards ── */
 .status-card {
-  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 8px;
-  padding: 24px; text-align: center; margin-bottom: 16px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 32px;
+  text-align: center;
+  margin-bottom: 20px;
 }
-.status-icon { font-size: 48px; margin-bottom: 8px; }
-.status-label { font-size: 20px; font-weight: 600; }
-.status-detail { color: var(--fg2); margin-top: 8px; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.status-icon { font-size: 40px; margin-bottom: 8px; }
+.status-label {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 700;
+}
+.status-detail { color: var(--ink3); margin-top: 6px; font-size: 14px; }
+
+/* ── Stat grid ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
 .stat-card {
-  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 8px; padding: 16px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  padding: 20px;
 }
-.stat-card .label { color: var(--fg2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
-.bar-chart { margin-top: 16px; }
-.bar-row { display: flex; align-items: center; margin-bottom: 6px; }
-.bar-label { width: 140px; font-size: 12px; color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
-.bar-fill { height: 20px; background: var(--blue); border-radius: 3px; min-width: 2px; transition: width 0.3s; }
-.bar-count { margin-left: 8px; font-size: 12px; color: var(--fg2); }
+.stat-card .label {
+  font-family: var(--serif);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink3);
+}
+.stat-card .value {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 900;
+  margin-top: 4px;
+  color: var(--ink);
+}
+
+/* ── Bar chart ── */
+.bar-chart { margin-top: 20px; }
+.bar-section-title {
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink3);
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--rule2);
+}
+.bar-row { display: flex; align-items: center; margin-bottom: 5px; }
+.bar-label {
+  width: 150px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-fill {
+  height: 16px;
+  background: var(--ink);
+  min-width: 2px;
+  transition: width 0.4s ease;
+}
+.bar-count {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink3);
+}
+
+/* ── Detail panel ── */
 .receipt-detail {
-  background: var(--bg2); border: 1px solid var(--bg3); border-radius: 6px;
-  padding: 12px; margin: 4px 0 8px; font-family: var(--mono); font-size: 12px;
-  white-space: pre-wrap; word-break: break-all; color: var(--fg2);
-  max-height: 400px; overflow-y: auto;
+  background: var(--paper2);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink3);
+  padding: 14px 16px;
+  margin: 6px 0 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink2);
+  max-height: 400px;
+  overflow-y: auto;
 }
+
+/* ── Break info ── */
 .break-info {
-  background: #3d1f1f; border: 1px solid var(--red); border-radius: 8px;
-  padding: 16px; margin-top: 16px;
+  background: var(--red-bg);
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  padding: 20px;
+  margin-top: 20px;
 }
-.break-info h3 { color: var(--red); margin-bottom: 8px; }
-.break-info code { font-family: var(--mono); font-size: 12px; }
-.progress-bar { background: var(--bg3); border-radius: 4px; height: 24px; overflow: hidden; margin: 12px 0; }
-.progress-fill { height: 100%; background: var(--green); transition: width 0.3s; }
-.loading { color: var(--fg2); text-align: center; padding: 48px; }
-.empty { color: var(--fg3); text-align: center; padding: 48px; font-style: italic; }
+.break-info h3 {
+  font-family: var(--serif);
+  color: var(--accent);
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+.break-info p { margin-bottom: 4px; font-size: 13px; }
+.break-info code { font-family: var(--mono); font-size: 11px; }
+
+/* ── Progress bar ── */
+.progress-bar {
+  background: var(--rule2);
+  height: 20px;
+  overflow: hidden;
+  margin: 16px 0;
+}
+.progress-fill { height: 100%; background: var(--green); transition: width 0.4s ease; }
+
+.loading {
+  color: var(--ink3);
+  text-align: center;
+  padding: 64px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 16px;
+}
+.empty {
+  color: var(--ink3);
+  text-align: center;
+  padding: 64px;
+  font-style: italic;
+}
+
+/* ── Truncation warning ── */
+.truncation-notice {
+  color: var(--yellow);
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--yellow-bg);
+  border-left: 3px solid var(--yellow);
+  font-size: 13px;
+}
 </style>
 </head>
 <body>
+<header>
+  <h1>Signet Audit Ledger</h1>
+  <div class="dateline" id="dateline"></div>
+  <hr class="rule">
+</header>
 <nav>
-  <div class="logo"><span>S</span>ignet Dashboard</div>
   <button onclick="navigate('timeline')" id="nav-timeline">Timeline</button>
   <button onclick="navigate('chain')" id="nav-chain">Chain Integrity</button>
   <button onclick="navigate('signatures')" id="nav-signatures">Signatures</button>
-  <button onclick="navigate('stats')" id="nav-stats">Stats</button>
+  <button onclick="navigate('stats')" id="nav-stats">Statistics</button>
 </nav>
-<main id="app"><div class="loading">Loading...</div></main>
+<main id="app"><div class="loading">Retrieving records...</div></main>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -115,6 +368,11 @@ const h = (tag, attrs, ...kids) => {
   return el;
 };
 
+// Set dateline
+$('#dateline').textContent = new Date().toLocaleDateString('en-US', {
+  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+}).toUpperCase();
+
 let state = { view: 'timeline', expandedRow: null };
 
 async function fetchJSON(url) {
@@ -126,12 +384,21 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-// Extract fields from any receipt version (v1/v2/v3)
 function receiptTime(r) {
   const v = r.v || 1;
-  if (v === 1) return r.ts;
+  if (v === 1 || v === 4) return r.ts;
   if (v === 2) return r.ts_request;
-  return r.ts_response; // v3+
+  if (v === 3) return r.ts_response;
+  return r.ts;
+}
+function receiptChain(r) {
+  if (r.v !== 4 || !r.authorization?.chain) return null;
+  return r.authorization.chain;
+}
+function receiptRootName(r) {
+  const chain = receiptChain(r);
+  if (!chain || chain.length === 0) return '';
+  return chain[0].delegator.name;
 }
 function receiptTool(r) {
   return r.action?.tool || r.agent_receipt?.action?.tool || '';
@@ -155,11 +422,11 @@ function navigate(view) {
 function fmtTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
-  return d.toLocaleString();
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function truncate(s, n) {
-  return s && s.length > n ? s.slice(0, n) + '...' : (s || '');
+  return s && s.length > n ? s.slice(0, n) + '\u2026' : (s || '');
 }
 
 // ── Timeline ──
@@ -177,12 +444,12 @@ async function renderTimeline() {
           {selected: (v === 'all' ? '' : v) === since})
       )
     ),
-    h('input', {id: 'f-tool', placeholder: 'Filter by tool...', value: tool}),
-    h('input', {id: 'f-signer', placeholder: 'Filter by signer...', value: signer}),
-    h('button', {onclick: () => renderTimeline()}, 'Apply')
+    h('input', {id: 'f-tool', placeholder: 'Tool name\u2026', value: tool}),
+    h('input', {id: 'f-signer', placeholder: 'Signer name\u2026', value: signer}),
+    h('button', {onclick: () => renderTimeline()}, 'Query')
   );
 
-  app.replaceChildren(filters, h('div', {class: 'loading'}, 'Loading records...'));
+  app.replaceChildren(filters, h('div', {class: 'loading'}, 'Retrieving records\u2026'));
 
   let params = new URLSearchParams();
   if (since) params.set('since', since);
@@ -193,14 +460,14 @@ async function renderTimeline() {
   try {
     const records = await fetchJSON(`/api/records?${params}`);
     if (!records.length) {
-      app.replaceChildren(filters, h('div', {class: 'empty'}, 'No audit records found.'));
+      app.replaceChildren(filters, h('div', {class: 'empty'}, 'No audit records found for the selected period.'));
       return;
     }
 
     const table = h('table', null,
       h('thead', null, h('tr', null,
-        h('th', null, 'Time'), h('th', null, 'Ver'), h('th', null, 'Signer'),
-        h('th', null, 'Tool'), h('th', null, 'Target'), h('th', null, 'Receipt ID')
+        h('th', null, 'Timestamp'), h('th', null, 'Ver.'), h('th', null, 'Signer'),
+        h('th', null, 'Tool'), h('th', null, 'Target'), h('th', null, 'Receipt')
       )),
       h('tbody', null, ...records.map((rec, i) => {
         const r = rec.receipt;
@@ -210,13 +477,28 @@ async function renderTimeline() {
           h('td', null, h('span', {class: `badge badge-v${v}`}, `v${v}`)),
           h('td', null, receiptSigner(r)),
           h('td', {class: 'mono'}, receiptTool(r)),
-          h('td', {class: 'mono'}, truncate(receiptTarget(r), 24)),
-          h('td', {class: 'mono'}, truncate(r.id, 16))
+          h('td', {class: 'mono'}, truncate(receiptTarget(r), 28)),
+          h('td', {class: 'mono'}, truncate(r.id, 20))
         );
+        const detailParts = [];
+        const chain = receiptChain(r);
+        if (chain && chain.length > 0) {
+          const nodes = [];
+          nodes.push(h('span', {class: 'chain-node'}, chain[0].delegator.name));
+          for (const tok of chain) {
+            nodes.push(h('span', {class: 'chain-arrow'}, '\u2192'));
+            nodes.push(h('span', {class: 'chain-node'}, tok.delegate.name));
+          }
+          const sc = chain[chain.length - 1].scope;
+          const scopeStr = `tools: [${sc.tools.join(', ')}]  targets: [${sc.targets.join(', ')}]  depth: ${sc.max_depth}`;
+          detailParts.push(h('div', {class: 'chain-viz'},
+            h('div', null, h('strong', null, 'Delegation Chain: '), ...nodes),
+            h('span', {class: 'chain-scope'}, scopeStr)
+          ));
+        }
+        detailParts.push(h('pre', {class: 'receipt-detail'}, JSON.stringify(r, null, 2)));
         const detail = h('tr', {id: `detail-${i}`, style: 'display:none'},
-          h('td', {colspan: '6'},
-            h('pre', {class: 'receipt-detail'}, JSON.stringify(r, null, 2))
-          )
+          h('td', {colspan: '6'}, ...detailParts)
         );
         return [row, detail];
       }).flat())
@@ -228,7 +510,7 @@ async function renderTimeline() {
   }
 }
 
-function toggleRow(i, rec) {
+function toggleRow(i) {
   const el = $(`#detail-${i}`);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? '' : 'none';
@@ -238,13 +520,13 @@ function toggleRow(i, rec) {
 
 async function renderChain() {
   const app = $('#app');
-  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying chain integrity...'));
+  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying chain integrity\u2026'));
 
   try {
     const status = await fetchJSON('/api/chain-status');
     const card = h('div', {class: 'status-card'},
-      h('div', {class: 'status-icon'}, status.valid ? '\u2705' : '\u274C'),
-      h('div', {class: 'status-label', style: `color:${status.valid ? 'var(--green)' : 'var(--red)'}`},
+      h('div', {class: 'status-icon'}, status.valid ? '\u2713' : '\u2717'),
+      h('div', {class: 'status-label', style: `color:${status.valid ? 'var(--green)' : 'var(--accent)'}`},
         status.valid ? 'Chain Intact' : 'Chain Broken'),
       h('div', {class: 'status-detail'}, `${status.total_records} records verified`)
     );
@@ -254,11 +536,11 @@ async function renderChain() {
     if (status.break_point) {
       const bp = status.break_point;
       parts.push(h('div', {class: 'break-info'},
-        h('h3', null, 'Break Point'),
+        h('h3', null, 'Break Point Detected'),
         h('p', null, `File: `, h('code', null, bp.file)),
         h('p', null, `Line: `, h('code', null, String(bp.line))),
-        h('p', null, `Expected: `, h('code', null, truncate(bp.expected_hash, 32))),
-        h('p', null, `Actual: `, h('code', null, truncate(bp.actual_hash, 32)))
+        h('p', null, `Expected: `, h('code', null, truncate(bp.expected_hash, 40))),
+        h('p', null, `Actual: `, h('code', null, truncate(bp.actual_hash, 40)))
       ));
     }
 
@@ -272,7 +554,7 @@ async function renderChain() {
 
 async function renderSignatures() {
   const app = $('#app');
-  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying signatures...'));
+  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying signatures\u2026'));
 
   try {
     const result = await fetchJSON('/api/verify-signatures');
@@ -280,9 +562,9 @@ async function renderSignatures() {
     const allValid = result.valid === result.total;
 
     const card = h('div', {class: 'status-card'},
-      h('div', {class: 'status-icon'}, allValid ? '\u2705' : '\u26A0\uFE0F'),
+      h('div', {class: 'status-icon'}, allValid ? '\u2713' : '\u26A0'),
       h('div', {class: 'status-label', style: `color:${allValid ? 'var(--green)' : 'var(--yellow)'}`},
-        `${result.valid} / ${result.total} Valid`),
+        `${result.valid} of ${result.total} Valid`),
       h('div', {class: 'progress-bar'},
         h('div', {class: 'progress-fill', style: `width:${pct}%;background:${allValid ? 'var(--green)' : 'var(--yellow)'}`})
       )
@@ -291,13 +573,14 @@ async function renderSignatures() {
     const parts = [card];
 
     if (result.failures && result.failures.length > 0) {
+      parts.push(h('div', {class: 'section-head'}, 'Verification Failures'));
       const table = h('table', null,
         h('thead', null, h('tr', null,
-          h('th', null, 'Receipt ID'), h('th', null, 'File'), h('th', null, 'Line'), h('th', null, 'Reason')
+          h('th', null, 'Receipt'), h('th', null, 'File'), h('th', null, 'Line'), h('th', null, 'Reason')
         )),
         h('tbody', null, ...result.failures.map(f =>
           h('tr', null,
-            h('td', {class: 'mono'}, truncate(f.receipt_id, 20)),
+            h('td', {class: 'mono'}, truncate(f.receipt_id, 24)),
             h('td', {class: 'mono'}, f.file),
             h('td', null, String(f.line)),
             h('td', null, f.reason)
@@ -317,7 +600,7 @@ async function renderSignatures() {
 
 async function renderStats() {
   const app = $('#app');
-  app.replaceChildren(h('div', {class: 'loading'}, 'Loading stats...'));
+  app.replaceChildren(h('div', {class: 'loading'}, 'Compiling statistics\u2026'));
 
   try {
     const stats = await fetchJSON('/api/stats');
@@ -328,15 +611,15 @@ async function renderStats() {
         h('div', {class: 'value'}, String(stats.total_records))
       ),
       h('div', {class: 'stat-card'},
-        h('div', {class: 'label'}, 'Earliest'),
+        h('div', {class: 'label'}, 'Earliest Record'),
         h('div', {class: 'value', style: 'font-size:14px'}, fmtTime(stats.earliest))
       ),
       h('div', {class: 'stat-card'},
-        h('div', {class: 'label'}, 'Latest'),
+        h('div', {class: 'label'}, 'Latest Record'),
         h('div', {class: 'value', style: 'font-size:14px'}, fmtTime(stats.latest))
       ),
       h('div', {class: 'stat-card'},
-        h('div', {class: 'label'}, 'Tools'),
+        h('div', {class: 'label'}, 'Distinct Tools'),
         h('div', {class: 'value'}, String(Object.keys(stats.by_tool).length))
       )
     );
@@ -344,8 +627,8 @@ async function renderStats() {
     const makeChart = (title, data) => {
       const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
       const max = entries.length > 0 ? entries[0][1] : 1;
-      return h('div', null,
-        h('h3', {style: 'color:var(--fg2);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px'}, title),
+      return h('div', {style: 'margin-bottom:28px'},
+        h('div', {class: 'bar-section-title'}, title),
         h('div', {class: 'bar-chart'}, ...entries.slice(0, 15).map(([name, count]) =>
           h('div', {class: 'bar-row'},
             h('div', {class: 'bar-label'}, name),
@@ -358,12 +641,13 @@ async function renderStats() {
 
     const parts = [cards];
     if (stats.truncated) {
-      parts.push(h('div', {style: 'color:var(--yellow);margin-bottom:12px;padding:8px 12px;background:var(--bg2);border:1px solid var(--yellow);border-radius:6px'},
-        `Showing stats for first ${stats.total_records} records (log has more — results are truncated).`));
+      parts.push(h('div', {class: 'truncation-notice'},
+        `Showing statistics for the first ${stats.total_records} records. The audit log contains additional entries.`));
     }
     parts.push(makeChart('By Tool', stats.by_tool));
     parts.push(makeChart('By Signer', stats.by_signer));
     parts.push(makeChart('By Version', stats.by_version));
+    if (stats.by_authorization) parts.push(makeChart('By Authorization', stats.by_authorization));
     app.replaceChildren(...parts);
   } catch (e) {
     app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));

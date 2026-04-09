@@ -119,6 +119,47 @@ npm run execution-boundary-demo
 
 See [examples/mcp-agent/demo-execution-boundary.mjs](./examples/mcp-agent/demo-execution-boundary.mjs) for the demo source.
 
+<a id="delegation-chains"></a>
+## Delegation Chains: Who Authorized This Agent?
+
+Signet receipts prove **what** happened. Delegation chains prove **who allowed it**.
+
+A root identity (human or org) cryptographically delegates scoped authority to an agent. Permissions can only narrow, never widen. The agent's v4 receipt carries the full proof of authorization.
+
+```text
+Owner (alice) → Agent A (tools: [Bash, Read], max_depth: 0)
+                    ↓
+              v4 Receipt: tool=Bash, authorization.chain proves alice → Agent A
+```
+
+```bash
+# Create a delegation token
+signet delegate create --from alice --to deploy-bot --to-name deploy-bot \
+    --tools Bash,Read --targets "mcp://github" --max-depth 0
+
+# Sign with authorization proof (v4 receipt)
+signet delegate sign --key deploy-bot --tool Bash \
+    --params '{"cmd":"git pull"}' --target "mcp://github" --chain chain.json
+
+# Verify: signature + chain + scope + root trust
+signet delegate verify-auth receipt.json --trusted-roots alice
+```
+
+Or in Python:
+
+```python
+from signet_auth import sign_delegation, sign_authorized, verify_authorized
+
+# Delegation functions accept JSON strings for scope, chain, and receipts
+token_json = sign_delegation(root_key_b64, "alice", agent_pubkey_b64, "bot", scope_json)
+receipt_json = sign_authorized(agent_key_b64, action_json, "bot", f"[{token_json}]")
+scope_json = verify_authorized(receipt_json, [root_pubkey_b64])
+```
+
+<p align="center">
+  <img src="demo-delegation.svg" alt="Delegation chain demo" width="820">
+</p>
+
 ## When Teams Reach For Signet
 
 - You need an audit trail for coding agents, MCP tools, or CI automation

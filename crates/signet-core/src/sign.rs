@@ -1,11 +1,8 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
-use chrono::Utc;
 use ed25519_dalek::{Signer as _, SigningKey};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 
 use crate::canonical;
+use crate::delegation::{current_timestamp, derive_id, format_pubkey, format_sig, generate_nonce};
 use crate::error::SignetError;
 use crate::receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
@@ -66,22 +63,17 @@ pub fn sign(
     };
 
     // 3. Build signer
-    let pubkey_bytes = key.verifying_key().to_bytes();
     let signer = Signer {
-        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner.to_string(),
     };
 
-    // 4. Generate nonce
-    let mut nonce_bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
+    // 4. Generate nonce + timestamp
+    let nonce = generate_nonce();
+    let ts = current_timestamp();
 
-    // 5. Get timestamp
-    let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
-    // 6. Build signable JSON
+    // 5. Build signable JSON, canonicalize, sign
     let signable = serde_json::json!({
         "v": 1u8,
         "action": signed_action,
@@ -90,15 +82,9 @@ pub fn sign(
         "nonce": nonce,
     });
     let canonical_bytes = canonical::canonicalize(&signable)?;
-
-    // 7. Sign
     let signature = key.sign(canonical_bytes.as_bytes());
-    let sig_b64 = BASE64.encode(signature.to_bytes());
-    let sig = format!("ed25519:{}", sig_b64);
-
-    // 8. Derive receipt ID
-    let sig_hash = Sha256::digest(signature.to_bytes());
-    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+    let sig = format_sig(&signature.to_bytes());
+    let id = derive_id("rec", &signature.to_bytes());
 
     Ok(Receipt {
         v: 1,
@@ -143,19 +129,14 @@ pub fn sign_compound(
     };
 
     // 3. Build signer
-    let pubkey_bytes = key.verifying_key().to_bytes();
     let signer = Signer {
-        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner.to_string(),
     };
 
-    // 4. Generate nonce
-    let mut nonce_bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
-
-    // 5. Build signable (everything except sig and id)
+    // 4. Generate nonce, build signable, canonicalize, sign
+    let nonce = generate_nonce();
     let signable = serde_json::json!({
         "v": 2u8,
         "action": signed_action,
@@ -166,15 +147,9 @@ pub fn sign_compound(
         "nonce": nonce,
     });
     let canonical_bytes = canonical::canonicalize(&signable)?;
-
-    // 6. Sign
     let signature = key.sign(canonical_bytes.as_bytes());
-    let sig_b64 = BASE64.encode(signature.to_bytes());
-    let sig = format!("ed25519:{}", sig_b64);
-
-    // 7. Derive receipt ID
-    let sig_hash = Sha256::digest(signature.to_bytes());
-    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+    let sig = format_sig(&signature.to_bytes());
+    let id = derive_id("rec", &signature.to_bytes());
 
     Ok(CompoundReceipt {
         v: 2,
@@ -204,18 +179,13 @@ pub fn sign_bilateral(
     };
 
     // Server info
-    let pubkey_bytes = server_key.verifying_key().to_bytes();
     let server = ServerInfo {
-        pubkey: format!("ed25519:{}", BASE64.encode(pubkey_bytes)),
+        pubkey: format_pubkey(&server_key.verifying_key().to_bytes()),
         name: server_name.to_string(),
     };
 
-    // Nonce
-    let mut nonce_bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = format!("rnd_{}", hex::encode(nonce_bytes));
-
-    // Signable (everything except sig, id, extensions)
+    // Nonce, signable, canonicalize, sign
+    let nonce = generate_nonce();
     let signable = serde_json::json!({
         "v": 3u8,
         "agent_receipt": agent_receipt,
@@ -225,13 +195,9 @@ pub fn sign_bilateral(
         "nonce": nonce,
     });
     let canonical_bytes = canonical::canonicalize(&signable)?;
-
     let signature = server_key.sign(canonical_bytes.as_bytes());
-    let sig_b64 = BASE64.encode(signature.to_bytes());
-    let sig = format!("ed25519:{}", sig_b64);
-
-    let sig_hash = Sha256::digest(signature.to_bytes());
-    let id = format!("rec_{}", hex::encode(&sig_hash[..16]));
+    let sig = format_sig(&signature.to_bytes());
+    let id = derive_id("rec", &signature.to_bytes());
 
     Ok(BilateralReceipt {
         v: 3,
@@ -251,6 +217,8 @@ mod tests {
     use super::*;
     use crate::identity::generate_keypair;
     use crate::test_helpers::test_action;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine;
     use serde_json::json;
 
     #[test]

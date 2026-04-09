@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { generateKeypair, sign, verify, type SignetAction } from '../src/index.js';
+import {
+  generateKeypair, sign, verify, type SignetAction,
+  signDelegation, verifyDelegation, signAuthorized, verifyAuthorized,
+  type Scope, type DelegationToken,
+} from '../src/index.js';
 
 describe('@signet-auth/core', () => {
   const testAction: SignetAction = {
@@ -55,5 +59,89 @@ describe('@signet-auth/core', () => {
     const receipt = sign(kp.secretKey, testAction, 'agent', 'owner');
     assert(receipt.action.params_hash.startsWith('sha256:'));
     assert(receipt.action.params_hash.length > 10);
+  });
+});
+
+describe('delegation chain', () => {
+  const testAction: SignetAction = {
+    tool: 'Bash',
+    params: { cmd: 'ls' },
+    params_hash: '',
+    target: 'mcp://test',
+    transport: 'stdio',
+  };
+
+  const testScope: Scope = {
+    tools: ['Bash', 'Read'],
+    targets: ['mcp://test'],
+    max_depth: 0,
+  };
+
+  it('signDelegation produces valid token', () => {
+    const root = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    assert.strictEqual(token.v, 1);
+    assert(token.id.startsWith('del_'));
+    assert(token.sig.startsWith('ed25519:'));
+    assert.strictEqual(token.delegator.name, 'alice');
+    assert.strictEqual(token.delegate.name, 'bot');
+    assert.deepStrictEqual(token.scope.tools, ['Bash', 'Read']);
+  });
+
+  it('verifyDelegation roundtrip', () => {
+    const root = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    assert.strictEqual(verifyDelegation(token), true);
+  });
+
+  it('verifyDelegation rejects tampered token', () => {
+    const root = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    const tampered = { ...token, delegate: { ...token.delegate, name: 'evil' } };
+    assert.strictEqual(verifyDelegation(tampered), false);
+  });
+
+  it('signAuthorized produces v4 receipt', () => {
+    const root = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    const receipt = signAuthorized(agent.secretKey, testAction, 'bot', [token]);
+
+    assert.strictEqual(receipt.v, 4);
+    assert(receipt.id.startsWith('rec_'));
+    assert(receipt.authorization !== undefined);
+    assert(receipt.authorization.chain.length === 1);
+    assert(receipt.authorization.chain_hash.startsWith('sha256:'));
+    assert.strictEqual(receipt.signer.owner, 'alice');
+  });
+
+  it('verifyAuthorized roundtrip', () => {
+    const root = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    const receipt = signAuthorized(agent.secretKey, testAction, 'bot', [token]);
+
+    const scope = verifyAuthorized(receipt, [root.publicKey]);
+    assert.deepStrictEqual(scope.tools, ['Bash', 'Read']);
+    assert.deepStrictEqual(scope.targets, ['mcp://test']);
+  });
+
+  it('verifyAuthorized rejects wrong root', () => {
+    const root = generateKeypair();
+    const wrongRoot = generateKeypair();
+    const agent = generateKeypair();
+
+    const token = signDelegation(root.secretKey, 'alice', agent.publicKey, 'bot', testScope);
+    const receipt = signAuthorized(agent.secretKey, testAction, 'bot', [token]);
+
+    assert.throws(() => verifyAuthorized(receipt, [wrongRoot.publicKey]));
   });
 });

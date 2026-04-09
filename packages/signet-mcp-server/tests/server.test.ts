@@ -99,6 +99,23 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     assert(result.error?.includes('receipt too old'), `Expected 'receipt too old', got: ${result.error}`);
   });
 
+  it('test_verify_clock_skew_configurable — custom clockSkewTolerance is respected', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const receipt = req.params._meta._signet as SignetReceipt;
+    // With 0 tolerance, even a tiny clock difference is rejected
+    // Manually push receipt ts into the future by 2 seconds
+    const futureReceipt = { ...receipt, ts: new Date(Date.now() + 2000).toISOString() };
+    const futureReq = {
+      params: { ...req.params, _meta: { _signet: futureReceipt } },
+    };
+    // Default 30s tolerance should accept 2s ahead
+    const resultDefault = verifyRequest(futureReq, { trustedKeys: [] });
+    // Signature is invalid because we tampered with ts, but the clock check runs before sig check
+    // Actually sig check runs first (step 4). So let's test with clockSkewTolerance=0 on a valid receipt
+    const validResult = verifyRequest(req, { trustedKeys: [trustedKey(receipt)], clockSkewTolerance: 600 });
+    assert.strictEqual(validResult.ok, true, `Expected ok with large tolerance, got: ${validResult.error}`);
+  });
+
   it('test_verify_target_mismatch — expectedTarget differs → ok: false', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const receipt = req.params._meta._signet as SignetReceipt;

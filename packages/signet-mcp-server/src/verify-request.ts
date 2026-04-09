@@ -13,6 +13,8 @@ export interface VerifyOptions {
   expectedTarget?: string;
   /** If set, rejects duplicate nonces (replay protection). */
   nonceCache?: NonceCache;
+  /** Clock skew tolerance in seconds for future-dated receipts. Default: 30. */
+  clockSkewTolerance?: number;
 }
 
 export interface VerifyResult {
@@ -22,7 +24,7 @@ export interface VerifyResult {
   error?: string;
 }
 
-const CLOCK_SKEW_TOLERANCE_MS = 30_000; // 30 seconds
+const DEFAULT_CLOCK_SKEW_TOLERANCE_S = 30;
 
 export function verifyRequest(
   request: { params?: Record<string, unknown> },
@@ -30,6 +32,7 @@ export function verifyRequest(
 ): VerifyResult {
   const requireSig = options.requireSignature ?? true;
   const maxAgeMs = (options.maxAge ?? 300) * 1000;
+  const clockSkewMs = (options.clockSkewTolerance ?? DEFAULT_CLOCK_SKEW_TOLERANCE_S) * 1000;
 
   // 1. Extract _meta._signet
   const meta = (request.params as Record<string, unknown> | undefined)?._meta;
@@ -90,7 +93,7 @@ export function verifyRequest(
   if (receiptTime < now - maxAgeMs) {
     return { ok: false, error: 'receipt too old' };
   }
-  if (receiptTime > now + CLOCK_SKEW_TOLERANCE_MS) {
+  if (receiptTime > now + clockSkewMs) {
     return { ok: false, error: 'receipt from future' };
   }
 

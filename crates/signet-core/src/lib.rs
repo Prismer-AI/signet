@@ -3,6 +3,7 @@ pub mod delegation;
 pub mod error;
 pub mod identity;
 pub mod policy;
+pub mod policy_eval;
 pub mod receipt;
 pub mod sign;
 pub mod sign_delegation;
@@ -21,6 +22,7 @@ pub use delegation::{
 pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use policy::{compute_policy_hash, Policy, PolicyAttestation, PolicyEvalResult, RuleAction};
+pub use policy_eval::{evaluate_policy, RateLimitState};
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };

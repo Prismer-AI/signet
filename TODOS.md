@@ -42,15 +42,13 @@ Shipped 2026-04-01. Published to PyPI as `signet-auth`. Includes `SigningAgent` 
 
 ---
 
-### Delegation Chains
+### ~~Delegation Chains~~ ✅
 
 **What:** Agent A can cryptographically authorize Agent B to act on its behalf. Chain verification proves the full authorization path.
 
 **Why:** Multi-agent systems require scoped authority. Without delegation, every sub-agent must hold root keys — a security anti-pattern.
 
-**Effort:** L — ~1.5 weeks human / ~6 hr CC
-
-**Depends on:** identity registry (centralized or embedded key registry)
+**Shipped:** v0.6, 2026-04-09. DelegationToken + Scope + verify_chain + sign_authorized + verify_authorized. CLI `signet delegate` commands. TS + Python bindings. Dashboard v4 support.
 
 ---
 

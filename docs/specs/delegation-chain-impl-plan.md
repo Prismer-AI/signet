@@ -1,6 +1,7 @@
 # Implementation Plan: Delegation Chain (Phase 1 + Phase 2)
 
 Date: 2026-04-09 (v2 — revised after Claude + Codex plan review)
+Status: **COMPLETED** — All 4 phases implemented 2026-04-09
 Based on: delegation-chain-spec.md (v3)
 
 ---

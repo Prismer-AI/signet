@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-09
+
+### Added
+
+#### Delegation Chain (v4 Receipts)
+- **signet-core**: `DelegationToken`, `Scope`, `Authorization` types for cryptographic delegation
+- **signet-core**: `sign_delegation()` — create scoped authority tokens from delegator to delegate
+- **signet-core**: `verify_delegation()` — verify token signature + expiry with optional `at` parameter
+- **signet-core**: `verify_chain()` — verify entire delegation chain (pubkey continuity, scope narrowing, depth limits, trusted roots)
+- **signet-core**: `sign_authorized()` — sign tool call with delegation proof (produces v4 receipt)
+- **signet-core**: `verify_authorized()` — full verification: signature + chain + scope + root trust
+- **signet-core**: `verify_v4_signature_only()` — signature-only check for audit-level verification
+- **signet-core**: `verify_any()` now accepts v4 receipts (signature-only, delegates to `verify_authorized()` for full check)
+- **signet-core**: Audit `extract_timestamp()` updated for v4 (uses `ts`, not `ts_response`)
+- **signet-core**: 4 new error variants: `ScopeViolation`, `ChainError`, `DelegationExpired`, `Unauthorized`
+- **signet-core**: Shared crypto helpers: `generate_nonce()`, `current_timestamp()`, `derive_id()`, `format_pubkey()`, `format_sig()`, `is_wildcard()`
+- **signet-cli**: `signet delegate create|verify|sign|verify-auth` subcommands
+- **WASM**: `wasm_sign_delegation()`, `wasm_verify_delegation()`, `wasm_sign_authorized()`, `wasm_verify_authorized()`
+- **@signet-auth/core**: `signDelegation()`, `verifyDelegation()`, `signAuthorized()`, `verifyAuthorized()` with full TypeScript types
+- **signet-auth (Python)**: `sign_delegation()`, `verify_delegation()`, `sign_authorized()`, `verify_authorized()` bindings
+- **signet-auth (Python)**: `SigningAgent.delegate()`, `SigningAgent.sign_authorized()`, `SigningAgent.verify_delegation()`, `SigningAgent.verify_authorized()` high-level API
+
+#### Dashboard
+- Editorial/newspaper redesign (Playfair Display + Source Serif 4 + IBM Plex Mono)
+- v4 delegation chain visualization in timeline detail (delegator -> delegate path, scope, root pubkey, expiry)
+- "By Authorization" stats chart (delegated vs direct signing)
+- Fixed `receiptTime()` for v4 receipts
+
+#### Demo Assets
+- `demo-delegation.mjs` — 8-step delegation chain demo script
+- `demo-delegation-full.mp4` — CLI + Dashboard combined video
+- `demo-delegation.svg` — animated SVG for README
+
+### Changed
+- `Receipt` struct now has optional `authorization` field (backward compatible — v1/v2/v3 unaffected)
+- `sign.rs` refactored to use shared helpers (reduced ~30 lines of duplication)
+- Mixed wildcard scopes (e.g. `["*", "Bash"]`) now rejected at sign time
+- `sign_authorized()` validates signing key matches final delegate in chain
+
 ## [0.4.0] - 2026-04-06
 
 ### Added

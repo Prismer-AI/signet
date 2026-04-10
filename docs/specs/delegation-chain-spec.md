@@ -1,7 +1,7 @@
 # Technical Spec: Delegation Chains (Signet v0.6)
 
 Date: 2026-04-09
-Status: Draft (v3 — second review pass fixes)
+Status: Implemented (v3 — all phases completed 2026-04-09)
 Based on: RFC-0001
 
 ---

@@ -1,6 +1,6 @@
 # RFC-0001: Delegation Chain for Agent Authorization
 
-- **Status:** Draft
+- **Status:** Implemented (v0.6, 2026-04-09)
 - **Author:** Signet Contributors
 - **Created:** 2026-04-06
 - **Target version:** v0.6+

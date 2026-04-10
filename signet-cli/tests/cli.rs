@@ -416,13 +416,20 @@ fn test_delegate_create() {
     let out = signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "owner",
-            "--to", "agent",
-            "--to-name", "my-agent",
-            "--tools", "Bash,Read",
-            "--targets", "mcp://github.local",
-            "--max-depth", "1",
+            "delegate",
+            "create",
+            "--from",
+            "owner",
+            "--to",
+            "agent",
+            "--to-name",
+            "my-agent",
+            "--tools",
+            "Bash,Read",
+            "--targets",
+            "mcp://github.local",
+            "--max-depth",
+            "1",
         ])
         .assert()
         .success()
@@ -453,11 +460,16 @@ fn test_delegate_create_output_file() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "alice",
-            "--to", "bot",
-            "--to-name", "bot",
-            "--output", token_path.to_str().unwrap(),
+            "delegate",
+            "create",
+            "--from",
+            "alice",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--output",
+            token_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -485,21 +497,23 @@ fn test_delegate_verify_single_token() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "root",
-            "--to", "agent",
-            "--to-name", "agent",
-            "--output", token_path.to_str().unwrap(),
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "agent",
+            "--to-name",
+            "agent",
+            "--output",
+            token_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args([
-            "delegate", "verify",
-            token_path.to_str().unwrap(),
-        ])
+        .args(["delegate", "verify", token_path.to_str().unwrap()])
         .assert()
         .success()
         .stderr(predicate::str::contains("Token valid"));
@@ -523,13 +537,20 @@ fn test_delegate_sign_v4_receipt() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "owner",
-            "--to", "bot",
-            "--to-name", "bot",
-            "--tools", "*",
-            "--targets", "*",
-            "--output", token_path.to_str().unwrap(),
+            "delegate",
+            "create",
+            "--from",
+            "owner",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--output",
+            token_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -544,13 +565,20 @@ fn test_delegate_sign_v4_receipt() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "sign",
-            "--key", "bot",
-            "--tool", "Bash",
-            "--params", r#"{"command":"ls"}"#,
-            "--target", "mcp://local",
-            "--chain", chain_path.to_str().unwrap(),
-            "--output", receipt_path.to_str().unwrap(),
+            "delegate",
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--params",
+            r#"{"command":"ls"}"#,
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
             "--no-log",
         ])
         .assert()
@@ -580,13 +608,20 @@ fn test_delegate_verify_auth_e2e() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "root",
-            "--to", "worker",
-            "--to-name", "worker",
-            "--tools", "*",
-            "--targets", "*",
-            "--output", token_path.to_str().unwrap(),
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "worker",
+            "--to-name",
+            "worker",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--output",
+            token_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -600,13 +635,20 @@ fn test_delegate_verify_auth_e2e() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "sign",
-            "--key", "worker",
-            "--tool", "Read",
-            "--params", r#"{"path":"/tmp/data"}"#,
-            "--target", "mcp://fs",
-            "--chain", chain_path.to_str().unwrap(),
-            "--output", receipt_path.to_str().unwrap(),
+            "delegate",
+            "sign",
+            "--key",
+            "worker",
+            "--tool",
+            "Read",
+            "--params",
+            r#"{"path":"/tmp/data"}"#,
+            "--target",
+            "mcp://fs",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
             "--no-log",
         ])
         .assert()
@@ -616,9 +658,11 @@ fn test_delegate_verify_auth_e2e() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "verify-auth",
+            "delegate",
+            "verify-auth",
             receipt_path.to_str().unwrap(),
-            "--trusted-roots", "root",
+            "--trusted-roots",
+            "root",
         ])
         .assert()
         .success()
@@ -640,13 +684,20 @@ fn test_delegate_verify_auth_wrong_root() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "create",
-            "--from", "root",
-            "--to", "worker",
-            "--to-name", "worker",
-            "--tools", "*",
-            "--targets", "*",
-            "--output", token_path.to_str().unwrap(),
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "worker",
+            "--to-name",
+            "worker",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--output",
+            token_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -659,13 +710,20 @@ fn test_delegate_verify_auth_wrong_root() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "sign",
-            "--key", "worker",
-            "--tool", "Bash",
-            "--params", "{}",
-            "--target", "mcp://local",
-            "--chain", chain_path.to_str().unwrap(),
-            "--output", receipt_path.to_str().unwrap(),
+            "delegate",
+            "sign",
+            "--key",
+            "worker",
+            "--tool",
+            "Bash",
+            "--params",
+            "{}",
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
             "--no-log",
         ])
         .assert()
@@ -675,9 +733,11 @@ fn test_delegate_verify_auth_wrong_root() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "delegate", "verify-auth",
+            "delegate",
+            "verify-auth",
             receipt_path.to_str().unwrap(),
-            "--trusted-roots", "stranger",
+            "--trusted-roots",
+            "stranger",
         ])
         .assert()
         .failure();

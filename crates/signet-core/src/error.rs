@@ -27,6 +27,15 @@ pub enum SignetError {
     #[error("action not authorized: {0}")]
     Unauthorized(String),
 
+    #[error("policy violation: {0}")]
+    PolicyViolation(String),
+
+    #[error("policy parse error: {0}")]
+    PolicyParseError(String),
+
+    #[error("action requires human approval: {0}")]
+    RequiresApproval(String),
+
     #[cfg(not(target_arch = "wasm32"))]
     #[error("key not found: {0}")]
     KeyNotFound(String),

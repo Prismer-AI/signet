@@ -20,6 +20,9 @@ pyo3::create_exception!(signet_auth, ScopeViolationError, SignetError);
 pyo3::create_exception!(signet_auth, ChainError, SignetError);
 pyo3::create_exception!(signet_auth, DelegationExpiredError, SignetError);
 pyo3::create_exception!(signet_auth, UnauthorizedError, SignetError);
+pyo3::create_exception!(signet_auth, PolicyViolationError, SignetError);
+pyo3::create_exception!(signet_auth, PolicyParseError, SignetError);
+pyo3::create_exception!(signet_auth, RequiresApprovalError, SignetError);
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("SignetError", m.py().get_type::<SignetError>())?;
@@ -61,6 +64,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<DelegationExpiredError>(),
     )?;
     m.add("UnauthorizedError", m.py().get_type::<UnauthorizedError>())?;
+    m.add(
+        "PolicyViolationError",
+        m.py().get_type::<PolicyViolationError>(),
+    )?;
+    m.add("PolicyParseError", m.py().get_type::<PolicyParseError>())?;
+    m.add(
+        "RequiresApprovalError",
+        m.py().get_type::<RequiresApprovalError>(),
+    )?;
     Ok(())
 }
 
@@ -78,6 +90,9 @@ pub fn to_py_err(err: signet_core::SignetError) -> PyErr {
         signet_core::SignetError::ChainError(msg) => ChainError::new_err(msg),
         signet_core::SignetError::DelegationExpired(msg) => DelegationExpiredError::new_err(msg),
         signet_core::SignetError::Unauthorized(msg) => UnauthorizedError::new_err(msg),
+        signet_core::SignetError::PolicyViolation(msg) => PolicyViolationError::new_err(msg),
+        signet_core::SignetError::PolicyParseError(msg) => PolicyParseError::new_err(msg),
+        signet_core::SignetError::RequiresApproval(msg) => RequiresApprovalError::new_err(msg),
         #[cfg(not(target_arch = "wasm32"))]
         signet_core::SignetError::KeyNotFound(msg) => KeyNotFoundError::new_err(msg),
         #[cfg(not(target_arch = "wasm32"))]

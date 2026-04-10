@@ -399,6 +399,290 @@ fn test_passphrase_env_var() {
     assert!(receipt_path.exists());
 }
 
+// ─── delegate create ────────────────────────────────────────────────────────
+
+#[test]
+fn test_delegate_create() {
+    let dir = tempdir().unwrap();
+    // Create delegator and delegate identities
+    for name in ["owner", "agent"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "owner",
+            "--to", "agent",
+            "--to-name", "my-agent",
+            "--tools", "Bash,Read",
+            "--targets", "mcp://github.local",
+            "--max-depth", "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(out).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("must be valid JSON");
+    assert_eq!(v["v"], 1);
+    assert_eq!(v["delegator"]["name"], "owner");
+    assert_eq!(v["delegate"]["name"], "my-agent");
+    assert!(v["sig"].as_str().unwrap().starts_with("ed25519:"));
+}
+
+#[test]
+fn test_delegate_create_output_file() {
+    let dir = tempdir().unwrap();
+    for name in ["alice", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "alice",
+            "--to", "bot",
+            "--to-name", "bot",
+            "--output", token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert!(token_path.exists());
+    let content = fs::read_to_string(&token_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).expect("must be valid JSON");
+    assert!(v.get("sig").is_some());
+}
+
+// ─── delegate verify ────────────────────────────────────────────────────────
+
+#[test]
+fn test_delegate_verify_single_token() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "agent"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "root",
+            "--to", "agent",
+            "--to-name", "agent",
+            "--output", token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "verify",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Token valid"));
+}
+
+// ─── delegate sign (v4 authorized receipt) ──────────────────────────────────
+
+#[test]
+fn test_delegate_sign_v4_receipt() {
+    let dir = tempdir().unwrap();
+    for name in ["owner", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    // Create delegation token
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "owner",
+            "--to", "bot",
+            "--to-name", "bot",
+            "--tools", "*",
+            "--targets", "*",
+            "--output", token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Wrap token in array for chain format
+    let token_content = fs::read_to_string(&token_path).unwrap();
+    let chain_path = dir.path().join("chain.json");
+    fs::write(&chain_path, format!("[{token_content}]")).unwrap();
+
+    // Sign an action with delegation chain
+    let receipt_path = dir.path().join("v4_receipt.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "sign",
+            "--key", "bot",
+            "--tool", "Bash",
+            "--params", r#"{"command":"ls"}"#,
+            "--target", "mcp://local",
+            "--chain", chain_path.to_str().unwrap(),
+            "--output", receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(&receipt_path).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&content).expect("must be valid JSON");
+    assert_eq!(v["v"], 4);
+    assert!(v.get("authorization").is_some());
+}
+
+// ─── delegate verify-auth (v4 receipt verification) ─────────────────────────
+
+#[test]
+fn test_delegate_verify_auth_e2e() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "worker"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    // Create delegation
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "root",
+            "--to", "worker",
+            "--to-name", "worker",
+            "--tools", "*",
+            "--targets", "*",
+            "--output", token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let token_content = fs::read_to_string(&token_path).unwrap();
+    let chain_path = dir.path().join("chain.json");
+    fs::write(&chain_path, format!("[{token_content}]")).unwrap();
+
+    // Sign action
+    let receipt_path = dir.path().join("receipt.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "sign",
+            "--key", "worker",
+            "--tool", "Read",
+            "--params", r#"{"path":"/tmp/data"}"#,
+            "--target", "mcp://fs",
+            "--chain", chain_path.to_str().unwrap(),
+            "--output", receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    // Verify against trusted root
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots", "root",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Authorized receipt verified"));
+}
+
+#[test]
+fn test_delegate_verify_auth_wrong_root() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "worker", "stranger"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create",
+            "--from", "root",
+            "--to", "worker",
+            "--to-name", "worker",
+            "--tools", "*",
+            "--targets", "*",
+            "--output", token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let token_content = fs::read_to_string(&token_path).unwrap();
+    let chain_path = dir.path().join("chain.json");
+    fs::write(&chain_path, format!("[{token_content}]")).unwrap();
+
+    let receipt_path = dir.path().join("receipt.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "sign",
+            "--key", "worker",
+            "--tool", "Bash",
+            "--params", "{}",
+            "--target", "mcp://local",
+            "--chain", chain_path.to_str().unwrap(),
+            "--output", receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    // Verify with wrong root — should fail
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots", "stranger",
+        ])
+        .assert()
+        .failure();
+}
+
 // ─── @file params ────────────────────────────────────────────────────────────
 
 #[test]

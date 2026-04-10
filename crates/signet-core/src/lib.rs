@@ -4,6 +4,7 @@ pub mod error;
 pub mod identity;
 pub mod policy;
 pub mod policy_eval;
+pub mod policy_load;
 pub mod receipt;
 pub mod sign;
 pub mod sign_delegation;
@@ -23,6 +24,10 @@ pub use error::SignetError;
 pub use identity::generate_keypair;
 pub use policy::{compute_policy_hash, Policy, PolicyAttestation, PolicyEvalResult, RuleAction};
 pub use policy_eval::{evaluate_policy, RateLimitState};
+pub use policy_load::{parse_policy_json, parse_policy_yaml, validate_policy};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use policy_load::load_policy;
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };

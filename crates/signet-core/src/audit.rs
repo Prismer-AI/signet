@@ -214,6 +214,36 @@ pub fn append(dir: &Path, receipt: &serde_json::Value) -> Result<AuditRecord, Si
     result
 }
 
+/// Append a policy violation record to the audit log. Violations are logged
+/// even though no receipt is produced (the action was denied).
+pub fn append_violation(
+    dir: &Path,
+    action: &crate::receipt::Action,
+    agent_name: &str,
+    eval: &crate::policy::PolicyEvalResult,
+) -> Result<AuditRecord, SignetError> {
+    let violation = serde_json::json!({
+        "type": "policy_violation",
+        "action": {
+            "tool": action.tool,
+            "params_hash": if action.params_hash.is_empty() {
+                crate::sign::compute_params_hash(action)?
+            } else {
+                action.params_hash.clone()
+            },
+            "target": action.target,
+        },
+        "agent": agent_name,
+        "policy": eval.policy_name,
+        "policy_hash": eval.policy_hash,
+        "matched_rules": eval.matched_rules,
+        "decision": format!("{:?}", eval.decision).to_lowercase(),
+        "reason": eval.reason,
+        "ts": crate::delegation::current_timestamp(),
+    });
+    append(dir, &violation)
+}
+
 pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, SignetError> {
     let files = sorted_audit_files(dir, false)?; // newest first
     let mut results = Vec::new();

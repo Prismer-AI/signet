@@ -9,6 +9,7 @@ mod cmd_claude;
 mod cmd_dashboard;
 mod cmd_delegate;
 mod cmd_identity;
+mod cmd_policy;
 mod cmd_sign;
 mod cmd_verify;
 mod dashboard;
@@ -44,6 +45,11 @@ enum Commands {
     Delegate {
         #[command(subcommand)]
         action: cmd_delegate::DelegateAction,
+    },
+    /// Validate and test policy files
+    Policy {
+        #[command(subcommand)]
+        action: cmd_policy::PolicyAction,
     },
 }
 
@@ -97,6 +103,7 @@ fn run() -> Result<()> {
         Commands::Claude { action } => cmd_claude::run(action)?,
         Commands::Dashboard(args) => cmd_dashboard::dashboard(args)?,
         Commands::Delegate { action } => cmd_delegate::run(action)?,
+        Commands::Policy { action } => cmd_policy::run(action)?,
     }
     Ok(())
 }

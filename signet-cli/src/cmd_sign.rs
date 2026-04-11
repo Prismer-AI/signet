@@ -28,6 +28,9 @@ pub struct SignArgs {
     /// Skip writing to audit log
     #[arg(long)]
     pub no_log: bool,
+    /// Policy file (YAML/JSON) — evaluate before signing
+    #[arg(long)]
+    pub policy: Option<String>,
 }
 
 pub fn sign(args: SignArgs) -> Result<()> {
@@ -95,7 +98,41 @@ pub fn sign(args: SignArgs) -> Result<()> {
     };
 
     let owner = info.owner.as_deref().unwrap_or("");
-    let receipt = signet_core::sign(&sk, &action, &info.name, owner)?;
+
+    let receipt = if let Some(ref policy_path) = args.policy {
+        let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
+        match signet_core::sign_with_policy(&sk, &action, &info.name, owner, &policy, None) {
+            Ok((receipt, eval)) => {
+                eprintln!(
+                    "Policy \"{}\": {} ({})",
+                    eval.policy_name,
+                    format!("{:?}", eval.decision).to_lowercase(),
+                    if eval.matched_rules.is_empty() {
+                        "default action".to_string()
+                    } else {
+                        eval.matched_rules.join(", ")
+                    }
+                );
+                receipt
+            }
+            Err(signet_core::SignetError::PolicyViolation(reason)) => {
+                // Log violation to audit trail
+                if !args.no_log {
+                    let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
+                    let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None);
+                    let _ = signet_core::audit::append_violation(&dir, &action, &info.name, &eval);
+                }
+                anyhow::bail!("policy violation: {reason}");
+            }
+            Err(signet_core::SignetError::RequiresApproval(reason)) => {
+                anyhow::bail!("requires approval: {reason}");
+            }
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        signet_core::sign(&sk, &action, &info.name, owner)?
+    };
+
     let json = serde_json::to_string(&receipt)?;
 
     if !args.no_log {

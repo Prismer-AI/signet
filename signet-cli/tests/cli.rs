@@ -743,6 +743,146 @@ fn test_delegate_verify_auth_wrong_root() {
         .failure();
 }
 
+// ─── policy validate ────────────────────────────────────────────────────────
+
+#[test]
+fn test_policy_validate() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: test-policy\nrules:\n  - id: deny-rm\n    match:\n      tool: Bash\n      params:\n        command:\n          contains: \"rm -rf\"\n    action: deny\n    reason: destructive command\n",
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["policy", "validate", policy_path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("test-policy"))
+        .stderr(predicate::str::contains("valid"))
+        .stderr(predicate::str::contains("1 rules"));
+}
+
+#[test]
+fn test_policy_check_allowed() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: check-policy\nrules:\n  - id: allow-read\n    match:\n      tool: Read\n    action: allow\n",
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "policy", "check",
+            policy_path.to_str().unwrap(),
+            "--tool", "Read",
+            "--params", r#"{"path":"/tmp"}"#,
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ALLOW"));
+}
+
+#[test]
+fn test_policy_check_denied() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: deny-policy\ndefault_action: deny\nrules: []\n",
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "policy", "check",
+            policy_path.to_str().unwrap(),
+            "--tool", "Bash",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("DENY"));
+}
+
+// ─── sign --policy ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_sign_with_policy_cli_allowed() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "polkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: allow-all\nrules: []\n",
+    )
+    .unwrap();
+
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key", "polkey",
+            "--tool", "Read",
+            "--params", "{}",
+            "--target", "mcp://local",
+            "--policy", policy_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("allow-all"))
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(out).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert!(v.get("policy").is_some(), "receipt must have policy attestation");
+}
+
+#[test]
+fn test_sign_with_policy_cli_denied() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "denkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: deny-all\ndefault_action: deny\nrules: []\n",
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key", "denkey",
+            "--tool", "Bash",
+            "--params", "{}",
+            "--target", "mcp://local",
+            "--policy", policy_path.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains("policy violation"));
+}
+
 // ─── @file params ────────────────────────────────────────────────────────────
 
 #[test]

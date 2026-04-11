@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-11
+
+### Added
+
+#### Policy Engine
+- **signet-core**: `Policy`, `Rule`, `RuleAction`, `MatchSpec`, `PolicyAttestation`, `PolicyEvalResult` types
+- **signet-core**: `evaluate_policy()` — max-severity evaluation (deny > require_approval > allow)
+- **signet-core**: `sign_with_policy()` — evaluate policy before signing, embed `PolicyAttestation` in receipt
+- **signet-core**: `parse_policy_yaml()`, `parse_policy_json()`, `validate_policy()`, `load_policy()`, `compute_policy_hash()`
+- **signet-core**: `RateLimitState` — in-memory sliding window rate limiting per rule
+- **signet-core**: `audit::append_violation()` — log denied/require_approval actions to audit trail
+- **signet-core**: 3 new error variants: `PolicyViolation`, `PolicyParseError`, `RequiresApproval`
+- **signet-core**: `Display` impl for `RuleAction`
+- **signet-cli**: `signet policy validate <path>` — validate policy file syntax and rules
+- **signet-cli**: `signet policy check <path> --tool --params --agent --target` — dry-run policy evaluation
+- **signet-cli**: `signet sign --policy <path>` — enforce policy before signing
+- **WASM**: `wasm_parse_policy_yaml()`, `wasm_evaluate_policy()`, `wasm_sign_with_policy()`, `wasm_compute_policy_hash()`
+- **@signet-auth/core**: `parsePolicyYaml()`, `evaluatePolicy()`, `signWithPolicy()`, `computePolicyHash()` with `Policy`, `PolicyReceipt`, `SignWithPolicyResult`, `PolicyEvalResult`, `PolicyAttestation` interfaces
+- **signet-auth (Python)**: `parse_policy_yaml()`, `parse_policy_json()`, `evaluate_policy()`, `sign_with_policy()`, `compute_policy_hash()` bindings
+- **signet-auth (Python)**: `PolicyViolationError`, `PolicyParseError`, `RequiresApprovalError` exception types
+
+### Changed
+- `Receipt` struct now has optional `policy: Option<PolicyAttestation>` field (backward compatible)
+- `verify()` includes policy field in signable when present (receipts without policy unaffected)
+- New dependency: `serde_yaml = "0.9"` (non-WASM only)
+
+### Tests
+- 102 policy-specific tests across Rust (73), Python (18), TypeScript (11)
+- 421 total tests passing (194 Rust core + 31 CLI + 173 Python + 23 TypeScript)
+
 ## [0.6.0] - 2026-04-11
 
 ### Added

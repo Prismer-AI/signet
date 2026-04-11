@@ -148,17 +148,20 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         anyhow::Ok(())
     };
 
-    // Run both directions concurrently
+    // Run both directions concurrently.
+    // When agent stdin closes (EOF), we drop child_stdin so the server sees EOF too.
+    // Then wait for server stdout to drain before exiting.
+    let server_handle = tokio::spawn(server_to_agent);
+
     tokio::select! {
         r = agent_to_server => {
             if let Err(e) = r {
                 eprintln!("[signet proxy] agent→server error: {e}");
             }
-        }
-        r = server_to_agent => {
-            if let Err(e) = r {
-                eprintln!("[signet proxy] server→agent error: {e}");
-            }
+            // agent_to_server finished (stdin EOF) — child_stdin is dropped,
+            // so the server will see EOF and eventually close stdout.
+            // Wait for server responses to drain.
+            let _ = server_handle.await;
         }
         _ = tokio::signal::ctrl_c() => {
             eprintln!("[signet proxy] shutting down");

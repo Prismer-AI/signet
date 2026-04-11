@@ -174,7 +174,7 @@ rules: []
 `;
 
   it('parsePolicyYaml parses and returns policy object', () => {
-    const policy = parsePolicyYaml(allowPolicyYaml) as Record<string, unknown>;
+    const policy = parsePolicyYaml(allowPolicyYaml);
     assert.strictEqual(policy.name, 'test-allow');
     assert.strictEqual(policy.version, 1);
   });
@@ -204,21 +204,23 @@ rules: []
     assert.strictEqual(result.decision, 'deny');
   });
 
-  it('signWithPolicy produces receipt with policy attestation', () => {
+  it('signWithPolicy produces receipt with policy attestation and eval', () => {
     const kp = generateKeypair();
     const policy = parsePolicyYaml(allowPolicyYaml);
-    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    const { receipt, eval: evalResult } = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
     assert.strictEqual(receipt.v, 1);
     assert.ok(receipt.policy);
     assert.strictEqual(receipt.policy.policy_name, 'test-allow');
     assert.strictEqual(receipt.policy.decision, 'allow');
     assert.ok(receipt.policy.policy_hash.startsWith('sha256:'));
+    assert.strictEqual(evalResult.decision, 'allow');
+    assert.ok(evalResult.matched_rules.includes('allow-read'));
   });
 
   it('signWithPolicy receipt is verifiable', () => {
     const kp = generateKeypair();
     const policy = parsePolicyYaml(allowPolicyYaml);
-    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    const { receipt } = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
     assert.strictEqual(verify(receipt, kp.publicKey), true);
   });
 
@@ -231,11 +233,35 @@ rules: []
     );
   });
 
+  it('signWithPolicy throws on require_approval policy', () => {
+    const kp = generateKeypair();
+    const approvalPolicy = parsePolicyYaml(`
+version: 1
+name: test-approval
+rules:
+  - id: needs-approval
+    match:
+      tool: Read
+    action: require_approval
+    reason: needs human approval
+`);
+    assert.throws(
+      () => signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', approvalPolicy),
+      /requires.*approval/i,
+    );
+  });
+
   it('signWithPolicy tampered attestation fails verify', () => {
     const kp = generateKeypair();
     const policy = parsePolicyYaml(allowPolicyYaml);
-    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    const { receipt } = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
     receipt.policy.policy_name = 'forged';
     assert.strictEqual(verify(receipt, kp.publicKey), false);
+  });
+
+  it('parsePolicyYaml throws on invalid YAML', () => {
+    assert.throws(
+      () => parsePolicyYaml('not: valid: yaml: [[['),
+    );
   });
 });

@@ -87,7 +87,7 @@ def test_parse_policy_yaml_invalid():
 
 
 def test_parse_policy_json_invalid():
-    with pytest.raises(Exception):
+    with pytest.raises(signet_auth.PolicyParseError):
         signet_auth.parse_policy_json("{invalid json")
 
 

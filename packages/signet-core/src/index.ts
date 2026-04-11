@@ -250,15 +250,37 @@ export interface PolicyAttestation {
   reason: string;
 }
 
-export function parsePolicyYaml(yaml: string): unknown {
+export interface Policy {
+  version: number;
+  name: string;
+  description?: string;
+  default_action?: 'allow' | 'deny' | 'require_approval';
+  rules: Array<{
+    id: string;
+    match: Record<string, unknown>;
+    action: 'allow' | 'deny' | 'require_approval';
+    reason?: string;
+  }>;
+}
+
+export interface PolicyReceipt extends SignetReceipt {
+  policy: PolicyAttestation;
+}
+
+export interface SignWithPolicyResult {
+  receipt: PolicyReceipt;
+  eval: PolicyEvalResult;
+}
+
+export function parsePolicyYaml(yaml: string): Policy {
   const json = wasm_parse_policy_yaml(yaml);
-  return JSON.parse(json);
+  return JSON.parse(json) as Policy;
 }
 
 export function evaluatePolicy(
   action: SignetAction,
   agentName: string,
-  policy: unknown,
+  policy: Policy,
 ): PolicyEvalResult {
   const json = wasm_evaluate_policy(
     JSON.stringify(action),
@@ -273,8 +295,8 @@ export function signWithPolicy(
   action: SignetAction,
   signerName: string,
   signerOwner: string,
-  policy: unknown,
-): SignetReceipt & { policy: PolicyAttestation } {
+  policy: Policy,
+): SignWithPolicyResult {
   const json = wasm_sign_with_policy(
     secretKey,
     JSON.stringify(action),
@@ -282,9 +304,9 @@ export function signWithPolicy(
     signerOwner,
     JSON.stringify(policy),
   );
-  return JSON.parse(json);
+  return JSON.parse(json) as SignWithPolicyResult;
 }
 
-export function computePolicyHash(policy: unknown): string {
+export function computePolicyHash(policy: Policy): string {
   return wasm_compute_policy_hash(JSON.stringify(policy));
 }

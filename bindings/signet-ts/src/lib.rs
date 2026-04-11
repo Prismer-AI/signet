@@ -359,21 +359,28 @@ pub fn wasm_sign_with_policy(
     signer_owner: &str,
     policy_json: &str,
 ) -> Result<String, JsError> {
-    let key_bytes = BASE64.decode(secret_key_b64)
-        .map_err(|e| JsError::new(&format!("invalid secret key base64: {e}")))?;
-    let signing_key = SigningKey::from_bytes(
-        &key_bytes.try_into().map_err(|_| JsError::new("secret key must be 32 bytes"))?,
-    );
+    let signing_key = parse_signing_key(secret_key_b64)?;
     let action: signet_core::Action = serde_json::from_str(action_json)
         .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
     let policy: signet_core::Policy = serde_json::from_str(policy_json)
         .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
 
-    let (receipt, _eval) = signet_core::sign_with_policy(
+    let (receipt, eval) = signet_core::sign_with_policy(
         &signing_key, &action, signer_name, signer_owner, &policy, None,
     ).map_err(|e| JsError::new(&e.to_string()))?;
 
-    serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+    let result = serde_json::json!({
+        "receipt": receipt,
+        "eval": {
+            "decision": eval.decision.to_string(),
+            "matched_rules": eval.matched_rules,
+            "winning_rule": eval.winning_rule,
+            "reason": eval.reason,
+            "policy_name": eval.policy_name,
+            "policy_hash": eval.policy_hash,
+        }
+    });
+    serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
 #[wasm_bindgen]

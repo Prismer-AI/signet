@@ -15,6 +15,13 @@ pub struct Action {
     pub call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_hash: Option<String>,
+    /// Workflow-level trace ID for grouping related tool calls.
+    /// Inside the signature scope — the causal link is cryptographically attested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Receipt ID of the parent action (for causal chaining within a workflow).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_receipt_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

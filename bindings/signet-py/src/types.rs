@@ -11,7 +11,7 @@ pub struct PyAction {
 #[pymethods]
 impl PyAction {
     #[new]
-    #[pyo3(signature = (tool, params=None, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None))]
+    #[pyo3(signature = (tool, params=None, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None, trace_id=None, parent_receipt_id=None))]
     fn new(
         tool: String,
         params: Option<Bound<'_, PyAny>>,
@@ -20,6 +20,8 @@ impl PyAction {
         session: Option<String>,
         call_id: Option<String>,
         response_hash: Option<String>,
+        trace_id: Option<String>,
+        parent_receipt_id: Option<String>,
     ) -> PyResult<Self> {
         let json_params = match params {
             Some(p) => pythonize::depythonize(&p)?,
@@ -35,13 +37,15 @@ impl PyAction {
                 session,
                 call_id,
                 response_hash,
+                trace_id,
+                parent_receipt_id,
             },
         })
     }
 
     #[classmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (tool, params_hash, *, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None))]
+    #[pyo3(signature = (tool, params_hash, *, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None, trace_id=None, parent_receipt_id=None))]
     fn hash_only(
         _cls: &Bound<'_, pyo3::types::PyType>,
         tool: String,
@@ -51,6 +55,8 @@ impl PyAction {
         session: Option<String>,
         call_id: Option<String>,
         response_hash: Option<String>,
+        trace_id: Option<String>,
+        parent_receipt_id: Option<String>,
     ) -> Self {
         PyAction {
             inner: signet_core::receipt::Action {
@@ -62,6 +68,8 @@ impl PyAction {
                 session,
                 call_id,
                 response_hash,
+                trace_id,
+                parent_receipt_id,
             },
         }
     }
@@ -109,6 +117,16 @@ impl PyAction {
     #[getter]
     fn response_hash(&self) -> Option<&str> {
         self.inner.response_hash.as_deref()
+    }
+
+    #[getter]
+    fn trace_id(&self) -> Option<&str> {
+        self.inner.trace_id.as_deref()
+    }
+
+    #[getter]
+    fn parent_receipt_id(&self) -> Option<&str> {
+        self.inner.parent_receipt_id.as_deref()
     }
 }
 

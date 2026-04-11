@@ -135,6 +135,8 @@ pub fn sign_authorized(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     let signer = Signer {
@@ -482,6 +484,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
 
         // Sign with wrong_key (not the delegate in the chain)

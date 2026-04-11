@@ -60,6 +60,8 @@ pub fn sign(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     // 3. Build signer
@@ -141,6 +143,8 @@ pub fn sign_with_policy(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     let signer = Signer {
@@ -202,6 +206,8 @@ pub fn sign_compound(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     // 2. Hash response content
@@ -347,6 +353,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
         assert_eq!(

@@ -821,6 +821,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
 
@@ -868,6 +870,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
 
@@ -909,6 +913,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
 
@@ -951,6 +957,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
 
@@ -992,6 +1000,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let mut receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
 
@@ -1021,6 +1031,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let err = sign_authorized(&agent_key, &action, "bot", vec![]).unwrap_err();
         assert!(err.to_string().contains("at least one token"));
@@ -1059,6 +1071,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
         let json = serde_json::to_string(&receipt).unwrap();
@@ -1098,6 +1112,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
         let json = serde_json::to_string(&receipt).unwrap();

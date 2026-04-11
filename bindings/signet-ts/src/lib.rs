@@ -1,6 +1,5 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 

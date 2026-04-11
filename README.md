@@ -10,6 +10,7 @@
   <a href="https://github.com/Prismer-AI/signet/releases/latest"><img src="https://img.shields.io/github/v/release/Prismer-AI/signet?style=flat-square&labelColor=black&color=green&label=release" alt="Release"></a>
   <a href="https://github.com/Prismer-AI/signet/blob/main/LICENSE-APACHE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?labelColor=black&style=flat-square" alt="License"></a>
   <a href="https://github.com/Prismer-AI/signet/stargazers"><img src="https://img.shields.io/github/stars/Prismer-AI/signet?style=flat-square&labelColor=black&color=yellow" alt="Stars"></a>
+  <a href="https://codespaces.new/Prismer-AI/signet?quickstart=1"><img src="https://img.shields.io/badge/Try_it-Open_in_Codespaces-black?style=flat-square&logo=github" alt="Open in Codespaces"></a>
 </p>
 
 <p align="center">

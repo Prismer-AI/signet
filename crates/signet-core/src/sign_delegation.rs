@@ -181,6 +181,7 @@ pub fn sign_authorized(
         action: signed_action,
         signer,
         authorization: Some(authorization),
+        policy: None,
         ts,
         nonce,
         sig,

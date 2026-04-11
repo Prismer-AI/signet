@@ -17,13 +17,22 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
     let signature = Signature::from_slice(&sig_bytes)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
 
-    let signable = serde_json::json!({
+    let mut signable = serde_json::json!({
         "v": receipt.v,
         "action": receipt.action,
         "signer": receipt.signer,
         "ts": receipt.ts,
         "nonce": receipt.nonce,
     });
+    // Include policy in signable if present (must match what sign_with_policy produced)
+    if let Some(ref policy) = receipt.policy {
+        signable.as_object_mut().unwrap().insert(
+            "policy".to_string(),
+            serde_json::to_value(policy).map_err(|e| {
+                SignetError::InvalidReceipt(format!("failed to serialize policy: {e}"))
+            })?,
+        );
+    }
     let canonical_bytes = canonical::canonicalize(&signable)?;
 
     pubkey

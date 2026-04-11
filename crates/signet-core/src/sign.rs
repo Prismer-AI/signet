@@ -92,10 +92,93 @@ pub fn sign(
         action: signed_action,
         signer,
         authorization: None,
+        policy: None,
         ts,
         nonce,
         sig,
     })
+}
+
+/// Sign an action with policy enforcement. Evaluates the policy first:
+/// - Allow → receipt with PolicyAttestation embedded in signed payload
+/// - Deny → Err(PolicyViolation)
+/// - RequireApproval → Err(RequiresApproval)
+pub fn sign_with_policy(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    policy: &crate::policy::Policy,
+    rate_state: Option<&mut crate::policy_eval::RateLimitState>,
+) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
+    let eval = crate::policy_eval::evaluate_policy(action, signer_name, policy, rate_state);
+
+    match eval.decision {
+        crate::policy::RuleAction::Deny => {
+            return Err(SignetError::PolicyViolation(eval.reason.clone()));
+        }
+        crate::policy::RuleAction::RequireApproval => {
+            return Err(SignetError::RequiresApproval(eval.reason.clone()));
+        }
+        crate::policy::RuleAction::Allow => {}
+    }
+
+    let attestation = crate::policy::PolicyAttestation {
+        policy_hash: eval.policy_hash.clone(),
+        policy_name: eval.policy_name.clone(),
+        matched_rules: eval.matched_rules.clone(),
+        decision: eval.decision,
+        reason: eval.reason.clone(),
+    };
+
+    let params_hash = compute_params_hash(action)?;
+    let signed_action = Action {
+        tool: action.tool.clone(),
+        params: action.params.clone(),
+        params_hash,
+        target: action.target.clone(),
+        transport: action.transport.clone(),
+        session: action.session.clone(),
+        call_id: action.call_id.clone(),
+        response_hash: action.response_hash.clone(),
+    };
+
+    let signer = Signer {
+        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
+        name: signer_name.to_string(),
+        owner: signer_owner.to_string(),
+    };
+
+    let nonce = generate_nonce();
+    let ts = current_timestamp();
+
+    // Policy attestation is inside the signable — tampering breaks the signature
+    let signable = serde_json::json!({
+        "v": 1u8,
+        "action": signed_action,
+        "signer": signer,
+        "policy": attestation,
+        "ts": ts,
+        "nonce": nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+    let signature = key.sign(canonical_bytes.as_bytes());
+    let sig = format_sig(&signature.to_bytes());
+    let id = derive_id("rec", &signature.to_bytes());
+
+    let receipt = Receipt {
+        v: 1,
+        id,
+        action: signed_action,
+        signer,
+        authorization: None,
+        policy: Some(attestation),
+        ts,
+        nonce,
+        sig,
+    };
+
+    Ok((receipt, eval))
 }
 
 pub fn sign_compound(
@@ -318,6 +401,119 @@ mod tests {
         assert_eq!(bilateral.server.name, "github-mcp");
         assert_eq!(bilateral.agent_receipt.id, agent_receipt.id);
         assert_eq!(bilateral.agent_receipt.sig, agent_receipt.sig);
+    }
+
+    #[test]
+    fn test_sign_with_policy_allowed() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let policy = crate::policy_load::parse_policy_yaml(
+            r#"
+version: 1
+name: test-policy
+rules:
+  - id: allow-all
+    match:
+      tool: "github_create_issue"
+    action: allow
+"#,
+        )
+        .unwrap();
+        let (receipt, eval) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        assert_eq!(receipt.v, 1);
+        assert!(receipt.policy.is_some());
+        let att = receipt.policy.unwrap();
+        assert_eq!(att.policy_name, "test-policy");
+        assert_eq!(att.decision, crate::policy::RuleAction::Allow);
+        assert!(att.policy_hash.starts_with("sha256:"));
+        assert_eq!(eval.decision, crate::policy::RuleAction::Allow);
+    }
+
+    #[test]
+    fn test_sign_with_policy_denied() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let policy = crate::policy_load::parse_policy_yaml(
+            r#"
+version: 1
+name: deny-policy
+default_action: deny
+rules: []
+"#,
+        )
+        .unwrap();
+        let err = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap_err();
+        assert!(matches!(err, SignetError::PolicyViolation(_)));
+    }
+
+    #[test]
+    fn test_sign_with_policy_require_approval() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let policy = crate::policy_load::parse_policy_yaml(
+            r#"
+version: 1
+name: approval-policy
+rules:
+  - id: needs-approval
+    match:
+      tool: "github_create_issue"
+    action: require_approval
+    reason: "issue creation requires approval"
+"#,
+        )
+        .unwrap();
+        let err = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap_err();
+        assert!(matches!(err, SignetError::RequiresApproval(_)));
+    }
+
+    #[test]
+    fn test_sign_with_policy_attestation_in_signature() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let policy = crate::policy_load::parse_policy_yaml(
+            r#"
+version: 1
+name: sig-test
+rules: []
+"#,
+        )
+        .unwrap();
+        let (receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        // Verify the receipt — policy is inside the signed payload
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+        assert!(receipt.policy.is_some());
+    }
+
+    #[test]
+    fn test_sign_with_policy_tampered_attestation_fails_verify() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let policy = crate::policy_load::parse_policy_yaml(
+            r#"
+version: 1
+name: tamper-test
+rules: []
+"#,
+        )
+        .unwrap();
+        let (mut receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        // Tamper with policy attestation
+        if let Some(ref mut att) = receipt.policy {
+            att.policy_name = "forged-policy".to_string();
+        }
+        // Signature should now fail
+        assert!(crate::verify::verify(&receipt, &vk).is_err());
+    }
+
+    #[test]
+    fn test_sign_with_policy_no_policy_still_verifies() {
+        // Receipts signed without policy (sign()) should still verify
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert!(receipt.policy.is_none());
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
     }
 
     #[test]

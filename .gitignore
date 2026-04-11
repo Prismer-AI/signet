@@ -65,3 +65,4 @@ __pycache__/
 node_modules/
 .mcpregistry_github_token
 .mcpregistry_registry_token
+.venv/

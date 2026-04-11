@@ -22,8 +22,9 @@ fn is_sensitive_env(name: &str) -> bool {
 }
 
 /// Stale pending request timeout (seconds). Entries older than this are
-/// evicted and their v1 receipt is logged as "bilateral_timeout".
-const PENDING_TTL_SECS: u64 = 300; // 5 minutes
+/// evicted. v1 receipt is already logged upfront, so eviction just cleans
+/// memory — no audit data is lost.
+const PENDING_TTL_SECS: u64 = 1800; // 30 minutes
 
 /// Pending request: receipt waiting for server response to co-sign.
 ///
@@ -126,9 +127,22 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     }
 
     let target_uri = if args.target_uri.is_empty() {
-        // Use last whitespace-separated token as a best-effort URI
-        let last = args.target.split_whitespace().last().unwrap_or("local");
-        format!("mcp://{last}")
+        // Use the command name (first token) as best-effort URI.
+        // "npx @modelcontextprotocol/server-github" → "mcp://server-github"
+        // "python3 server.py --port 3000" → "mcp://server.py"
+        let first = args.target.split_whitespace().next().unwrap_or("local");
+        // Skip common launchers (npx, node, python3, etc.) and use the next arg
+        let meaningful = match first {
+            "npx" | "node" | "python" | "python3" | "bun" | "deno" | "cargo" | "go" =>
+                args.target.split_whitespace().nth(1).unwrap_or(first),
+            _ => first,
+        };
+        // Strip path prefix, keep filename
+        let name = std::path::Path::new(meaningful)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(meaningful);
+        format!("mcp://{name}")
     } else {
         args.target_uri.clone()
     };
@@ -220,18 +234,13 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                     continue;
                 }
 
-                // Periodically evict stale pending entries and log their v1 receipts
+                // Periodically evict stale pending entries (v1 already logged upfront)
                 let stale = evict_stale(&pending, PENDING_TTL_SECS);
                 for req in &stale {
                     eprintln!(
-                        "[signet proxy] timeout: {} ({}) — no response, logging v1",
-                        req.tool_name, req.receipt.id,
+                        "[signet proxy] evicted: {} ({}) — no bilateral after {}s",
+                        req.tool_name, req.receipt.id, PENDING_TTL_SECS,
                     );
-                    if !no_log {
-                        if let Ok(val) = serde_json::to_value(&req.receipt) {
-                            let _ = signet_core::audit::append(&dir, &val);
-                        }
-                    }
                 }
 
                 let output = match serde_json::from_str::<serde_json::Value>(trimmed) {
@@ -381,20 +390,13 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         }
     }
 
-    // After both tasks complete, log any remaining pending v1 receipts
-    // that never got a bilateral response.
+    // Clean up remaining pending entries (v1 already logged upfront).
     {
         let mut map = pending.lock().unwrap_or_else(|p| p.into_inner());
-        for (_, req) in map.drain() {
-            eprintln!(
-                "[signet proxy] no response: {} ({}) — logging v1",
-                req.tool_name, req.receipt.id,
-            );
-            if !no_log {
-                if let Ok(val) = serde_json::to_value(&req.receipt) {
-                    let _ = signet_core::audit::append(&dir, &val);
-                }
-            }
+        let remaining = map.len();
+        map.clear();
+        if remaining > 0 {
+            eprintln!("[signet proxy] {remaining} pending call(s) without bilateral response");
         }
     }
 
@@ -500,9 +502,20 @@ fn sign_tools_call(
         signet_core::sign(sk, &action, signer_name, signer_owner)?
     };
 
+    // Always log v1 receipt immediately — ensures audit trail even if proxy
+    // crashes before the server responds. The bilateral (v3) receipt is logged
+    // separately when the response arrives.
+    if !no_log {
+        if let Ok(val) = serde_json::to_value(&receipt) {
+            if let Err(e) = signet_core::audit::append(dir, &val) {
+                eprintln!("[signet proxy] warning: audit log failed: {e}");
+            }
+        }
+    }
+
     // Store pending for bilateral co-signing (only if we have a valid RPC id)
-    match &call_id {
-        Some(id) if !id.is_empty() => {
+    if let Some(ref id) = call_id {
+        if !id.is_empty() {
             pending
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -514,17 +527,6 @@ fn sign_tools_call(
                         created_at: Instant::now(),
                     },
                 );
-        }
-        _ => {
-            // No valid RPC id — can't track for bilateral. Log v1 directly.
-            eprintln!(
-                "[signet proxy] warning: tools/call without RPC id, bilateral disabled"
-            );
-            if !no_log {
-                if let Ok(val) = serde_json::to_value(&receipt) {
-                    let _ = signet_core::audit::append(dir, &val);
-                }
-            }
         }
     }
 

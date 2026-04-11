@@ -139,10 +139,17 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     eprintln!("[signet proxy] server key: {} (ephemeral)", server_pubkey_b64);
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 
-    // Use sh -c to handle quoting, paths with spaces, and shell features.
-    let mut command = Command::new("sh");
+    // Use shell to handle quoting, paths with spaces, and shell features.
+    let mut command = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", &args.target]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.args(["-c", &args.target]);
+        c
+    };
     command
-        .args(["-c", &args.target])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -340,6 +347,10 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                     }
                 }
 
+                // Forward response unmodified. The v3 bilateral receipt goes to the
+                // audit log only, NOT injected into the response — modifying the
+                // JSON-RPC body would break MCP clients. For client-side bilateral
+                // verification, use SigningTransport + onBilateral callback instead.
                 writer.write_all(line.as_bytes()).await?;
                 writer.flush().await?;
             }
@@ -347,14 +358,23 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         }
     };
 
-    let server_handle = tokio::spawn(server_to_agent);
+    let mut server_handle = tokio::spawn(server_to_agent);
 
     tokio::select! {
         r = agent_to_server => {
             if let Err(e) = r {
                 eprintln!("[signet proxy] agent→server error: {e}");
             }
+            // stdin EOF — wait for server responses to drain
             let _ = server_handle.await;
+        }
+        r = &mut server_handle => {
+            // Server exited (crashed or finished) — stop reading stdin
+            match r {
+                Ok(Err(e)) => eprintln!("[signet proxy] server exited with error: {e}"),
+                Err(e) => eprintln!("[signet proxy] server task failed: {e}"),
+                _ => eprintln!("[signet proxy] server exited"),
+            }
         }
         _ = tokio::signal::ctrl_c() => {
             eprintln!("[signet proxy] shutting down");

@@ -237,7 +237,7 @@ pub fn append_violation(
         "policy": eval.policy_name,
         "policy_hash": eval.policy_hash,
         "matched_rules": eval.matched_rules,
-        "decision": format!("{:?}", eval.decision).to_lowercase(),
+        "decision": eval.decision.to_string(),
         "reason": eval.reason,
         "ts": crate::delegation::current_timestamp(),
     });

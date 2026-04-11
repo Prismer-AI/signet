@@ -25,13 +25,17 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
         "nonce": receipt.nonce,
     });
     // Include policy in signable if present (must match what sign_with_policy produced)
+    // JCS canonicalization guarantees key-order independence, so insertion order is irrelevant.
     if let Some(ref policy) = receipt.policy {
-        signable.as_object_mut().unwrap().insert(
-            "policy".to_string(),
-            serde_json::to_value(policy).map_err(|e| {
-                SignetError::InvalidReceipt(format!("failed to serialize policy: {e}"))
-            })?,
-        );
+        signable
+            .as_object_mut()
+            .ok_or_else(|| SignetError::InvalidReceipt("signable is not a JSON object".into()))?
+            .insert(
+                "policy".to_string(),
+                serde_json::to_value(policy).map_err(|e| {
+                    SignetError::InvalidReceipt(format!("failed to serialize policy: {e}"))
+                })?,
+            );
     }
     let canonical_bytes = canonical::canonicalize(&signable)?;
 

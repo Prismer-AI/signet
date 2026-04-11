@@ -47,6 +47,16 @@ pub enum RuleAction {
     Deny = 2,
 }
 
+impl std::fmt::Display for RuleAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuleAction::Allow => write!(f, "allow"),
+            RuleAction::RequireApproval => write!(f, "require_approval"),
+            RuleAction::Deny => write!(f, "deny"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MatchSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -101,33 +101,31 @@ pub fn sign(args: SignArgs) -> Result<()> {
 
     let receipt = if let Some(ref policy_path) = args.policy {
         let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
-        match signet_core::sign_with_policy(&sk, &action, &info.name, owner, &policy, None) {
-            Ok((receipt, eval)) => {
-                eprintln!(
-                    "Policy \"{}\": {} ({})",
-                    eval.policy_name,
-                    format!("{:?}", eval.decision).to_lowercase(),
-                    if eval.matched_rules.is_empty() {
-                        "default action".to_string()
-                    } else {
-                        eval.matched_rules.join(", ")
-                    }
-                );
-                receipt
+        // Evaluate once, then branch — avoids double load and TOCTOU issues
+        let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None);
+        let rules_str = if eval.matched_rules.is_empty() {
+            "default action".to_string()
+        } else {
+            eval.matched_rules.join(", ")
+        };
+        eprintln!("Policy \"{}\": {} ({})", eval.policy_name, eval.decision, rules_str);
+
+        match eval.decision {
+            signet_core::RuleAction::Allow => {
+                signet_core::sign_with_policy(&sk, &action, &info.name, owner, &policy, None)?.0
             }
-            Err(signet_core::SignetError::PolicyViolation(reason)) => {
-                // Log violation to audit trail
+            signet_core::RuleAction::Deny | signet_core::RuleAction::RequireApproval => {
                 if !args.no_log {
-                    let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
-                    let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None);
-                    let _ = signet_core::audit::append_violation(&dir, &action, &info.name, &eval);
+                    if let Err(e) = signet_core::audit::append_violation(&dir, &action, &info.name, &eval) {
+                        eprintln!("Warning: failed to log violation: {e}");
+                    }
                 }
-                anyhow::bail!("policy violation: {reason}");
+                if eval.decision == signet_core::RuleAction::Deny {
+                    anyhow::bail!("policy violation: {}", eval.reason);
+                } else {
+                    anyhow::bail!("requires approval: {}", eval.reason);
+                }
             }
-            Err(signet_core::SignetError::RequiresApproval(reason)) => {
-                anyhow::bail!("requires approval: {reason}");
-            }
-            Err(e) => return Err(e.into()),
         }
     } else {
         signet_core::sign(&sk, &action, &info.name, owner)?

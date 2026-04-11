@@ -10,6 +10,7 @@ mod cmd_dashboard;
 mod cmd_delegate;
 mod cmd_identity;
 mod cmd_policy;
+mod cmd_proxy;
 mod cmd_sign;
 mod cmd_verify;
 mod dashboard;
@@ -51,6 +52,8 @@ enum Commands {
         #[command(subcommand)]
         action: cmd_policy::PolicyAction,
     },
+    /// Run as MCP proxy — sign tool calls transparently
+    Proxy(cmd_proxy::ProxyArgs),
 }
 
 #[derive(Subcommand)]
@@ -104,6 +107,7 @@ fn run() -> Result<()> {
         Commands::Dashboard(args) => cmd_dashboard::dashboard(args)?,
         Commands::Delegate { action } => cmd_delegate::run(action)?,
         Commands::Policy { action } => cmd_policy::run(action)?,
+        Commands::Proxy(args) => cmd_proxy::run(args)?,
     }
     Ok(())
 }

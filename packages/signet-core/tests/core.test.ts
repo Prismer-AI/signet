@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import {
   generateKeypair, sign, verify, type SignetAction,
   signDelegation, verifyDelegation, signAuthorized, verifyAuthorized,
-  type Scope, type DelegationToken,
+  parsePolicyYaml, evaluatePolicy, signWithPolicy, computePolicyHash,
+  type Scope, type DelegationToken, type PolicyEvalResult,
 } from '../src/index.js';
 
 describe('@signet-auth/core', () => {
@@ -143,5 +144,98 @@ describe('delegation chain', () => {
     const receipt = signAuthorized(agent.secretKey, testAction, 'bot', [token]);
 
     assert.throws(() => verifyAuthorized(receipt, [wrongRoot.publicKey]));
+  });
+});
+
+describe('policy engine', () => {
+  const testAction: SignetAction = {
+    tool: 'Read',
+    params: { path: '/tmp' },
+    params_hash: '',
+    target: 'mcp://local',
+    transport: 'stdio',
+  };
+
+  const allowPolicyYaml = `
+version: 1
+name: test-allow
+rules:
+  - id: allow-read
+    match:
+      tool: Read
+    action: allow
+`;
+
+  const denyPolicyYaml = `
+version: 1
+name: test-deny
+default_action: deny
+rules: []
+`;
+
+  it('parsePolicyYaml parses and returns policy object', () => {
+    const policy = parsePolicyYaml(allowPolicyYaml) as Record<string, unknown>;
+    assert.strictEqual(policy.name, 'test-allow');
+    assert.strictEqual(policy.version, 1);
+  });
+
+  it('computePolicyHash returns sha256 hash', () => {
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    const hash = computePolicyHash(policy);
+    assert.ok(hash.startsWith('sha256:'));
+    assert.strictEqual(hash.length, 71);
+  });
+
+  it('computePolicyHash is deterministic', () => {
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    assert.strictEqual(computePolicyHash(policy), computePolicyHash(policy));
+  });
+
+  it('evaluatePolicy returns allow for matching rule', () => {
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    const result = evaluatePolicy(testAction, 'agent', policy);
+    assert.strictEqual(result.decision, 'allow');
+    assert.ok(result.matched_rules.includes('allow-read'));
+  });
+
+  it('evaluatePolicy returns deny for deny-default policy', () => {
+    const policy = parsePolicyYaml(denyPolicyYaml);
+    const result = evaluatePolicy(testAction, 'agent', policy);
+    assert.strictEqual(result.decision, 'deny');
+  });
+
+  it('signWithPolicy produces receipt with policy attestation', () => {
+    const kp = generateKeypair();
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    assert.strictEqual(receipt.v, 1);
+    assert.ok(receipt.policy);
+    assert.strictEqual(receipt.policy.policy_name, 'test-allow');
+    assert.strictEqual(receipt.policy.decision, 'allow');
+    assert.ok(receipt.policy.policy_hash.startsWith('sha256:'));
+  });
+
+  it('signWithPolicy receipt is verifiable', () => {
+    const kp = generateKeypair();
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    assert.strictEqual(verify(receipt, kp.publicKey), true);
+  });
+
+  it('signWithPolicy throws on deny policy', () => {
+    const kp = generateKeypair();
+    const policy = parsePolicyYaml(denyPolicyYaml);
+    assert.throws(
+      () => signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy),
+      /policy violation/i,
+    );
+  });
+
+  it('signWithPolicy tampered attestation fails verify', () => {
+    const kp = generateKeypair();
+    const policy = parsePolicyYaml(allowPolicyYaml);
+    const receipt = signWithPolicy(kp.secretKey, testAction, 'agent', 'owner', policy);
+    receipt.policy.policy_name = 'forged';
+    assert.strictEqual(verify(receipt, kp.publicKey), false);
   });
 });

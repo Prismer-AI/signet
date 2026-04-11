@@ -248,6 +248,24 @@ def verify_authorized(
     clock_skew_secs: int = 60,
 ) -> str: ...
 
+# ─── Policy functions ─────────────────────────────────────────────────────────
+
+def parse_policy_yaml(yaml: str) -> str: ...
+def parse_policy_json(json_str: str) -> str: ...
+def evaluate_policy(
+    action_json: str,
+    agent_name: str,
+    policy_json: str,
+) -> str: ...
+def sign_with_policy(
+    key_b64: str,
+    action_json: str,
+    signer_name: str,
+    signer_owner: str,
+    policy_json: str,
+) -> tuple[str, str]: ...
+def compute_policy_hash(policy_json: str) -> str: ...
+
 # ─── Identity functions ───────────────────────────────────────────────────────
 
 def validate_key_name(name: str) -> None: ...

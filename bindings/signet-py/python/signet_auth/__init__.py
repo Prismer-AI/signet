@@ -23,6 +23,9 @@ from signet_auth._signet import (
     ChainError,
     DelegationExpiredError,
     UnauthorizedError,
+    PolicyViolationError,
+    PolicyParseError,
+    RequiresApprovalError,
     # Types
     Action,
     Signer,
@@ -51,6 +54,12 @@ from signet_auth._signet import (
     verify_delegation,
     sign_authorized,
     verify_authorized,
+    # Policy functions
+    parse_policy_yaml,
+    parse_policy_json,
+    evaluate_policy,
+    sign_with_policy,
+    compute_policy_hash,
     # Identity functions
     validate_key_name,
     default_signet_dir,
@@ -86,6 +95,9 @@ __all__ = [
     "CorruptedRecordError",
     "SignetIOError",
     "UnsupportedFormatError",
+    "PolicyViolationError",
+    "PolicyParseError",
+    "RequiresApprovalError",
     # Types
     "Action",
     "Signer",
@@ -114,6 +126,12 @@ __all__ = [
     "verify_delegation",
     "sign_authorized",
     "verify_authorized",
+    # Policy functions
+    "parse_policy_yaml",
+    "parse_policy_json",
+    "evaluate_policy",
+    "sign_with_policy",
+    "compute_policy_hash",
     # Identity functions
     "validate_key_name",
     "default_signet_dir",

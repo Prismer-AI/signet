@@ -1,5 +1,6 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use ed25519_dalek::SigningKey;
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 
@@ -313,4 +314,72 @@ pub fn wasm_verify_authorized(
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     serde_json::to_string(&scope).map_err(|e| JsError::new(&e.to_string()))
+}
+
+// ─── Policy functions ────────────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn wasm_parse_policy_yaml(yaml: &str) -> Result<String, JsError> {
+    let policy = signet_core::parse_policy_yaml(yaml)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    signet_core::validate_policy(&policy)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&policy).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_evaluate_policy(
+    action_json: &str,
+    agent_name: &str,
+    policy_json: &str,
+) -> Result<String, JsError> {
+    let action: signet_core::Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    let policy: signet_core::Policy = serde_json::from_str(policy_json)
+        .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
+
+    let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None);
+
+    let result = serde_json::json!({
+        "decision": eval.decision.to_string(),
+        "matched_rules": eval.matched_rules,
+        "winning_rule": eval.winning_rule,
+        "reason": eval.reason,
+        "policy_name": eval.policy_name,
+        "policy_hash": eval.policy_hash,
+    });
+    serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_sign_with_policy(
+    secret_key_b64: &str,
+    action_json: &str,
+    signer_name: &str,
+    signer_owner: &str,
+    policy_json: &str,
+) -> Result<String, JsError> {
+    let key_bytes = BASE64.decode(secret_key_b64)
+        .map_err(|e| JsError::new(&format!("invalid secret key base64: {e}")))?;
+    let signing_key = SigningKey::from_bytes(
+        &key_bytes.try_into().map_err(|_| JsError::new("secret key must be 32 bytes"))?,
+    );
+    let action: signet_core::Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    let policy: signet_core::Policy = serde_json::from_str(policy_json)
+        .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
+
+    let (receipt, _eval) = signet_core::sign_with_policy(
+        &signing_key, &action, signer_name, signer_owner, &policy, None,
+    ).map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_compute_policy_hash(policy_json: &str) -> Result<String, JsError> {
+    let policy: signet_core::Policy = serde_json::from_str(policy_json)
+        .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
+    signet_core::compute_policy_hash(&policy)
+        .map_err(|e| JsError::new(&e.to_string()))
 }

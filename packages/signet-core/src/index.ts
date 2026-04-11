@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -229,4 +229,62 @@ export function verifyAuthorized(
     BigInt(clockSkewSecs),
   );
   return JSON.parse(json) as Scope;
+}
+
+// ─── Policy functions ───────────────────────────────────────────────────────
+
+export interface PolicyEvalResult {
+  decision: 'allow' | 'deny' | 'require_approval';
+  matched_rules: string[];
+  winning_rule: string | null;
+  reason: string;
+  policy_name: string;
+  policy_hash: string;
+}
+
+export interface PolicyAttestation {
+  policy_hash: string;
+  policy_name: string;
+  matched_rules: string[];
+  decision: 'allow' | 'deny' | 'require_approval';
+  reason: string;
+}
+
+export function parsePolicyYaml(yaml: string): unknown {
+  const json = wasm_parse_policy_yaml(yaml);
+  return JSON.parse(json);
+}
+
+export function evaluatePolicy(
+  action: SignetAction,
+  agentName: string,
+  policy: unknown,
+): PolicyEvalResult {
+  const json = wasm_evaluate_policy(
+    JSON.stringify(action),
+    agentName,
+    JSON.stringify(policy),
+  );
+  return JSON.parse(json) as PolicyEvalResult;
+}
+
+export function signWithPolicy(
+  secretKey: string,
+  action: SignetAction,
+  signerName: string,
+  signerOwner: string,
+  policy: unknown,
+): SignetReceipt & { policy: PolicyAttestation } {
+  const json = wasm_sign_with_policy(
+    secretKey,
+    JSON.stringify(action),
+    signerName,
+    signerOwner,
+    JSON.stringify(policy),
+  );
+  return JSON.parse(json);
+}
+
+export function computePolicyHash(policy: unknown): string {
+  return wasm_compute_policy_hash(JSON.stringify(policy));
 }

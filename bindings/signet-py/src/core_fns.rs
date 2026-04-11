@@ -304,6 +304,101 @@ fn verify_authorized(
     serde_json::to_string(&scope).map_err(|e| to_py_err(e.into()))
 }
 
+// ─── Policy functions ────────────────────────────────────────────────────────
+
+/// Parse and validate a YAML policy string. Returns the policy as JSON.
+#[pyfunction]
+fn parse_policy_yaml(_py: Python<'_>, yaml: &str) -> PyResult<String> {
+    let policy = signet_core::parse_policy_yaml(yaml).map_err(to_py_err)?;
+    signet_core::validate_policy(&policy).map_err(to_py_err)?;
+    serde_json::to_string(&policy).map_err(|e| to_py_err(e.into()))
+}
+
+/// Parse and validate a JSON policy string. Returns the policy as JSON.
+#[pyfunction]
+fn parse_policy_json(_py: Python<'_>, json_str: &str) -> PyResult<String> {
+    let policy = signet_core::parse_policy_json(json_str).map_err(to_py_err)?;
+    signet_core::validate_policy(&policy).map_err(to_py_err)?;
+    serde_json::to_string(&policy).map_err(|e| to_py_err(e.into()))
+}
+
+/// Evaluate a policy against an action. Returns the evaluation result as JSON.
+#[pyfunction]
+fn evaluate_policy(
+    _py: Python<'_>,
+    action_json: &str,
+    agent_name: &str,
+    policy_json: &str,
+) -> PyResult<String> {
+    let action: signet_core::Action =
+        serde_json::from_str(action_json).map_err(|e| to_py_err(e.into()))?;
+    let policy: signet_core::Policy =
+        serde_json::from_str(policy_json).map_err(|e| to_py_err(e.into()))?;
+
+    let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None);
+
+    let result = serde_json::json!({
+        "decision": eval.decision.to_string(),
+        "matched_rules": eval.matched_rules,
+        "winning_rule": eval.winning_rule,
+        "reason": eval.reason,
+        "policy_name": eval.policy_name,
+        "policy_hash": eval.policy_hash,
+    });
+    serde_json::to_string(&result).map_err(|e| to_py_err(e.into()))
+}
+
+/// Sign an action with policy enforcement. Returns (receipt_json, eval_json).
+/// Raises PolicyViolationError on deny, RequiresApprovalError on require_approval.
+#[pyfunction]
+fn sign_with_policy(
+    py: Python<'_>,
+    key_b64: &str,
+    action_json: String,
+    signer_name: String,
+    signer_owner: String,
+    policy_json: String,
+) -> PyResult<(String, String)> {
+    let signing_key = parse_signing_key(key_b64)?;
+    let action: signet_core::Action =
+        serde_json::from_str(&action_json).map_err(|e| to_py_err(e.into()))?;
+    let policy: signet_core::Policy =
+        serde_json::from_str(&policy_json).map_err(|e| to_py_err(e.into()))?;
+
+    let (receipt, eval) = py
+        .allow_threads(|| {
+            signet_core::sign_with_policy(
+                &signing_key,
+                &action,
+                &signer_name,
+                &signer_owner,
+                &policy,
+                None,
+            )
+        })
+        .map_err(to_py_err)?;
+
+    let receipt_json = serde_json::to_string(&receipt).map_err(|e| to_py_err(e.into()))?;
+    let eval_result = serde_json::json!({
+        "decision": eval.decision.to_string(),
+        "matched_rules": eval.matched_rules,
+        "winning_rule": eval.winning_rule,
+        "reason": eval.reason,
+        "policy_name": eval.policy_name,
+        "policy_hash": eval.policy_hash,
+    });
+    let eval_json = serde_json::to_string(&eval_result).map_err(|e| to_py_err(e.into()))?;
+    Ok((receipt_json, eval_json))
+}
+
+/// Compute the SHA-256 hash of a policy (JCS-canonicalized).
+#[pyfunction]
+fn compute_policy_hash(_py: Python<'_>, policy_json: &str) -> PyResult<String> {
+    let policy: signet_core::Policy =
+        serde_json::from_str(policy_json).map_err(|e| to_py_err(e.into()))?;
+    signet_core::compute_policy_hash(&policy).map_err(to_py_err)
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign, m)?)?;
@@ -316,5 +411,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(sign_authorized, m)?)?;
     m.add_function(wrap_pyfunction!(verify_authorized, m)?)?;
+    // Policy functions
+    m.add_function(wrap_pyfunction!(parse_policy_yaml, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_policy_json, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_policy, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_with_policy, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_policy_hash, m)?)?;
     Ok(())
 }

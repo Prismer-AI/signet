@@ -226,7 +226,7 @@ export function verifyAuthorized(
   const json = wasm_verify_authorized(
     JSON.stringify(receipt),
     JSON.stringify(bareRoots),
-    clockSkewSecs,
+    BigInt(clockSkewSecs),
   );
   return JSON.parse(json) as Scope;
 }

@@ -1,32 +1,69 @@
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{bail, Result};
 use clap::Args;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-/// Env vars that are never passed to the child MCP server process.
+/// Env vars filtered from child process. Also filters any var whose name
+/// contains SECRET, TOKEN, PASSWORD, PRIVATE_KEY, CREDENTIAL, or API_KEY
+/// (case-insensitive) — see `is_sensitive_env`.
 const ENV_DENYLIST: &[&str] = &[
     "SIGNET_PASSPHRASE",
-    "AWS_SECRET_ACCESS_KEY",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GITHUB_TOKEN",
-    "NPM_TOKEN",
-    "PYPI_TOKEN",
-    "CARGO_REGISTRY_TOKEN",
+    "DATABASE_URL",
+    "DOCKER_AUTH_CONFIG",
 ];
 
+/// Returns true if the env var name looks like it holds a secret.
+fn is_sensitive_env(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    ENV_DENYLIST.iter().any(|&d| name == d)
+        || upper.contains("SECRET")
+        || upper.contains("TOKEN")
+        || upper.contains("PASSWORD")
+        || upper.contains("PRIVATE_KEY")
+        || upper.contains("CREDENTIAL")
+        || upper.contains("API_KEY")
+}
+
+/// Stale pending request timeout (seconds). Entries older than this are
+/// evicted and their v1 receipt is logged as "bilateral_timeout".
+const PENDING_TTL_SECS: u64 = 300; // 5 minutes
+
 /// Pending request: receipt waiting for server response to co-sign.
+///
+/// ## Trust boundary (RPC ID spoofing)
+///
+/// The bilateral receipt proves "the proxy observed this response for this
+/// JSON-RPC request id." It does NOT prove the server acted honestly — a
+/// malicious server can return fabricated content for any id. The
+/// `response.content_hash` in the bilateral receipt binds the response
+/// content cryptographically, so a verifier can later compare the actual
+/// response against the hash. But the proxy cannot detect if the server
+/// returned a correct response for the wrong id.
 struct PendingRequest {
     receipt: signet_core::Receipt,
     tool_name: String,
+    created_at: Instant,
 }
 
-/// Shared state between agent→server and server→agent tasks.
 type PendingMap = Arc<Mutex<HashMap<String, PendingRequest>>>;
+
+/// Evict stale entries from the pending map. Returns evicted entries
+/// so the caller can log their v1 receipts.
+fn evict_stale(pending: &PendingMap, ttl_secs: u64) -> Vec<PendingRequest> {
+    let mut map = pending.lock().unwrap_or_else(|p| p.into_inner());
+    let cutoff = Instant::now() - std::time::Duration::from_secs(ttl_secs);
+    let stale_keys: Vec<String> = map
+        .iter()
+        .filter(|(_, v)| v.created_at < cutoff)
+        .map(|(k, _)| k.clone())
+        .collect();
+    stale_keys.iter().filter_map(|k| map.remove(k)).collect()
+}
 
 #[derive(Args)]
 pub struct ProxyArgs {
@@ -81,17 +118,18 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         None
     };
 
-    let target_uri = if args.target_uri.is_empty() {
-        format!("mcp://{}", args.target.split_whitespace().last().unwrap_or("local"))
-    } else {
-        args.target_uri.clone()
-    };
-
+    // Validate target before deriving target_uri
     let parts: Vec<&str> = args.target.split_whitespace().collect();
     if parts.is_empty() {
         bail!("--target cannot be empty");
     }
     let (cmd, cmd_args) = (parts[0], &parts[1..]);
+
+    let target_uri = if args.target_uri.is_empty() {
+        format!("mcp://{}", parts.last().unwrap_or(&"local"))
+    } else {
+        args.target_uri.clone()
+    };
 
     eprintln!("[signet proxy] target: {}", args.target);
     eprintln!("[signet proxy] target_uri: {}", target_uri);
@@ -108,7 +146,7 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     if !args.no_env_filter {
         command.env_clear();
         for (k, v) in std::env::vars() {
-            if !ENV_DENYLIST.iter().any(|&denied| k == denied) {
+            if !is_sensitive_env(&k) {
                 command.env(&k, &v);
             }
         }
@@ -118,8 +156,14 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         .spawn()
         .map_err(|e| anyhow::anyhow!("failed to spawn '{}': {e}", args.target))?;
 
-    let child_stdin = child.stdin.take().expect("child stdin");
-    let child_stdout = child.stdout.take().expect("child stdout");
+    let child_stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture child stdin"))?;
+    let child_stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("failed to capture child stdout"))?;
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -157,6 +201,20 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                     writer.write_all(line.as_bytes()).await?;
                     writer.flush().await?;
                     continue;
+                }
+
+                // Periodically evict stale pending entries and log their v1 receipts
+                let stale = evict_stale(&pending, PENDING_TTL_SECS);
+                for req in &stale {
+                    eprintln!(
+                        "[signet proxy] timeout: {} ({}) — no response, logging v1",
+                        req.tool_name, req.receipt.id,
+                    );
+                    if !no_log {
+                        if let Ok(val) = serde_json::to_value(&req.receipt) {
+                            let _ = signet_core::audit::append(&dir, &val);
+                        }
+                    }
                 }
 
                 let output = match serde_json::from_str::<serde_json::Value>(trimmed) {
@@ -198,6 +256,7 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                 writer.write_all(output.as_bytes()).await?;
                 writer.flush().await?;
             }
+
             anyhow::Ok(())
         }
     };
@@ -223,14 +282,17 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
                     if let Ok(msg) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                        // Check if this is a response (has "id" + "result", no "method")
                         if is_rpc_response(&msg) {
                             if let Some(rpc_id) = extract_rpc_id(&msg) {
-                                // Look up pending request
-                                let pending_req = pending.lock().unwrap().remove(&rpc_id);
+                                let pending_req = pending
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner())
+                                    .remove(&rpc_id);
                                 if let Some(req) = pending_req {
-                                    // Bilateral co-sign: proxy signs the response
-                                    let response_content = msg.get("result")
+                                    // Use result content, or error content for error responses
+                                    let response_content = msg
+                                        .get("result")
+                                        .or_else(|| msg.get("error"))
                                         .cloned()
                                         .unwrap_or(serde_json::json!({}));
                                     let ts = chrono::Utc::now()
@@ -241,9 +303,15 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                     ) {
                                         Ok(bilateral) => {
                                             if !no_log {
-                                                let val = serde_json::to_value(&bilateral).unwrap_or_default();
-                                                if let Err(e) = signet_core::audit::append(&dir, &val) {
-                                                    eprintln!("[signet proxy] warning: bilateral audit failed: {e}");
+                                                match serde_json::to_value(&bilateral) {
+                                                    Ok(val) => {
+                                                        if let Err(e) = signet_core::audit::append(&dir, &val) {
+                                                            eprintln!("[signet proxy] warning: bilateral audit failed: {e}");
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("[signet proxy] warning: bilateral serialize failed: {e}");
+                                                    }
                                                 }
                                             }
                                             bilateral_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -262,7 +330,6 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                     }
                 }
 
-                // Always forward the response to agent
                 writer.write_all(line.as_bytes()).await?;
                 writer.flush().await?;
             }
@@ -281,6 +348,23 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         }
         _ = tokio::signal::ctrl_c() => {
             eprintln!("[signet proxy] shutting down");
+        }
+    }
+
+    // After both tasks complete, log any remaining pending v1 receipts
+    // that never got a bilateral response.
+    {
+        let mut map = pending.lock().unwrap_or_else(|p| p.into_inner());
+        for (_, req) in map.drain() {
+            eprintln!(
+                "[signet proxy] no response: {} ({}) — logging v1",
+                req.tool_name, req.receipt.id,
+            );
+            if !no_log {
+                if let Ok(val) = serde_json::to_value(&req.receipt) {
+                    let _ = signet_core::audit::append(&dir, &val);
+                }
+            }
         }
     }
 
@@ -339,12 +423,7 @@ fn sign_tools_call(
         .cloned()
         .unwrap_or(serde_json::json!({}));
 
-    let call_id = msg.get("id").and_then(|id| match id {
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        serde_json::Value::String(s) => Some(s.clone()),
-        _ => None,
-    });
-    let rpc_id = call_id.clone().unwrap_or_default();
+    let call_id = extract_rpc_id(msg);
 
     let action = signet_core::Action {
         tool: tool_name.clone(),
@@ -353,7 +432,7 @@ fn sign_tools_call(
         target: target_uri.to_string(),
         transport: "stdio".to_string(),
         session: None,
-        call_id,
+        call_id: call_id.clone(),
         response_hash: None,
     };
 
@@ -389,18 +468,33 @@ fn sign_tools_call(
         signet_core::sign(sk, &action, signer_name, signer_owner)?
     };
 
-    // Don't log v1 receipt to audit — the bilateral receipt (v3) will be logged
-    // when the response arrives. If the server never responds, we lose the record,
-    // but that's better than logging both v1 and v3 for the same action.
-
-    // Store pending request for bilateral co-signing
-    pending.lock().unwrap().insert(
-        rpc_id,
-        PendingRequest {
-            receipt: receipt.clone(),
-            tool_name: tool_name.clone(),
-        },
-    );
+    // Store pending for bilateral co-signing (only if we have a valid RPC id)
+    match &call_id {
+        Some(id) if !id.is_empty() => {
+            pending
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(
+                    id.clone(),
+                    PendingRequest {
+                        receipt: receipt.clone(),
+                        tool_name: tool_name.clone(),
+                        created_at: Instant::now(),
+                    },
+                );
+        }
+        _ => {
+            // No valid RPC id — can't track for bilateral. Log v1 directly.
+            eprintln!(
+                "[signet proxy] warning: tools/call without RPC id, bilateral disabled"
+            );
+            if !no_log {
+                if let Ok(val) = serde_json::to_value(&receipt) {
+                    let _ = signet_core::audit::append(dir, &val);
+                }
+            }
+        }
+    }
 
     // Inject receipt into params._meta._signet
     let receipt_val = serde_json::to_value(&receipt)?;

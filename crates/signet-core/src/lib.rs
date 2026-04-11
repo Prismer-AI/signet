@@ -31,7 +31,7 @@ pub use policy_load::load_policy;
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
 };
-pub use sign::{sign, sign_bilateral, sign_compound};
+pub use sign::{sign, sign_bilateral, sign_compound, sign_with_policy};
 pub use sign_delegation::{sign_authorized, sign_delegation};
 pub use verify::{
     verify, verify_any, verify_bilateral, verify_bilateral_with_options, verify_compound,

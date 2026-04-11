@@ -900,4 +900,74 @@ mod tests {
         assert_eq!(result.valid, 1);
         assert!(result.failures.is_empty());
     }
+
+    // ─── trace correlation in audit ─────────────────────────────────────
+
+    #[test]
+    fn test_audit_preserves_trace_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_audit_test".to_string());
+        action.parent_receipt_id = Some("rec_parent".to_string());
+        let receipt = sign::sign(&sk, &action, "agent", "").unwrap();
+        append(dir.path(), &serde_json::to_value(&receipt).unwrap()).unwrap();
+
+        let records = query(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(records.len(), 1);
+        let stored = &records[0].receipt;
+        assert_eq!(
+            stored["action"]["trace_id"].as_str(),
+            Some("tr_audit_test"),
+        );
+        assert_eq!(
+            stored["action"]["parent_receipt_id"].as_str(),
+            Some("rec_parent"),
+        );
+    }
+
+    #[test]
+    fn test_audit_trace_fields_absent_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let receipt = sign_receipt_simple(); // no trace fields
+        append(dir.path(), &receipt).unwrap();
+
+        let records = query(dir.path(), &AuditFilter::default()).unwrap();
+        let stored = &records[0].receipt;
+        assert!(stored["action"].get("trace_id").is_none());
+        assert!(stored["action"].get("parent_receipt_id").is_none());
+    }
+
+    #[test]
+    fn test_audit_chain_intact_with_trace_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+
+        for i in 0..3 {
+            let mut action = test_action();
+            action.trace_id = Some("tr_chain".to_string());
+            action.parent_receipt_id = Some(format!("rec_{}", i));
+            let receipt = sign::sign(&sk, &action, "agent", "").unwrap();
+            append(dir.path(), &serde_json::to_value(&receipt).unwrap()).unwrap();
+        }
+
+        let status = verify_chain(dir.path()).unwrap();
+        assert!(status.valid);
+        assert_eq!(status.total_records, 3);
+    }
+
+    #[test]
+    fn test_audit_verify_signatures_with_trace() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sk, _) = generate_keypair();
+
+        let mut action = test_action();
+        action.trace_id = Some("tr_sig".to_string());
+        let receipt = sign::sign(&sk, &action, "agent", "").unwrap();
+        append(dir.path(), &serde_json::to_value(&receipt).unwrap()).unwrap();
+
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+        assert_eq!(result.valid, 1);
+        assert!(result.failures.is_empty());
+    }
 }

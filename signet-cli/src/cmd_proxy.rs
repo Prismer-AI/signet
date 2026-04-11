@@ -18,9 +18,10 @@ const ENV_DENYLIST: &[&str] = &[
 ];
 
 /// Returns true if the env var name looks like it holds a secret.
+/// Denylist comparison is case-insensitive.
 fn is_sensitive_env(name: &str) -> bool {
     let upper = name.to_uppercase();
-    ENV_DENYLIST.iter().any(|&d| name == d)
+    ENV_DENYLIST.iter().any(|&d| upper == d.to_uppercase())
         || upper.contains("SECRET")
         || upper.contains("TOKEN")
         || upper.contains("PASSWORD")
@@ -112,6 +113,15 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     let owner = info.owner.as_deref().unwrap_or("").to_string();
     let signer_name = info.name.clone();
 
+    // Generate an ephemeral server key for bilateral co-signing.
+    // This MUST be different from the agent signing key — if they're the same,
+    // bilateral receipts are meaningless (one key compromise forges both sides).
+    let (server_sk, _server_vk) = signet_core::generate_keypair();
+    let server_pubkey_b64 = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(_server_vk.to_bytes())
+    };
+
     let policy = if let Some(ref path) = args.policy {
         Some(signet_core::load_policy(std::path::Path::new(path))?)
     } else {
@@ -133,8 +143,9 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
 
     eprintln!("[signet proxy] target: {}", args.target);
     eprintln!("[signet proxy] target_uri: {}", target_uri);
-    eprintln!("[signet proxy] signer: {} ({})", signer_name, info.pubkey);
-    eprintln!("[signet proxy] bilateral co-signing: enabled");
+    eprintln!("[signet proxy] agent key: {} ({})", signer_name, info.pubkey);
+    eprintln!("[signet proxy] server key: {} (ephemeral)", server_pubkey_b64);
+    eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 
     let mut command = Command::new(cmd);
     command
@@ -261,9 +272,9 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         }
     };
 
-    // Server → Agent (intercept responses, bilateral co-sign)
+    // Server → Agent (intercept responses, bilateral co-sign with server key)
     let server_to_agent = {
-        let sk = sk.clone();
+        let server_sk = server_sk.clone();
         let dir = dir.clone();
         let pending = pending.clone();
         let bilateral_counter = bilateral_counter.clone();
@@ -298,7 +309,7 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                     let ts = chrono::Utc::now()
                                         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                                     match signet_core::sign_bilateral(
-                                        &sk, &req.receipt, &response_content,
+                                        &server_sk, &req.receipt, &response_content,
                                         "signet-proxy", &ts,
                                     ) {
                                         Ok(bilateral) => {
@@ -389,10 +400,12 @@ fn is_rpc_response(msg: &serde_json::Value) -> bool {
         && msg.get("method").is_none()
 }
 
+/// Extract RPC id as a type-prefixed string to distinguish numeric 1 from string "1".
+/// JSON-RPC treats them as different ids, so we key the pending map with "n:1" vs "s:1".
 fn extract_rpc_id(msg: &serde_json::Value) -> Option<String> {
     msg.get("id").and_then(|id| match id {
-        serde_json::Value::Number(n) => Some(n.to_string()),
-        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(format!("n:{n}")),
+        serde_json::Value::String(s) => Some(format!("s:{s}")),
         _ => None,
     })
 }

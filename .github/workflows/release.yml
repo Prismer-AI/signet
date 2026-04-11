@@ -120,13 +120,24 @@ jobs:
     needs: [build, python, python-sdist]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract the section between ## [VERSION] and the next ## [
+          NOTES=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          # Write to file to preserve newlines
+          echo "$NOTES" > /tmp/release-notes.md
+          echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          body_path: ${{ steps.notes.outputs.notes_file }}
 
   pypi:
     name: Publish to PyPI

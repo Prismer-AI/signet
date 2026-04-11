@@ -8,26 +8,17 @@ use clap::Args;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-/// Env vars filtered from child process. Also filters any var whose name
-/// contains SECRET, TOKEN, PASSWORD, PRIVATE_KEY, CREDENTIAL, or API_KEY
-/// (case-insensitive) — see `is_sensitive_env`.
-const ENV_DENYLIST: &[&str] = &[
-    "SIGNET_PASSPHRASE",
-    "DATABASE_URL",
-    "DOCKER_AUTH_CONFIG",
-];
+/// Env vars always filtered from child process (Signet's own secrets).
+const ALWAYS_FILTER: &[&str] = &["SIGNET_PASSPHRASE"];
 
-/// Returns true if the env var name looks like it holds a secret.
-/// Denylist comparison is case-insensitive.
+/// Aggressive env filter: strips vars whose name contains these patterns.
+/// Only applied when --env-filter is explicitly enabled.
 fn is_sensitive_env(name: &str) -> bool {
     let upper = name.to_uppercase();
-    ENV_DENYLIST.iter().any(|&d| upper == d.to_uppercase())
-        || upper.contains("SECRET")
-        || upper.contains("TOKEN")
+    upper.contains("SECRET")
         || upper.contains("PASSWORD")
         || upper.contains("PRIVATE_KEY")
         || upper.contains("CREDENTIAL")
-        || upper.contains("API_KEY")
 }
 
 /// Stale pending request timeout (seconds). Entries older than this are
@@ -88,9 +79,11 @@ pub struct ProxyArgs {
     #[arg(long)]
     pub policy: Option<String>,
 
-    /// Allow all env vars to pass to child process (disables env filtering)
+    /// Enable aggressive env filtering (strips vars with SECRET, PASSWORD, etc.)
+    /// By default, only SIGNET_PASSPHRASE is filtered so MCP servers can access
+    /// their own auth tokens (GITHUB_TOKEN, OPENAI_API_KEY, etc.)
     #[arg(long)]
-    pub no_env_filter: bool,
+    pub env_filter: bool,
 }
 
 pub fn run(args: ProxyArgs) -> Result<()> {
@@ -128,15 +121,14 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         None
     };
 
-    // Validate target before deriving target_uri
-    let parts: Vec<&str> = args.target.split_whitespace().collect();
-    if parts.is_empty() {
+    if args.target.trim().is_empty() {
         bail!("--target cannot be empty");
     }
-    let (cmd, cmd_args) = (parts[0], &parts[1..]);
 
     let target_uri = if args.target_uri.is_empty() {
-        format!("mcp://{}", parts.last().unwrap_or(&"local"))
+        // Use last whitespace-separated token as a best-effort URI
+        let last = args.target.split_whitespace().last().unwrap_or("local");
+        format!("mcp://{last}")
     } else {
         args.target_uri.clone()
     };
@@ -147,20 +139,27 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     eprintln!("[signet proxy] server key: {} (ephemeral)", server_pubkey_b64);
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 
-    let mut command = Command::new(cmd);
+    // Use sh -c to handle quoting, paths with spaces, and shell features.
+    let mut command = Command::new("sh");
     command
-        .args(cmd_args)
+        .args(["-c", &args.target])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
-    if !args.no_env_filter {
+    // Always remove Signet's own secrets. Optionally strip broader patterns.
+    for key in ALWAYS_FILTER {
+        command.env_remove(key);
+    }
+    if args.env_filter {
+        // Aggressive mode: also strip vars matching SECRET, PASSWORD, etc.
         command.env_clear();
         for (k, v) in std::env::vars() {
-            if !is_sensitive_env(&k) {
+            if !is_sensitive_env(&k) && !ALWAYS_FILTER.iter().any(|&f| k == f) {
                 command.env(&k, &v);
             }
         }
+        eprintln!("[signet proxy] env: aggressive filtering enabled");
     }
 
     let mut child = command

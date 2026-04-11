@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2026-04-09
+## [0.6.0] - 2026-04-11
 
 ### Added
 
@@ -38,11 +38,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `demo-delegation-full.mp4` — CLI + Dashboard combined video
 - `demo-delegation.svg` — animated SVG for README
 
+### Tests
+- **Python**: 17 delegation tests — sign_delegation/verify_delegation roundtrip, scope narrowing/widening, sign_authorized/verify_authorized v4 receipts, error handling
+- **CLI**: 7 delegation tests — delegate create/verify/sign/verify-auth end-to-end, output file, wrong root key rejection
+- All 369 tests passing (188 Rust core + 26 CLI + 155 Python)
+
+### Fixed
+- **@signet-auth/core**: Cast `clockSkewSecs` to `BigInt` for WASM `u64` parameter in `verifyAuthorized()`
+
 ### Changed
 - `Receipt` struct now has optional `authorization` field (backward compatible — v1/v2/v3 unaffected)
 - `sign.rs` refactored to use shared helpers (reduced ~30 lines of duplication)
 - Mixed wildcard scopes (e.g. `["*", "Bash"]`) now rejected at sign time
 - `sign_authorized()` validates signing key matches final delegate in chain
+- CI npm smoke test reduced to core-only install (reduces self-inflated download counts)
 
 ## [0.4.0] - 2026-04-06
 

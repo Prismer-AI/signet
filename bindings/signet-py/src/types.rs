@@ -11,6 +11,7 @@ pub struct PyAction {
 #[pymethods]
 impl PyAction {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (tool, params=None, target=String::new(), transport=String::from("stdio"), session=None, call_id=None, response_hash=None, trace_id=None, parent_receipt_id=None))]
     fn new(
         tool: String,

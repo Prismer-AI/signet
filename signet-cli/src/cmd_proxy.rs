@@ -432,6 +432,7 @@ fn extract_rpc_id(msg: &serde_json::Value) -> Option<String> {
 }
 
 /// Sign a tools/call request, store pending receipt for bilateral, inject into params.
+#[allow(clippy::too_many_arguments)]
 fn sign_tools_call(
     msg: &mut serde_json::Value,
     sk: &ed25519_dalek::SigningKey,

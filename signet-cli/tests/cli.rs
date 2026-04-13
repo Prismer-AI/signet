@@ -1451,3 +1451,74 @@ fn test_proxy_multiple_messages() {
     let response_count = stdout.matches("\"jsonrpc\"").count();
     assert_eq!(response_count, 3, "should get 3 responses, got {response_count}: {stdout}");
 }
+
+#[test]
+fn test_proxy_bilateral_cosigning() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "bilatkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"test"}}}"#, "\n",
+    );
+
+    let (_stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "bilatkey", input, &[]);
+
+    // Should sign the request
+    assert!(
+        stderr.contains("[signet proxy] signed: echo"),
+        "should sign request: {stderr}",
+    );
+
+    // Should bilateral co-sign the response
+    assert!(
+        stderr.contains("bilateral: echo") && stderr.contains("response co-signed"),
+        "should bilateral co-sign: {stderr}",
+    );
+
+    // Should log "1 signed, 1 bilateral"
+    assert!(
+        stderr.contains("1 signed, 1 bilateral"),
+        "should count bilateral: {stderr}",
+    );
+
+    // Audit should contain bilateral receipt (v3)
+    let audit_dir = dir.path().join("audit");
+    assert!(audit_dir.exists());
+    let files: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "jsonl").unwrap_or(false))
+        .collect();
+    let content = fs::read_to_string(files[0].path()).unwrap();
+    // Bilateral receipt has v:3 and agent_receipt embedded
+    assert!(content.contains("\"v\":3") || content.contains("\"v\": 3"), "should have v3 bilateral receipt: {content}");
+    assert!(content.contains("agent_receipt"), "should embed agent_receipt: {content}");
+}
+
+#[test]
+fn test_proxy_bilateral_multiple_calls() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "multibi", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read","arguments":{}}}"#, "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"write","arguments":{}}}"#, "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bash","arguments":{}}}"#, "\n",
+    );
+
+    let (_stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multibi", input, &[]);
+
+    // Should sign 3 and bilateral 3
+    assert!(
+        stderr.contains("3 signed, 3 bilateral"),
+        "should have 3 bilateral: {stderr}",
+    );
+}

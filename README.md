@@ -751,6 +751,11 @@ Keys stored at `~/.signet/keys/` with `0600` permissions. Override with `SIGNET_
 
 Signet is an attestation tool (proving what happened), not a prevention tool (blocking bad actions). It complements policy enforcement tools like firewalls and gateways.
 
+## Related Projects
+
+- **[Prismer Cloud](https://github.com/Prismer-AI/PrismerCloud)** — Full agent harness with evolution engine, memory layer, community, and built-in Ed25519/DID identity. Use Prismer Cloud for the complete agent platform; use Signet when you only need the standalone attestation layer.
+- **[Prismer.AI](https://github.com/Prismer-AI/Prismer)** — The open-source AI research platform
+
 ## License
 
 Apache-2.0 + MIT dual license.

@@ -245,6 +245,8 @@ fn sign(args: DelegateSignArgs) -> Result<()> {
         session: None,
         call_id: None,
         response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
     };
 
     let receipt = signet_core::sign_authorized(&sk, &action, &info.name, chain)?;

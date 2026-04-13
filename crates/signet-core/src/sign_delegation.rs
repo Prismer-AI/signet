@@ -135,6 +135,8 @@ pub fn sign_authorized(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     let signer = Signer {
@@ -482,6 +484,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
 
         // Sign with wrong_key (not the delegate in the chain)
@@ -489,5 +493,146 @@ mod tests {
         assert!(err
             .to_string()
             .contains("signing key does not match final delegate"));
+    }
+
+    #[test]
+    fn test_sign_authorized_preserves_trace_fields() {
+        let (root_key, _root_vk) = crate::identity::generate_keypair();
+        let (agent_key, _agent_vk) = crate::identity::generate_keypair();
+
+        let scope = Scope {
+            tools: vec!["*".to_string()],
+            targets: vec!["*".to_string()],
+            max_depth: 0,
+            expires: None,
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({"cmd": "ls"}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: Some("tr_delegated_wf".to_string()),
+            parent_receipt_id: Some("rec_prev_step".to_string()),
+        };
+
+        let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
+
+        // v4 receipt preserves trace fields
+        assert_eq!(receipt.v, 4);
+        assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_delegated_wf"));
+        assert_eq!(receipt.action.parent_receipt_id.as_deref(), Some("rec_prev_step"));
+
+        // Verify signature
+        assert!(crate::verify_delegation::verify_v4_signature_only(&receipt).is_ok());
+    }
+
+    #[test]
+    fn test_sign_authorized_trace_in_signature_scope() {
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, _) = crate::identity::generate_keypair();
+
+        let scope = Scope {
+            tools: vec!["*".to_string()],
+            targets: vec!["*".to_string()],
+            max_depth: 0,
+            expires: None,
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: Some("tr_legit".to_string()),
+            parent_receipt_id: None,
+        };
+
+        let mut receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
+
+        // Tamper with trace_id
+        receipt.action.trace_id = Some("tr_forged".to_string());
+
+        // Signature should fail
+        assert!(crate::verify_delegation::verify_v4_signature_only(&receipt).is_err());
+    }
+
+    #[test]
+    fn test_sign_authorized_full_verify_with_trace() {
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, _) = crate::identity::generate_keypair();
+
+        let scope = Scope {
+            tools: vec!["*".to_string()],
+            targets: vec!["*".to_string()],
+            max_depth: 0,
+            expires: None,
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({"cmd": "deploy"}),
+            params_hash: String::new(),
+            target: "mcp://prod".into(),
+            transport: "stdio".into(),
+            session: Some("sess_001".to_string()),
+            call_id: Some("call_001".to_string()),
+            response_hash: None,
+            trace_id: Some("tr_deploy_wf".to_string()),
+            parent_receipt_id: Some("rec_approval".to_string()),
+        };
+
+        let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
+
+        // Full verify with trusted root
+        let opts = crate::verify_delegation::AuthorizedVerifyOptions {
+            trusted_roots: vec![root_key.verifying_key()],
+            clock_skew_secs: 60,
+            max_chain_depth: 16,
+        };
+        let scope_result = crate::verify_delegation::verify_authorized(&receipt, &opts).unwrap();
+
+        // Trace fields preserved through full verification
+        assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_deploy_wf"));
+        assert_eq!(receipt.action.parent_receipt_id.as_deref(), Some("rec_approval"));
+        assert_eq!(scope_result.tools, vec!["*"]);
     }
 }

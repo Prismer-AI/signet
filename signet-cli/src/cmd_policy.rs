@@ -69,6 +69,8 @@ fn check(args: CheckArgs) -> Result<()> {
         session: None,
         call_id: None,
         response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
     };
 
     let eval = signet_core::evaluate_policy(&action, &args.agent, &policy, None);

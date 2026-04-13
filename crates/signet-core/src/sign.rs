@@ -60,6 +60,8 @@ pub fn sign(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     // 3. Build signer
@@ -141,6 +143,8 @@ pub fn sign_with_policy(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     let signer = Signer {
@@ -202,6 +206,8 @@ pub fn sign_compound(
         session: action.session.clone(),
         call_id: action.call_id.clone(),
         response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
     // 2. Hash response content
@@ -347,6 +353,8 @@ mod tests {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         };
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
         assert_eq!(
@@ -514,6 +522,175 @@ rules: []
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
         assert!(receipt.policy.is_none());
         assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    // ─── trace correlation tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_sign_with_trace_id() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_workflow_001".to_string());
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert_eq!(receipt.action.trace_id, Some("tr_workflow_001".to_string()));
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_with_parent_receipt_id() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.parent_receipt_id = Some("rec_parent_123".to_string());
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert_eq!(receipt.action.parent_receipt_id, Some("rec_parent_123".to_string()));
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_with_both_trace_fields() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_wf".to_string());
+        action.parent_receipt_id = Some("rec_prev".to_string());
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert_eq!(receipt.action.trace_id, Some("tr_wf".to_string()));
+        assert_eq!(receipt.action.parent_receipt_id, Some("rec_prev".to_string()));
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_trace_fields_none_by_default() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert!(receipt.action.trace_id.is_none());
+        assert!(receipt.action.parent_receipt_id.is_none());
+    }
+
+    #[test]
+    fn test_trace_id_in_signature_scope() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_legit".to_string());
+        let mut receipt = sign(&key, &action, "agent", "owner").unwrap();
+        // Tamper with trace_id
+        receipt.action.trace_id = Some("tr_forged".to_string());
+        assert!(crate::verify::verify(&receipt, &vk).is_err());
+    }
+
+    #[test]
+    fn test_parent_receipt_id_in_signature_scope() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.parent_receipt_id = Some("rec_real".to_string());
+        let mut receipt = sign(&key, &action, "agent", "owner").unwrap();
+        // Tamper with parent_receipt_id
+        receipt.action.parent_receipt_id = Some("rec_fake".to_string());
+        assert!(crate::verify::verify(&receipt, &vk).is_err());
+    }
+
+    #[test]
+    fn test_trace_fields_absent_in_json_when_none() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(!json.contains("trace_id"));
+        assert!(!json.contains("parent_receipt_id"));
+    }
+
+    #[test]
+    fn test_trace_fields_present_in_json_when_set() {
+        let (key, _) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_test".to_string());
+        action.parent_receipt_id = Some("rec_p".to_string());
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(json.contains("tr_test"));
+        assert!(json.contains("rec_p"));
+    }
+
+    #[test]
+    fn test_workflow_chain_sign_verify() {
+        let (key, vk) = generate_keypair();
+
+        // Workflow start
+        let mut start_action = test_action();
+        start_action.tool = "_workflow_start".to_string();
+        start_action.trace_id = Some("tr_wf001".to_string());
+        let start = sign(&key, &start_action, "agent", "owner").unwrap();
+
+        // Child 1
+        let mut child1_action = test_action();
+        child1_action.trace_id = Some("tr_wf001".to_string());
+        child1_action.parent_receipt_id = Some(start.id.clone());
+        let child1 = sign(&key, &child1_action, "agent", "owner").unwrap();
+
+        // Child 2
+        let mut child2_action = test_action();
+        child2_action.trace_id = Some("tr_wf001".to_string());
+        child2_action.parent_receipt_id = Some(child1.id.clone());
+        let child2 = sign(&key, &child2_action, "agent", "owner").unwrap();
+
+        // All verify
+        assert!(crate::verify::verify(&start, &vk).is_ok());
+        assert!(crate::verify::verify(&child1, &vk).is_ok());
+        assert!(crate::verify::verify(&child2, &vk).is_ok());
+
+        // Chain intact
+        assert_eq!(child1.action.parent_receipt_id.as_deref(), Some(start.id.as_str()));
+        assert_eq!(child2.action.parent_receipt_id.as_deref(), Some(child1.id.as_str()));
+        assert_eq!(child1.action.trace_id.as_deref(), Some("tr_wf001"));
+        assert_eq!(child2.action.trace_id.as_deref(), Some("tr_wf001"));
+    }
+
+    #[test]
+    fn test_bilateral_preserves_trace_fields() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_bilateral".to_string());
+        action.parent_receipt_id = Some("rec_prev".to_string());
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"text": "ok"});
+        // Use a timestamp after the agent's ts to satisfy ordering check
+        let server_ts = (chrono::Utc::now() + chrono::Duration::seconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral = sign_bilateral(
+            &server_key, &agent_receipt, &response, "server", &server_ts,
+        ).unwrap();
+        // Trace fields survive in embedded agent receipt
+        assert_eq!(bilateral.agent_receipt.action.trace_id.as_deref(), Some("tr_bilateral"));
+        assert_eq!(bilateral.agent_receipt.action.parent_receipt_id.as_deref(), Some("rec_prev"));
+        assert!(crate::verify::verify_bilateral(&bilateral, &server_vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_with_policy_preserves_trace_fields() {
+        let (key, vk) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_policy".to_string());
+        let policy = crate::policy_load::parse_policy_yaml(
+            "version: 1\nname: trace-test\nrules: []\n",
+        ).unwrap();
+        let (receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_policy"));
+        assert!(receipt.policy.is_some());
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_compound_preserves_trace_fields() {
+        let (key, _) = generate_keypair();
+        let mut action = test_action();
+        action.trace_id = Some("tr_compound".to_string());
+        let response = json!({"text": "ok"});
+        let receipt = sign_compound(
+            &key, &action, &response, "agent", "owner",
+            "2026-04-11T10:00:00.000Z", "2026-04-11T10:00:00.150Z",
+        ).unwrap();
+        assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_compound"));
     }
 
     #[test]

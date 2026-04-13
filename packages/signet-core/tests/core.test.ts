@@ -265,3 +265,111 @@ rules:
     );
   });
 });
+
+describe('signed trace correlation', () => {
+  it('trace_id is included in signed receipt', () => {
+    const kp = generateKeypair();
+    const action: SignetAction = {
+      tool: 'Bash',
+      params: { cmd: 'ls' },
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      trace_id: 'tr_test123',
+    };
+    const receipt = sign(kp.secretKey, action, 'agent', 'owner');
+    assert.strictEqual(receipt.action.trace_id, 'tr_test123');
+    assert.strictEqual(verify(receipt, kp.publicKey), true);
+  });
+
+  it('parent_receipt_id is included in signed receipt', () => {
+    const kp = generateKeypair();
+    const action: SignetAction = {
+      tool: 'Write',
+      params: {},
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      parent_receipt_id: 'rec_parent',
+    };
+    const receipt = sign(kp.secretKey, action, 'agent', 'owner');
+    assert.strictEqual(receipt.action.parent_receipt_id, 'rec_parent');
+    assert.strictEqual(verify(receipt, kp.publicKey), true);
+  });
+
+  it('trace_id tampering invalidates signature', () => {
+    const kp = generateKeypair();
+    const action: SignetAction = {
+      tool: 'Bash',
+      params: {},
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      trace_id: 'tr_legit',
+    };
+    const receipt = sign(kp.secretKey, action, 'agent', 'owner');
+    receipt.action.trace_id = 'tr_forged';
+    assert.strictEqual(verify(receipt, kp.publicKey), false);
+  });
+
+  it('trace fields absent when not set', () => {
+    const kp = generateKeypair();
+    const action: SignetAction = {
+      tool: 'Read',
+      params: {},
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+    };
+    const receipt = sign(kp.secretKey, action, 'agent', 'owner');
+    assert.strictEqual(receipt.action.trace_id, undefined);
+    assert.strictEqual(receipt.action.parent_receipt_id, undefined);
+    assert.strictEqual(verify(receipt, kp.publicKey), true);
+  });
+
+  it('workflow start + child calls with trace chain', () => {
+    const kp = generateKeypair();
+
+    // Workflow start
+    const startReceipt = sign(kp.secretKey, {
+      tool: '_workflow_start',
+      params: { skill: 'create-flask-app' },
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      trace_id: 'tr_wf001',
+    }, 'agent', 'owner');
+
+    // Child 1 references start
+    const child1 = sign(kp.secretKey, {
+      tool: 'Bash',
+      params: { cmd: 'pip install flask' },
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      trace_id: 'tr_wf001',
+      parent_receipt_id: startReceipt.id,
+    }, 'agent', 'owner');
+
+    // Child 2 references child 1
+    const child2 = sign(kp.secretKey, {
+      tool: 'Write',
+      params: { path: 'app.py' },
+      params_hash: '',
+      target: 'mcp://local',
+      transport: 'stdio',
+      trace_id: 'tr_wf001',
+      parent_receipt_id: child1.id,
+    }, 'agent', 'owner');
+
+    // All verifiable
+    assert.strictEqual(verify(startReceipt, kp.publicKey), true);
+    assert.strictEqual(verify(child1, kp.publicKey), true);
+    assert.strictEqual(verify(child2, kp.publicKey), true);
+
+    // Chain intact
+    assert.strictEqual(child1.action.trace_id, 'tr_wf001');
+    assert.strictEqual(child1.action.parent_receipt_id, startReceipt.id);
+    assert.strictEqual(child2.action.parent_receipt_id, child1.id);
+  });
+});

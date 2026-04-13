@@ -15,6 +15,8 @@ export interface SignetAction {
   session?: string;
   call_id?: string;
   response_hash?: string;
+  trace_id?: string;
+  parent_receipt_id?: string;
 }
 
 export interface SignetSigner {

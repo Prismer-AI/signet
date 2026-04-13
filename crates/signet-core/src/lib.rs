@@ -63,6 +63,8 @@ pub(crate) mod test_helpers {
             session: None,
             call_id: None,
             response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
         }
     }
 }

@@ -33,13 +33,11 @@ TypeScript 包：
   <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ 观看：Signet 如何签名和验证 AI Agent 工具调用（2 分钟）</a></sub>
 </p>
 
-**你的 AI Agent 刚调用了一个工具。你能证明它到底做了什么吗？**
+**AI Agent 已经能调用 Bash、GitHub、云 API，甚至支付系统。但大多数团队仍然无法证明：Agent 当时到底发了什么、是谁授权它这么做、以及执行前检查的是哪条策略。**
 
-日志只能告诉你事后发生了什么；Signet 让你证明 Agent 当时到底发出了什么。
+Signet 把 Agent 行为变成可携带、可校验、可离线验证的密码学证据。
 
-每个 Agent 都有自己的 Ed25519 身份，每次工具调用都会被签名，并写入哈希链审计日志。
-
-客户端和服务端都可以用 3 行代码在离线或执行前验证收据，所以重放、篡改、伪造、过期或发错目标的请求，会在被信任之前先被识别出来。
+每个 Agent 都有自己的 Ed25519 身份。每次工具调用都可以被签名、写入哈希链审计日志、在离线或执行前验证、由服务端联合签名、附带 delegation chain，并在需要时绑定到一条策略决策上。
 
 如果 Signet 对你有帮助，[点个 Star](https://github.com/Prismer-AI/signet) 让更多人发现它。
 
@@ -53,14 +51,27 @@ TypeScript 包：
   <sub>这个 demo 展示签名与审计收据。也可以查看 <a href="./demo-mcp.svg">MCP 流程示意图</a>。</sub>
 </p>
 
-## 为什么是 Signet
+## Signet 增加了什么
 
 Signet 为 Agent 行为增加一层轻量但可验证的信任层：
 
-- **签名** — 用 Agent 的密码学密钥签名每次工具调用
-- **审计** — 仅追加、哈希链接的本地日志
-- **验证** — 离线验证任意操作收据，无需网络
-- **集成** — 可接入 Claude Code、Codex CLI、MCP 客户端与服务端、Python 框架和 Vercel AI SDK
+- **签名**：用 Agent 的密码学密钥签名每次工具调用
+- **验证**：在离线或执行边界验证请求，再决定是否信任
+- **透明代理**：用 `signet proxy` 拦在任意 MCP Server 前面，无需改动 Agent 或 Server 代码
+- **联合签名**：当你控制服务端时，用双边收据记录"Agent 发了什么"以及"服务端返回了什么"
+- **追踪链路**：用 `trace_id` 和 `parent_receipt_id` 把多步工作流的收据串成因果链
+- **授权证明**：用 delegation chain 证明是谁授权了这个 Agent
+- **策略证明**：当 YAML 策略满足时，把签过名的 `PolicyAttestation` 写进收据
+- **本地可视化**：通过仅追加的审计日志和 dashboard 查看全链路记录，无需托管控制面
+
+## 0.9 有什么新东西
+
+- **MCP 透明代理**：`signet proxy --target <cmd> --key <name>` — 把 Signet 以 stdio 代理的形式接在任意 MCP Server 前面。Agent 和 Server 无需任何改动。对每个 `tools/call` 自动签名，并对 Server 响应生成双边收据。
+- **链路追踪**：在 `Action` 上新增 `trace_id` 和 `parent_receipt_id` 字段，把多步工作流中的收据串成因果链。两个字段都纳入签名范围 — 篡改任意一个，签名即失效。
+- **策略引擎**：`signet sign --policy policy.yaml` 会在签名前先执行策略检查，并把决策绑定进收据。Proxy 模式同样支持 `--policy`，被拒绝的请求不会到达 Server。
+- **委托链**：`signet delegate ...` 生成 v4 收据，证明是谁授权了这个 Agent，以及授予了什么 scope。
+- **本地 dashboard**：`signet dashboard` 展示时间线、链完整性、签名健康度，以及 delegated / direct 的分布。
+- **更完整的集成面**：官方 Claude Code 插件、Codex 插件、MCP 中间件、Python SDK 和 Vercel AI SDK callbacks。
 
 ## 30 秒体验
 
@@ -78,12 +89,13 @@ assert agent.verify(receipt)
 print(receipt.id)
 ```
 
-如果你是第一次接触 Signet，建议先从下面四条入口里选一条：
+如果你是第一次接触 Signet，建议先从下面五条入口里选一条：
 
 ## 选择你的入口
 
 - [**Claude Code**](#claude-code-plugin)：最适合最快跑通第一次体验。在 Claude Code 中运行 `/plugin install signet@claude-plugins-official`。5 分钟后你会得到自动签名的工具调用，以及写入 `~/.signet/audit/` 的本地审计日志。
 - [**Codex CLI**](#codex-plugin)：最适合给 Codex 的 Bash 工具调用补签名。把 `plugins/codex/` 复制到 `~/.codex/plugins/signet`，再加一个 `PostToolUse` hook。5 分钟后你会得到写入同一条 Signet 审计轨迹的 Codex Bash 行为记录。
+- [**Python SDK**](#python-sdk)：最适合把收据接到 LangGraph、LlamaIndex、OpenAI Agents、CrewAI 或你自己的工具执行器里。先从 `SigningAgent.create(...)` 开始，再按需接入框架 hooks。
 - [**MCP 客户端**](#mcp-client-integration)：最适合你已经控制 MCP client 或 transport 的情况。用 `new SigningTransport(inner, secretKey, "my-agent")` 包住 transport。5 分钟后你会得到带 `params._meta._signet` 收据的签名 `tools/call` 请求。
 - [**MCP 服务端**](#mcp-server-verification)：最适合你希望在执行前做验证。先在处理函数里调用 `verifyRequest(request, {...})`。5 分钟后你会得到发生在执行边界的服务端校验：签名者、freshness、target binding，以及 tool/params match。
 
@@ -107,19 +119,94 @@ npm run execution-boundary-demo
 
 demo 源码见 [examples/mcp-agent/demo-execution-boundary.mjs](./examples/mcp-agent/demo-execution-boundary.mjs)。
 
+<a id="delegation-chains"></a>
+## 委托链：这个 Agent 是谁授权的？
+
+Signet 收据证明的是 **发生了什么**。委托链证明的是 **谁允许它发生**。
+
+一个根身份（人或组织）可以用密码学方式把受限权限委托给 Agent。权限只能收窄，不能放大。Agent 生成的 v4 收据会携带完整的授权证明。
+
+```text
+Owner (alice) → Agent A (tools: [Bash, Read], max_depth: 0)
+                    ↓
+              v4 收据：tool=Bash，authorization.chain 证明 alice → Agent A
+```
+
+```bash
+# 创建 delegation token
+signet delegate create --from alice --to deploy-bot --to-name deploy-bot \
+    --tools Bash,Read --targets "mcp://github" --max-depth 0
+
+# 带授权证明签名（v4 收据）
+signet delegate sign --key deploy-bot --tool Bash \
+    --params '{"cmd":"git pull"}' --target "mcp://github" --chain chain.json
+
+# 验证：签名 + chain + scope + root trust
+signet delegate verify-auth receipt.json --trusted-roots alice
+```
+
+或者在 Python 中：
+
+```python
+from signet_auth import sign_delegation, sign_authorized, verify_authorized
+
+# delegation API 接收 scope、chain、receipt 的 JSON 字符串
+token_json = sign_delegation(root_key_b64, "alice", agent_pubkey_b64, "bot", scope_json)
+receipt_json = sign_authorized(agent_key_b64, action_json, "bot", f"[{token_json}]")
+scope_json = verify_authorized(receipt_json, [root_pubkey_b64])
+```
+
+<p align="center">
+  <img src="demo-delegation.svg" alt="Delegation chain demo" width="820">
+</p>
+
+## 策略证明：这次操作当时被允许了吗？
+
+Signet 可以在签名前执行 YAML 策略检查。若动作被允许，签名收据会携带一个 `PolicyAttestation`，证明当时生效的是哪条策略哈希、命中了哪条规则、最终决策是什么。
+
+```yaml
+version: 1
+name: production-agents
+default_action: deny
+rules:
+  - id: allow-read
+    match:
+      tool: Read
+    action: allow
+  - id: deny-rm-rf
+    match:
+      tool: Bash
+      params:
+        command:
+          contains: "rm -rf"
+    action: deny
+    reason: destructive command
+```
+
+```bash
+signet policy validate policy.yaml
+signet policy check policy.yaml --tool Bash --params '{"command":"rm -rf /"}'
+
+signet sign --key deploy-bot --tool Read \
+    --params '{"path":"README.md"}' --target "mcp://github" --policy policy.yaml
+```
+
+被拒绝的动作会在生成收据前直接失败。被允许的动作会产生一个收据，且它的签名 payload 会证明这次策略决策确实发生过。
+
 ## 什么时候该用 Signet
 
-- 你需要为 coding agent、MCP 工具调用或 CI 自动化补上一条审计轨迹
-- 你希望在事故发生后，证明到底是哪个 Agent 发起了哪个动作
+- 你需要为 coding agent、MCP 工具调用或 CI 自动化补上一条防篡改审计轨迹
+- 你希望在事故发生后，证明到底是哪个 Agent 发起了哪个动作，以及是谁授权它这么做
 - 你需要可离线验证的收据，而不是依赖某个托管平台查看日志
-- 你想为工具调用补上签名证据，但不想额外引入 proxy 或 gateway
+- 你想在签名前做轻量策略检查，但不想额外引入 proxy
 
 ## Signet 是什么，不是什么
 
-- **Signet 是** 面向 Agent 行为的证明层：签名、审计、验证
+- **Signet 是** 面向 Agent 行为的信任层：签名、审计、验证、委托链和策略证明
 - **Signet 是** 可以嵌入现有 Agent 栈的 SDK、插件和 MCP 中间件
-- **Signet 不是** 策略引擎、防火墙或动作拦截器
-- **Signet 不是** gateway 的替代品；它与 prevention / enforcement 工具互补
+- **Signet 可以** 在执行前拒绝未签名、过期、重放或发错目标的 MCP 请求
+- **Signet 可以** 在你提供策略文件时，在签名前直接拒绝动作
+- **Signet 不是** 托管 gateway、常驻控制面，也不是 sandboxing 或最小权限设计的替代品
 
 ## 安装
 
@@ -305,7 +392,8 @@ npx @signet-auth/mcp-tools
 
 可用工具：`signet_generate_keypair`、`signet_sign`、`signet_verify`、`signet_content_hash`。
 
-### Python（LangChain / CrewAI / AutoGen + 6 more）
+<a id="python-sdk"></a>
+### Python SDK（LangChain / CrewAI / AutoGen + 6 more）
 
 ```bash
 pip install signet-auth
@@ -494,6 +582,7 @@ assert bilateral.v == 3  # v3 = 双边收据
 
 ```typescript
 import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
 import { generateKeypair } from "@signet-auth/core";
 import { createSignetCallbacks } from "@signet-auth/vercel-ai";
 
@@ -501,7 +590,7 @@ const { secretKey } = generateKeypair();
 const callbacks = createSignetCallbacks(secretKey, "my-agent");
 
 const result = await generateText({
-  model: openai("gpt-4"),
+  model: openai("gpt-4o"),
   tools: { myTool },
   ...callbacks,
   prompt: "...",
@@ -524,11 +613,11 @@ SigningTransport（包装任意 MCP transport）
     +---> 将请求原样转发给 MCP Server
 ```
 
-仅在 Agent 端。MCP Server 无需任何修改。
+客户端侧签名本身不要求服务端改动。如果你也控制服务端，可以再接入 `verifyRequest()`，并在需要时配合 `signResponse()` 实现执行边界验证与双边收据。
 
 ## 操作收据
 
-每次工具调用都会产生一个签名收据：
+每次工具调用都会先产生一个签名收据。更高版本的收据会继续增加服务端联合签名（v3）和授权链（v4）：
 
 ```json
 {
@@ -566,6 +655,7 @@ SigningTransport（包装任意 MCP transport）
 | `signet sign --hash-only` | 仅存储参数哈希（不存原始参数） |
 | `signet sign --output <file>` | 将收据写入文件 |
 | `signet sign --no-log` | 跳过审计日志追加 |
+| `signet sign --policy <path>` | 签名前执行策略检查，并把 `PolicyAttestation` 写入收据 |
 | `signet verify <receipt.json> --pubkey <name>` | 验证收据签名 |
 | `signet verify --chain` | 验证审计日志哈希链完整性 |
 | `signet audit` | 列出最近操作 |
@@ -573,10 +663,40 @@ SigningTransport（包装任意 MCP transport）
 | `signet audit --tool <substring>` | 按工具名过滤 |
 | `signet audit --verify` | 验证所有收据签名 |
 | `signet audit --export <file>` | 导出记录为 JSON |
+| `signet delegate create ...` | 为另一个 Agent 创建带 scope 的 delegation token |
+| `signet delegate sign ... --chain <file>` | 带授权证明签名，并生成 v4 收据 |
+| `signet delegate verify-auth <receipt> --trusted-roots <name>` | 验证授权链、scope 和可信根 |
+| `signet policy validate <path>` | 校验策略语法并输出策略哈希 |
+| `signet policy check <path> --tool <t> --params <json>` | dry-run 某个动作是否会被允许 |
+| `signet proxy --target <cmd> --key <name>` | 以 MCP stdio 代理模式运行，透明签名所有工具调用 |
+| `signet proxy --target <cmd> --key <n> --policy <path>` | 代理模式 + 签名前策略检查 |
 | `signet claude install` | 安装 Claude Code 插件（PostToolUse 签名 hook） |
 | `signet claude uninstall` | 卸载 Claude Code 插件 |
+| `signet dashboard` | 在浏览器中打开本地审计 dashboard |
 
 密码短语通过交互提示输入，或通过 `SIGNET_PASSPHRASE` 环境变量设置（用于 CI）。
+
+## 审计 Dashboard
+
+运行 `signet dashboard` 打开本地 Web UI 查看审计日志。无需账号，无需联网，直接查看本地 receipts。
+
+<p align="center">
+  <img src="dashboard-timeline.png" alt="Signet audit dashboard — timeline 视图展示每次签过名的工具调用" width="820">
+</p>
+
+<p align="center">
+  <sub>Timeline 视图：展示每次工具调用的 signer、tool、target 和 receipt ID，并支持按时间、工具、签名者过滤。</sub>
+</p>
+
+**Chain Integrity** 标签页会验证整条审计日志的 SHA-256 哈希链，并精确指出链断裂发生在哪个文件、哪一行：
+
+<p align="center">
+  <img src="dashboard-chain-integrity.png" alt="Signet chain integrity check — 在 line 189 检测到断点" width="820">
+</p>
+
+<p align="center">
+  <sub>链在第 189 行断裂：界面会直接显示 expected / actual hash。这才是“append-only”在实际里的样子。</sub>
+</p>
 
 ## 文档
 
@@ -652,25 +772,25 @@ maturin develop
 ### 测试
 
 ```bash
-# Rust 测试（95 个）
+# Rust 测试
 cargo test --workspace
 
-# Python 测试（160 个）
+# Python 测试
 cd bindings/signet-py && pytest tests/ -v
 
-# WASM 往返测试（8 个）
+# WASM 往返测试
 node examples/wasm-roundtrip/test.mjs
 
-# TypeScript 测试（26 个）
+# TypeScript 测试
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
 
-# Vercel AI SDK 测试（5 个）
+# Vercel AI SDK 测试
 cd packages/signet-vercel-ai && npm test
 
-# 插件测试（54 个）
+# 插件测试
 cd plugins/claude-code && npm test
 cd plugins/codex && npm test
 ```
@@ -694,7 +814,7 @@ cd plugins/codex && npm test
 - MCP Server 是否执行了操作（使用双边收据 `signResponse()` 实现服务端联合签名 — 已在 v0.4 发布）
 - signer.owner 是否真正控制该密钥（计划中：身份注册中心）
 
-Signet 是证明工具（证明发生了什么），不是防护工具（阻止坏操作）。它与策略引擎、防火墙等工具互补。
+Signet 首先是证据层：它证明到底发生了什么。它也可以在签名边界和执行边界执行检查，但它不能替代 sandboxing、最小权限设计，或在高风险动作里的人类审批。
 
 ## 许可证
 

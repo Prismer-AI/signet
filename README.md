@@ -46,13 +46,11 @@
   <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Walkthrough: signing, audit log, and verification</a> · <a href="https://www.youtube.com/watch?v=PQnZC594qZc">▶ Demo: execution boundary &amp; MCP integration</a></sub>
 </p>
 
-**Your AI agent just called a tool. Can you prove what it did?**
+**AI agents can already call Bash, GitHub, cloud APIs, and payment rails. Most teams still cannot prove exactly what the agent sent, who authorized it, or which policy was checked before it ran.**
 
-Logs tell you what happened later; Signet lets you prove what the agent actually sent.
+Signet turns agent actions into portable, cryptographically verifiable evidence.
 
-Each agent gets an Ed25519 identity, every tool call is signed, and a hash-chained audit trail records the receipt.
-
-Clients and servers can verify receipts offline or before execution in 3 lines, so replayed, tampered, forged, stale, or mis-targeted requests get caught before they are trusted.
+Each agent gets an Ed25519 identity. Every tool call can be signed, appended to a hash-chained audit trail, verified offline or before execution, co-signed by the server, bound to a delegation chain, and optionally bound to a policy decision.
 
 If Signet is useful to you, [star this repo](https://github.com/Prismer-AI/signet) to help more teams find it.
 
@@ -66,14 +64,27 @@ The video above shows the full flow. The SVG below shows the CLI signing details
   <sub>This first demo shows signing + audit receipts. See also the <a href="./demo-mcp.svg">MCP flow diagram</a>.</sub>
 </p>
 
-## Why Signet
+## What Signet Adds
 
 Signet adds a lightweight trust layer for agent actions:
 
 - **Sign** every tool call with the agent's cryptographic key
-- **Audit** what happened with an append-only, hash-chained local log
-- **Verify** any action receipt offline, no network needed
-- **Integrate** with Claude Code, Codex CLI, MCP clients and servers, Python frameworks, and Vercel AI SDK
+- **Verify** requests offline or at the execution boundary before they are trusted
+- **Proxy** any MCP server transparently — sign and co-sign without touching agent or server code
+- **Co-sign** server responses with bilateral receipts when you control both sides
+- **Trace** multi-step workflows by linking receipts with `trace_id` and `parent_receipt_id`
+- **Authorize** agents with scoped delegation chains that prove who allowed the action
+- **Attest policy** by embedding a signed `PolicyAttestation` when a YAML policy is satisfied
+- **Inspect locally** with an append-only audit log and dashboard, no hosted control plane required
+
+## What's New In 0.9
+
+- **MCP proxy**: `signet proxy --target <cmd> --key <name>` — drop Signet in front of any MCP server as a transparent stdio proxy. No changes to the agent or server required. Signs every `tools/call` and co-signs server responses with bilateral receipts.
+- **Trace correlation**: `trace_id` and `parent_receipt_id` fields on `Action` link receipts across multi-step workflows into a causal chain. Both fields are part of the signed payload — tampering invalidates the signature.
+- **Policy engine**: `signet sign --policy policy.yaml` enforces policy before signing and binds the decision into the receipt. The proxy also respects `--policy`, blocking denied calls before they reach the server.
+- **Delegation chains**: `signet delegate ...` produces v4 receipts that prove who authorized the agent and what scope it had.
+- **Local dashboard**: `signet dashboard` shows timeline, chain integrity, signature health, and delegated vs direct activity.
+- **Broader integrations**: official Claude Code plugin, Codex plugin, MCP middleware, Python SDK, and Vercel AI SDK callbacks.
 
 ## Try It In 30 Seconds
 
@@ -91,12 +102,13 @@ assert agent.verify(receipt)
 print(receipt.id)
 ```
 
-If you're new, start with one of these four paths:
+If you're new, start with one of these five paths:
 
 ## Choose Your Path
 
 - [**Claude Code**](#claude-code-plugin): Best for the fastest first run in a coding agent. Run `/plugin install signet@claude-plugins-official` in Claude Code. In 5 minutes you'll have signed tool calls and a local audit log at `~/.signet/audit/`.
 - [**Codex CLI**](#codex-plugin): Best for signing Bash tool calls in Codex. Copy `plugins/codex/` into `~/.codex/plugins/signet` and add one `PostToolUse` hook. In 5 minutes you'll have signed Bash actions in Codex using the same audit trail.
+- [**Python SDK**](#python-sdk): Best if you want receipts inside LangGraph, LlamaIndex, OpenAI Agents, CrewAI, or your own tool runner. Start with `SigningAgent.create(...)` and add framework hooks only where you need them.
 - [**MCP clients**](#mcp-client-integration): Best if you control an MCP client or transport. Wrap your transport with `new SigningTransport(inner, secretKey, "my-agent")`. In 5 minutes you'll have signed `tools/call` requests with receipts in `params._meta._signet`.
 - [**MCP servers**](#mcp-server-verification): Best if you want verification before execution. Call `verifyRequest(request, {...})` in your tool handler. In 5 minutes you'll have signer, freshness, target-binding, and tool/params checks at the execution boundary.
 
@@ -161,19 +173,53 @@ scope_json = verify_authorized(receipt_json, [root_pubkey_b64])
   <img src="demo-delegation.svg" alt="Delegation chain demo" width="820">
 </p>
 
+## Policy Attestations: Was This Allowed?
+
+Signet can enforce a YAML policy before signing. When an action is allowed, the signed receipt carries a `PolicyAttestation` proving which policy hash, rule, and decision were in force.
+
+```yaml
+version: 1
+name: production-agents
+default_action: deny
+rules:
+  - id: allow-read
+    match:
+      tool: Read
+    action: allow
+  - id: deny-rm-rf
+    match:
+      tool: Bash
+      params:
+        command:
+          contains: "rm -rf"
+    action: deny
+    reason: destructive command
+```
+
+```bash
+signet policy validate policy.yaml
+signet policy check policy.yaml --tool Bash --params '{"command":"rm -rf /"}'
+
+signet sign --key deploy-bot --tool Read \
+    --params '{"path":"README.md"}' --target "mcp://github" --policy policy.yaml
+```
+
+Denied actions fail before a receipt is produced. Allowed actions produce a receipt whose signed payload proves the policy decision.
+
 ## When Teams Reach For Signet
 
-- You need an audit trail for coding agents, MCP tools, or CI automation
-- You want to prove which agent requested an action after an incident
+- You need a tamper-evident audit trail for coding agents, MCP tools, or CI automation
+- You want to prove which agent requested an action and who authorized it after an incident
 - You need receipts that can be verified offline without depending on a hosted service
-- You want signed tool-call evidence without adding a proxy or gateway to your stack
+- You want lightweight policy enforcement before signing without adding a proxy to your stack
 
 ## What Signet Is And Isn't
 
-- **Signet is** an attestation layer for agent actions: sign, audit, and verify
+- **Signet is** a trust layer for agent actions: signing, audit, verification, delegation, and policy attestation
 - **Signet is** designed to fit into existing agent stacks with SDKs, plugins, and MCP middleware
-- **Signet is not** a policy engine, firewall, or action blocker
-- **Signet is not** a replacement for gateways; it complements prevention and enforcement tools
+- **Signet can** reject unsigned, stale, replayed, or mis-targeted MCP requests before execution
+- **Signet can** deny actions before signing when you provide a policy file
+- **Signet is not** a hosted gateway, always-on control plane, or replacement for sandboxing and least-privilege design
 
 ## Install
 
@@ -192,6 +238,9 @@ npm install @signet-auth/mcp-server
 
 # TypeScript (Vercel AI SDK middleware)
 npm install @signet-auth/vercel-ai
+
+# TypeScript (standalone MCP signing server)
+npx @signet-auth/mcp-tools
 ```
 
 ## Quick Start
@@ -330,6 +379,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 ```typescript
 import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
 import { generateKeypair } from "@signet-auth/core";
 import { createSignetCallbacks } from "@signet-auth/vercel-ai";
 
@@ -337,7 +387,7 @@ const { secretKey } = generateKeypair();
 const callbacks = createSignetCallbacks(secretKey, "my-agent");
 
 const result = await generateText({
-  model: openai("gpt-4"),
+  model: openai("gpt-4o"),
   tools: { myTool },
   ...callbacks,
   prompt: "...",
@@ -380,7 +430,8 @@ npx @signet-auth/mcp-tools
 
 Available tools: `signet_generate_keypair`, `signet_sign`, `signet_verify`, `signet_content_hash`.
 
-### Python (LangChain / CrewAI / AutoGen + 6 more)
+<a id="python-sdk"></a>
+### Python SDK (LangChain / CrewAI / AutoGen + 6 more)
 
 ```bash
 pip install signet-auth
@@ -578,11 +629,11 @@ SigningTransport (wraps any MCP transport)
     +---> Forwards request to MCP server (unchanged)
 ```
 
-Agent-side only. MCP servers don't need to change.
+Client-side signing works without changing the server. If you control the server too, add `verifyRequest()` and optional `signResponse()` for execution-boundary verification and bilateral receipts.
 
 ## Action Receipt
 
-Every tool call produces a signed receipt:
+Every tool call starts with a signed receipt. Higher receipt versions add server co-signing (v3) and authorization chains (v4):
 
 ```json
 {
@@ -620,6 +671,7 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet sign --hash-only` | Store only params hash (not raw params) |
 | `signet sign --output <file>` | Write receipt to file instead of stdout |
 | `signet sign --no-log` | Skip audit log append |
+| `signet sign --policy <path>` | Enforce policy before signing and embed `PolicyAttestation` |
 | `signet verify <receipt.json> --pubkey <name>` | Verify a receipt signature |
 | `signet verify --chain` | Verify audit log hash chain integrity |
 | `signet audit` | List recent actions |
@@ -627,6 +679,13 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --tool <substring>` | Filter by tool name |
 | `signet audit --verify` | Verify all receipt signatures |
 | `signet audit --export <file>` | Export records as JSON |
+| `signet delegate create ...` | Create a scoped delegation token for another agent |
+| `signet delegate sign ... --chain <file>` | Sign with delegation proof and produce a v4 receipt |
+| `signet delegate verify-auth <receipt> --trusted-roots <name>` | Verify authorization chain, scope, and trusted root |
+| `signet policy validate <path>` | Validate policy syntax and print its hash |
+| `signet policy check <path> --tool <t> --params <json>` | Dry-run whether an action would be allowed |
+| `signet proxy --target <cmd> --key <name>` | Run as MCP stdio proxy — sign all tool calls transparently |
+| `signet proxy --target <cmd> --key <n> --policy <path>` | Proxy with policy enforcement before signing |
 | `signet claude install` | Install Claude Code plugin (PostToolUse signing hook) |
 | `signet claude uninstall` | Remove Claude Code plugin |
 | `signet dashboard` | Open local audit dashboard in browser |
@@ -727,26 +786,26 @@ maturin develop
 ### Test
 
 ```bash
-# Rust tests (95 tests)
+# Rust tests
 cargo test --workspace
 
-# Python tests (160 tests)
+# Python tests
 cd bindings/signet-py && pytest tests/ -v
 
-# WASM roundtrip (8 tests)
+# WASM roundtrip
 node examples/wasm-roundtrip/test.mjs
 
-# TypeScript tests (26 tests)
+# TypeScript tests
 cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
 
-# Plugin tests (54 tests)
+# Plugin tests
 cd plugins/claude-code && npm test
 cd plugins/codex && npm test
 
-# Vercel AI SDK tests (5 tests)
+# Vercel AI SDK tests
 cd packages/signet-vercel-ai && npm test
 
 # Reference verifier server smoke test
@@ -772,7 +831,7 @@ Keys stored at `~/.signet/keys/` with `0600` permissions. Override with `SIGNET_
 - That the MCP server executed the action (use bilateral receipts with `signResponse()` for server co-signing — shipped in v0.4)
 - That signer.owner actually controls the key (planned: identity registry)
 
-Signet is an attestation tool (proving what happened), not a prevention tool (blocking bad actions). It complements policy enforcement tools like firewalls and gateways.
+Signet is first an evidence layer: it proves what happened. It can also enforce checks at the signing boundary and execution boundary, but it does not replace sandboxing, least-privilege design, or human approval where those are required.
 
 ## Related Projects
 

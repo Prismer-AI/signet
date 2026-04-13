@@ -19,7 +19,7 @@ import {
 
 export function createSignetToolsServer(): Server {
   const server = new Server(
-    { name: 'signet-mcp-tools', version: '0.7.0' },
+    { name: 'signet-mcp-tools', version: '0.9.0' },
     { capabilities: { tools: {} } },
   );
 

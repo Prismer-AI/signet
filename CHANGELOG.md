@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-13
+
+### Added
+
+#### Signed Trace Correlation
+- **signet-core**: `trace_id` and `parent_receipt_id` optional fields on `Action` — link receipts across multi-step agent workflows
+- **signet-core**: Both fields are included in the signed payload (tampering invalidates signature)
+- **signet-core**: `sign()`, `sign_bilateral()`, `sign_authorized()` all propagate trace fields from `Action`
+- **signet-core**: `audit::append()` serializes trace fields when present (omitted when `None` — backward compatible)
+- **@signet-auth/core**: `trace_id?: string` and `parent_receipt_id?: string` on `ActionInput` TypeScript interface
+- **signet-auth (Python)**: `trace_id` and `parent_receipt_id` kwargs on `sign()`, `sign_hash_only()`, `SigningAgent.sign()`
+- **signet-auth (Python)**: `receipt.trace_id` and `receipt.parent_receipt_id` accessors on `PyReceipt`
+
+### Tests
+- Rust: 6 trace-specific tests (sign with trace_id, parent_receipt_id, combined, tampering detection, audit roundtrip)
+- Python: 9 trace tests — roundtrip, signature scope, absent-when-None, multi-step workflow chain
+- TypeScript: 5 trace tests — trace_id/parent_receipt_id in receipt, tampering invalidation, workflow chain
+
+## [0.8.0] - 2026-04-13
+
+### Added
+
+#### MCP Proxy — Transparent Signing
+- **signet-cli**: `signet proxy --target <cmd> --key <name>` — run as stdio MCP proxy, sign every `tools/call` transparently without modifying agent or server code
+- **signet-cli**: Bilateral co-signing: proxy signs agent request (v1 receipt logged immediately), then co-signs server response (v3 bilateral receipt) — server-side evidence even when the server has no Signet integration
+- **signet-cli**: `--policy <path>` — evaluate policy before signing; `deny` rules halt the call and log a violation; `require_approval` rules block with an error message
+- **signet-cli**: `--no-log` — disable audit log (useful for testing)
+- **signet-cli**: `--env-filter` — strip sensitive env vars (`SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIAL`) from child process; `SIGNET_PASSPHRASE` always filtered
+- **signet-cli**: Stale pending request eviction (30-minute TTL) — v1 receipt already logged, memory cleaned automatically
+- Non-`tools/call` messages (initialize, ping, etc.) pass through unmodified
+
+### Tests
+- 9 CLI integration tests: tools/call signing, passthrough for non-tool messages, audit log written, `--no-log` skips audit, policy allow/deny, multiple sequential calls, bilateral co-signing roundtrip, bilateral with multiple concurrent calls
+
 ## [0.7.0] - 2026-04-11
 
 ### Added
@@ -247,6 +281,11 @@ audit::append(&dir, &receipt_json)?;  // was: audit::append(&dir, &receipt)
 - WASM binding (wasm-bindgen) for Node.js
 - End-to-end MCP agent example (agent + echo server)
 
+[0.9.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.9.0
+[0.8.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.8.0
+[0.7.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.7.0
+[0.6.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.6.0
+[0.5.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.2.0

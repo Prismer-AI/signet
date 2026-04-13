@@ -26,7 +26,7 @@ dirs = "5"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "process", "io-util", "io-std"] }
 open = "5"
 
 [dev-dependencies]

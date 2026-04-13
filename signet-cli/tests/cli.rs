@@ -1202,3 +1202,252 @@ fn test_params_at_nonexistent() {
         .code(3)
         .stderr(predicate::str::contains("Error:"));
 }
+
+// ─── proxy ──────────────────────────────────────────────────────────────────
+
+/// Helper: run proxy with input, return (stdout, stderr)
+fn run_proxy(
+    dir: &std::path::Path,
+    target: &str,
+    key: &str,
+    input: &str,
+    extra_args: &[&str],
+) -> (String, String) {
+    use std::io::Write;
+    use std::process::{Command as StdCommand, Stdio};
+
+    let bin = assert_cmd::cargo::cargo_bin("signet");
+
+    let mut cmd = StdCommand::new(bin);
+    cmd.env("SIGNET_HOME", dir)
+        .args(["proxy", "--target", target, "--key", key])
+        .args(extra_args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("failed to spawn proxy");
+
+    // Write input to stdin then close it
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).expect("write stdin");
+        // stdin drops here, closing pipe → proxy sees EOF → exits
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("wait for proxy");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    (stdout, stderr)
+}
+
+fn mock_server_cmd() -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    format!("python3 {}/tests/mock_mcp_server.py", manifest_dir)
+}
+
+#[test]
+fn test_proxy_signs_tools_call() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "proxykey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello"}}}"#,
+        "\n",
+    );
+
+    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "proxykey", input, &[]);
+
+    // Proxy should have signed the call
+    assert!(
+        stderr.contains("[signet proxy] signed: echo"),
+        "stderr should log signing: {stderr}",
+    );
+
+    // Server should have received the _signet receipt
+    // The "signed" field is inside a nested JSON string, so it appears escaped
+    assert!(
+        stdout.contains(r#"\"signed\": \"yes\""#) || stdout.contains(r#""signed": "yes""#),
+        "server should see _signet in params: {stdout}",
+    );
+}
+
+#[test]
+fn test_proxy_passthrough_non_tools_call() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "passkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        "\n",
+    );
+
+    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "passkey", input, &[]);
+
+    // Should NOT log signing for initialize
+    assert!(
+        !stderr.contains("[signet proxy] signed:"),
+        "initialize should not be signed: {stderr}",
+    );
+
+    // Should pass through and get response
+    assert!(
+        stdout.contains("protocolVersion") || stdout.contains("mock"),
+        "should get initialize response: {stdout}",
+    );
+}
+
+#[test]
+fn test_proxy_writes_audit_log() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "auditkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"test_tool","arguments":{}}}"#,
+        "\n",
+    );
+
+    let (_stdout, _stderr) = run_proxy(dir.path(), &mock_server_cmd(), "auditkey", input, &[]);
+
+    // Audit log should exist
+    let audit_dir = dir.path().join("audit");
+    assert!(audit_dir.exists(), "audit/ should exist");
+    let files: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "jsonl").unwrap_or(false))
+        .collect();
+    assert!(!files.is_empty(), "should have audit .jsonl file");
+
+    // Read and verify audit content
+    let content = fs::read_to_string(files[0].path()).unwrap();
+    assert!(content.contains("test_tool"), "audit should contain tool name");
+    assert!(content.contains("ed25519:"), "audit should contain signature");
+}
+
+#[test]
+fn test_proxy_no_log_skips_audit() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "nologkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+        "\n",
+    );
+
+    let (_stdout, stderr) = run_proxy(
+        dir.path(), &mock_server_cmd(), "nologkey", input, &["--no-log"],
+    );
+
+    // Should still sign
+    assert!(stderr.contains("[signet proxy] signed:"));
+
+    // But no audit directory
+    let audit_dir = dir.path().join("audit");
+    assert!(!audit_dir.exists(), "audit/ should NOT exist with --no-log");
+}
+
+#[test]
+fn test_proxy_with_policy_allowed() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "polkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: allow-all\nrules: []\n",
+    )
+    .unwrap();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+        "\n",
+    );
+
+    let (_stdout, stderr) = run_proxy(
+        dir.path(), &mock_server_cmd(), "polkey", input,
+        &["--policy", policy_path.to_str().unwrap()],
+    );
+
+    assert!(stderr.contains("[signet proxy] signed:"), "should sign with policy: {stderr}");
+}
+
+#[test]
+fn test_proxy_with_policy_denied() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "denkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: deny-all\ndefault_action: deny\nrules: []\n",
+    )
+    .unwrap();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Bash","arguments":{"cmd":"ls"}}}"#,
+        "\n",
+    );
+
+    let (_stdout, stderr) = run_proxy(
+        dir.path(), &mock_server_cmd(), "denkey", input,
+        &["--policy", policy_path.to_str().unwrap()],
+    );
+
+    assert!(
+        stderr.contains("DENIED") || stderr.contains("policy violation"),
+        "should deny: {stderr}",
+    );
+}
+
+#[test]
+fn test_proxy_multiple_messages() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "multikey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#, "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read","arguments":{"path":"/tmp"}}}"#, "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write","arguments":{"path":"a.txt"}}}"#, "\n",
+    );
+
+    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multikey", input, &[]);
+
+    // Should sign exactly 2 tools/call, not initialize
+    let sign_count = stderr.matches("[signet proxy] signed:").count();
+    assert_eq!(sign_count, 2, "should sign 2 tools/call, got {sign_count}: {stderr}");
+
+    // Should get 3 responses
+    let response_count = stdout.matches("\"jsonrpc\"").count();
+    assert_eq!(response_count, 3, "should get 3 responses, got {response_count}: {stdout}");
+}

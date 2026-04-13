@@ -43,7 +43,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Watch the YouTube walkthrough</a></sub>
+  <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Walkthrough: signing, audit log, and verification</a> · <a href="https://www.youtube.com/watch?v=PQnZC594qZc">▶ Demo: execution boundary &amp; MCP integration</a></sub>
 </p>
 
 **Your AI agent just called a tool. Can you prove what it did?**
@@ -778,6 +778,12 @@ Signet is an attestation tool (proving what happened), not a prevention tool (bl
 
 - **[Prismer Cloud](https://github.com/Prismer-AI/PrismerCloud)** — Full agent harness with evolution engine, memory layer, community, and built-in Ed25519/DID identity. Use Prismer Cloud for the complete agent platform; use Signet when you only need the standalone attestation layer.
 - **[Prismer.AI](https://github.com/Prismer-AI/Prismer)** — The open-source AI research platform
+
+## Star History
+
+If Signet is useful to you, please star this repo — it helps more teams find it.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Prismer-AI/signet&type=Date)](https://star-history.com/#Prismer-AI/signet&Date)
 
 ## License
 

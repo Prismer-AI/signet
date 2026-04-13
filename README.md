@@ -629,8 +629,31 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --export <file>` | Export records as JSON |
 | `signet claude install` | Install Claude Code plugin (PostToolUse signing hook) |
 | `signet claude uninstall` | Remove Claude Code plugin |
+| `signet dashboard` | Open local audit dashboard in browser |
 
 Passphrase via interactive prompt or `SIGNET_PASSPHRASE` env var for CI.
+
+## Audit Dashboard
+
+Run `signet dashboard` to open a local web UI for your audit log — no account, no network, just your local receipts.
+
+<p align="center">
+  <img src="dashboard-timeline.png" alt="Signet audit dashboard — timeline view showing every signed tool call" width="820">
+</p>
+
+<p align="center">
+  <sub>Timeline view: every tool call logged with signer, tool name, target, and receipt ID. Filter by time, tool, or signer.</sub>
+</p>
+
+The **Chain Integrity** tab verifies the SHA-256 hash chain across your entire audit log — any tampering or gap is pinpointed to the exact file and line:
+
+<p align="center">
+  <img src="dashboard-chain-integrity.png" alt="Signet chain integrity check — break point detected at line 189" width="820">
+</p>
+
+<p align="center">
+  <sub>Chain broken at line 189: expected vs actual hash shown. This is what "append-only" actually looks like in practice.</sub>
+</p>
 
 ## Documentation
 

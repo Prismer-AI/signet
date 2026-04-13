@@ -468,6 +468,8 @@ fn sign_tools_call(
         session: None,
         call_id: call_id.clone(),
         response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
     };
 
     let receipt = if let Some(pol) = policy {

@@ -1412,7 +1412,7 @@ dependencies = [
 
 [[package]]
 name = "signet-cli"
-version = "0.7.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1436,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "signet-core"
-version = "0.7.0"
+version = "0.9.0"
 dependencies = [
  "argon2",
  "base64",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "signet-python"
-version = "0.7.0"
+version = "0.9.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "signet-wasm"
-version = "0.7.0"
+version = "0.9.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1616,6 +1616,7 @@ version = "1.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bd1c4c0fc4a7ab90fc15ef6daaa3ec3b893f004f915f2392557ed23237820cd"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust: 6 trace-specific tests (sign with trace_id, parent_receipt_id, combined, tampering detection, audit roundtrip)
 - Python: 9 trace tests — roundtrip, signature scope, absent-when-None, multi-step workflow chain
 - TypeScript: 5 trace tests — trace_id/parent_receipt_id in receipt, tampering invalidation, workflow chain
+- 495 total tests passing (213 Rust core + 40 CLI + 214 Python + 28 TypeScript)
 
 ## [0.8.0] - 2026-04-13
 
@@ -35,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **signet-cli**: `--env-filter` — strip sensitive env vars (`SECRET`, `PASSWORD`, `PRIVATE_KEY`, `CREDENTIAL`) from child process; `SIGNET_PASSPHRASE` always filtered
 - **signet-cli**: Stale pending request eviction (30-minute TTL) — v1 receipt already logged, memory cleaned automatically
 - Non-`tools/call` messages (initialize, ping, etc.) pass through unmodified
+
+### Fixed
+- `Action` struct initializers in `cmd_proxy.rs` updated to include `trace_id` and `parent_receipt_id` fields (added in v0.9.0)
 
 ### Tests
 - 9 CLI integration tests: tools/call signing, passthrough for non-tool messages, audit log written, `--no-log` skips audit, policy allow/deny, multiple sequential calls, bilateral co-signing roundtrip, bilateral with multiple concurrent calls

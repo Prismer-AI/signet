@@ -1,8 +1,8 @@
 <h1 align="center">Signet</h1>
 
 <p align="center">
-  <strong>Make AI agent tool calls verifiable at the execution boundary</strong><br/>
-  <sub>Prove what your AI agent actually sent. Verify tool calls offline or before execution in 3 lines.</sub>
+  <strong>Your agents run on their infrastructure. The proof belongs to you.</strong><br/>
+  <sub>Cryptographic evidence for every agent tool call — signed, hash-chained, offline-verifiable. Independent of any provider.</sub>
 </p>
 
 <p align="center">
@@ -48,7 +48,9 @@
 
 **AI agents can already call Bash, GitHub, cloud APIs, and payment rails. Most teams still cannot prove exactly what the agent sent, who authorized it, or which policy was checked before it ran.**
 
-Signet turns agent actions into portable, cryptographically verifiable evidence.
+Signet turns agent actions into portable, cryptographically verifiable evidence — evidence you hold, not evidence a vendor holds on your behalf.
+
+Platforms log what happened. Signet proves it. The difference matters when an auditor asks for independent verification, when an incident happens on infrastructure you don't control, or when "trust the console" isn't a sufficient answer.
 
 Each agent gets an Ed25519 identity. Every tool call can be signed, appended to a hash-chained audit trail, verified offline or before execution, co-signed by the server, bound to a delegation chain, and optionally bound to a policy decision.
 

@@ -1,8 +1,8 @@
 <h1 align="center">Signet</h1>
 
 <p align="center">
-  <strong>让 AI Agent 的工具调用在执行边界可验证</strong><br/>
-  <sub>证明你的 AI Agent 到底发出了什么。3 行代码即可离线验证或在执行前校验。</sub>
+  <strong>你的 Agent 跑在别人的基础设施上。证明归你所有。</strong><br/>
+  <sub>每次工具调用生成密码学证据 —— 签名、哈希链、可离线验证。独立于任何平台和厂商。</sub>
 </p>
 
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)
@@ -35,7 +35,9 @@ TypeScript 包：
 
 **AI Agent 已经能调用 Bash、GitHub、云 API，甚至支付系统。但大多数团队仍然无法证明：Agent 当时到底发了什么、是谁授权它这么做、以及执行前检查的是哪条策略。**
 
-Signet 把 Agent 行为变成可携带、可校验、可离线验证的密码学证据。
+Signet 把 Agent 行为变成可携带、可校验、可离线验证的密码学证据——是你自己持有的证据，而不是平台方代你持有的日志。
+
+平台记录了发生了什么。Signet 证明它发生了。当审计员需要独立验证、当事故发生在你不改属的基础设施上、或者“相信控制台日志”不足以作为答案时——这个区别就很重要。
 
 每个 Agent 都有自己的 Ed25519 身份。每次工具调用都可以被签名、写入哈希链审计日志、在离线或执行前验证、由服务端联合签名、附带 delegation chain，并在需要时绑定到一条策略决策上。
 

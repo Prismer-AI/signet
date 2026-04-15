@@ -90,6 +90,20 @@ Signet adds a lightweight trust layer for agent actions:
 - **Local dashboard**: `signet dashboard` shows timeline, chain integrity, signature health, and delegated vs direct activity.
 - **Broader integrations**: official Claude Code plugin, Codex plugin, MCP middleware, Python SDK, and Vercel AI SDK callbacks.
 
+## Compliance
+
+Signet provides the technical controls that auditors look for when assessing AI agent operations. See the full [Compliance Mapping](docs/COMPLIANCE.md) for details.
+
+| Framework | What Signet Addresses |
+|-----------|---------------------|
+| **SOC 2 Type II** | Signed audit trail (CC7.2), tamper detection (CC7.3), role-based scope (CC6.3), authorization proof (CC8.1) |
+| **ISO 27001** | Event logging (A.8.15), access control (A.5.15), authentication (A.5.17), configuration management (A.8.9) |
+| **EU AI Act** | Article 12 record-keeping: event logging, traceability, identification, integrity |
+| **DORA** | ICT incident logging (Art. 17), third-party risk evidence (Art. 28-30), audit trail integrity |
+| **NIST AI RMF** | Govern (delegation chains), Map (signed receipts), Measure (audit queries), Manage (policy engine) |
+
+> Signet is a tool, not a certification. It provides controls that support compliance — your deployment and configuration determine compliance posture.
+
 ## Try It In 30 Seconds
 
 ```bash

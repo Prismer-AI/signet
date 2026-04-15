@@ -315,6 +315,49 @@ pub fn wasm_verify_authorized(
     serde_json::to_string(&scope).map_err(|e| JsError::new(&e.to_string()))
 }
 
+// ─── Expiration functions ────────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn wasm_sign_with_expiration(
+    secret_key_b64: &str,
+    action_json: &str,
+    signer_name: &str,
+    signer_owner: &str,
+    expires_at: &str,
+) -> Result<String, JsError> {
+    let signing_key = parse_signing_key(secret_key_b64)?;
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+
+    let receipt = signet_core::sign_with_expiration(
+        &signing_key, &action, signer_name, signer_owner, expires_at,
+    ).map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_verify_allow_expired(
+    receipt_json: &str,
+    public_key_b64: &str,
+) -> Result<bool, JsError> {
+    let receipt: signet_core::Receipt = serde_json::from_str(receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+    let key_bytes = BASE64.decode(public_key_b64)
+        .map_err(|e| JsError::new(&format!("invalid public key: {e}")))?;
+    let arr: [u8; 32] = key_bytes.try_into()
+        .map_err(|_| JsError::new("public key must be 32 bytes"))?;
+    let vk = ed25519_dalek::VerifyingKey::from_bytes(&arr)
+        .map_err(|e| JsError::new(&format!("invalid public key: {e}")))?;
+
+    match signet_core::verify_allow_expired(&receipt, &vk) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
+}
+
 // ─── Policy functions ────────────────────────────────────────────────────────
 
 #[wasm_bindgen]

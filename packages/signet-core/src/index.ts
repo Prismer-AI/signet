@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -31,6 +31,7 @@ export interface SignetReceipt {
   action: SignetAction;
   signer: SignetSigner;
   ts: string;
+  exp?: string;
   nonce: string;
   sig: string;
 }
@@ -311,4 +312,30 @@ export function signWithPolicy(
 
 export function computePolicyHash(policy: Policy): string {
   return wasm_compute_policy_hash(JSON.stringify(policy));
+}
+
+// ─── Expiration functions ───────────────────────────────────────────────────
+
+export function signWithExpiration(
+  secretKey: string,
+  action: SignetAction,
+  signerName: string,
+  signerOwner: string,
+  expiresAt: string,
+): SignetReceipt {
+  const json = wasm_sign_with_expiration(
+    secretKey,
+    JSON.stringify(action),
+    signerName,
+    signerOwner,
+    expiresAt,
+  );
+  return JSON.parse(json);
+}
+
+export function verifyAllowExpired(receipt: SignetReceipt, publicKey: string): boolean {
+  const bareKey = publicKey.startsWith('ed25519:')
+    ? publicKey.slice('ed25519:'.length)
+    : publicKey;
+  return wasm_verify_allow_expired(JSON.stringify(receipt), bareKey);
 }

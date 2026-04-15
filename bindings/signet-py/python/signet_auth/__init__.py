@@ -54,6 +54,9 @@ from signet_auth._signet import (
     verify_delegation,
     sign_authorized,
     verify_authorized,
+    # Expiration functions
+    sign_with_expiration,
+    verify_allow_expired,
     # Policy functions
     parse_policy_yaml,
     parse_policy_json,
@@ -126,6 +129,9 @@ __all__ = [
     "verify_delegation",
     "sign_authorized",
     "verify_authorized",
+    # Expiration functions
+    "sign_with_expiration",
+    "verify_allow_expired",
     # Policy functions
     "parse_policy_yaml",
     "parse_policy_json",

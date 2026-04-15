@@ -304,6 +304,56 @@ fn verify_authorized(
     serde_json::to_string(&scope).map_err(|e| to_py_err(e.into()))
 }
 
+// ─── Expiration functions ────────────────────────────────────────────────────
+
+/// Sign an action with an expiration time. Same as sign() but includes exp in the signed payload.
+#[pyfunction]
+fn sign_with_expiration(
+    py: Python<'_>,
+    secret_key: &str,
+    action: crate::types::PyAction,
+    signer_name: String,
+    signer_owner: String,
+    expires_at: String,
+) -> PyResult<crate::types::PyReceipt> {
+    let signing_key = parse_signing_key(secret_key)?;
+    let inner_action = action.inner.clone();
+
+    let receipt = py
+        .allow_threads(|| {
+            signet_core::sign_with_expiration(
+                &signing_key,
+                &inner_action,
+                &signer_name,
+                &signer_owner,
+                &expires_at,
+            )
+        })
+        .map_err(to_py_err)?;
+
+    Ok(crate::types::PyReceipt { inner: receipt })
+}
+
+/// Verify a receipt, allowing expired receipts (for audit/forensic contexts).
+#[pyfunction]
+fn verify_allow_expired(
+    py: Python<'_>,
+    receipt: crate::types::PyReceipt,
+    public_key: &str,
+) -> PyResult<bool> {
+    let verifying_key = parse_verifying_key(public_key)?;
+    let inner_receipt = receipt.inner.clone();
+
+    let result =
+        py.allow_threads(|| signet_core::verify_allow_expired(&inner_receipt, &verifying_key));
+
+    match result {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
 // ─── Policy functions ────────────────────────────────────────────────────────
 
 /// Parse and validate a YAML policy string. Returns the policy as JSON.
@@ -411,6 +461,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(sign_authorized, m)?)?;
     m.add_function(wrap_pyfunction!(verify_authorized, m)?)?;
+    // Expiration functions
+    m.add_function(wrap_pyfunction!(sign_with_expiration, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_allow_expired, m)?)?;
     // Policy functions
     m.add_function(wrap_pyfunction!(parse_policy_yaml, m)?)?;
     m.add_function(wrap_pyfunction!(parse_policy_json, m)?)?;

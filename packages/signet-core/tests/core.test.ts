@@ -4,6 +4,7 @@ import {
   generateKeypair, sign, verify, type SignetAction,
   signDelegation, verifyDelegation, signAuthorized, verifyAuthorized,
   parsePolicyYaml, evaluatePolicy, signWithPolicy, computePolicyHash,
+  signWithExpiration, verifyAllowExpired,
   type Scope, type DelegationToken, type PolicyEvalResult,
 } from '../src/index.js';
 
@@ -371,5 +372,53 @@ describe('signed trace correlation', () => {
     assert.strictEqual(child1.action.trace_id, 'tr_wf001');
     assert.strictEqual(child1.action.parent_receipt_id, startReceipt.id);
     assert.strictEqual(child2.action.parent_receipt_id, child1.id);
+  });
+});
+
+describe('receipt expiration', () => {
+  const testAction: SignetAction = {
+    tool: 'Read',
+    params: {},
+    params_hash: '',
+    target: 'mcp://local',
+    transport: 'stdio',
+  };
+
+  it('signWithExpiration produces receipt with exp field', () => {
+    const kp = generateKeypair();
+    const future = new Date(Date.now() + 3600000).toISOString();
+    const receipt = signWithExpiration(kp.secretKey, testAction, 'agent', 'owner', future);
+    assert.strictEqual(receipt.exp, future);
+    assert.strictEqual(verify(receipt, kp.publicKey), true);
+  });
+
+  it('sign without expiration has no exp field', () => {
+    const kp = generateKeypair();
+    const receipt = sign(kp.secretKey, testAction, 'agent', 'owner');
+    assert.strictEqual(receipt.exp, undefined);
+  });
+
+  it('tampered expiration fails verification', () => {
+    const kp = generateKeypair();
+    const future = new Date(Date.now() + 3600000).toISOString();
+    const receipt = signWithExpiration(kp.secretKey, testAction, 'agent', 'owner', future);
+    receipt.exp = new Date(Date.now() + 86400000 * 365).toISOString();
+    assert.strictEqual(verify(receipt, kp.publicKey), false);
+  });
+
+  it('verifyAllowExpired accepts expired receipts', () => {
+    const kp = generateKeypair();
+    const past = new Date(Date.now() - 3600000).toISOString();
+    const receipt = signWithExpiration(kp.secretKey, testAction, 'agent', 'owner', past);
+    // verify would reject (expired), but verifyAllowExpired accepts
+    assert.strictEqual(verifyAllowExpired(receipt, kp.publicKey), true);
+  });
+
+  it('verifyAllowExpired still rejects tampered signatures', () => {
+    const kp = generateKeypair();
+    const past = new Date(Date.now() - 3600000).toISOString();
+    const receipt = signWithExpiration(kp.secretKey, testAction, 'agent', 'owner', past);
+    receipt.action.tool = 'evil';
+    assert.strictEqual(verifyAllowExpired(receipt, kp.publicKey), false);
   });
 });

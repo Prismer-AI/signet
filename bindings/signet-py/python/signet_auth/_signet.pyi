@@ -248,6 +248,17 @@ def verify_authorized(
     clock_skew_secs: int = 60,
 ) -> str: ...
 
+# ─── Expiration functions ─────────────────────────────────────────────────────
+
+def sign_with_expiration(
+    secret_key: str,
+    action: Action,
+    signer_name: str,
+    signer_owner: str,
+    expires_at: str,
+) -> Receipt: ...
+def verify_allow_expired(receipt: Receipt, public_key: str) -> bool: ...
+
 # ─── Policy functions ─────────────────────────────────────────────────────────
 
 def parse_policy_yaml(yaml: str) -> str: ...

@@ -96,6 +96,66 @@ pub fn sign(
         authorization: None,
         policy: None,
         ts,
+        exp: None,
+        nonce,
+        sig,
+    })
+}
+
+/// Sign an action with an expiration time. Same as `sign()` but the receipt
+/// carries an `exp` field (RFC 3339) inside the signature scope.
+pub fn sign_with_expiration(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    expires_at: &str,
+) -> Result<Receipt, SignetError> {
+    let params_hash = compute_params_hash(action)?;
+    let signed_action = Action {
+        tool: action.tool.clone(),
+        params: action.params.clone(),
+        params_hash,
+        target: action.target.clone(),
+        transport: action.transport.clone(),
+        session: action.session.clone(),
+        call_id: action.call_id.clone(),
+        response_hash: action.response_hash.clone(),
+        trace_id: action.trace_id.clone(),
+        parent_receipt_id: action.parent_receipt_id.clone(),
+    };
+
+    let signer = Signer {
+        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
+        name: signer_name.to_string(),
+        owner: signer_owner.to_string(),
+    };
+
+    let nonce = generate_nonce();
+    let ts = current_timestamp();
+
+    let signable = serde_json::json!({
+        "v": 1u8,
+        "action": signed_action,
+        "signer": signer,
+        "ts": ts,
+        "exp": expires_at,
+        "nonce": nonce,
+    });
+    let canonical_bytes = canonical::canonicalize(&signable)?;
+    let signature = key.sign(canonical_bytes.as_bytes());
+    let sig = format_sig(&signature.to_bytes());
+    let id = derive_id("rec", &signature.to_bytes());
+
+    Ok(Receipt {
+        v: 1,
+        id,
+        action: signed_action,
+        signer,
+        authorization: None,
+        policy: None,
+        ts,
+        exp: Some(expires_at.to_string()),
         nonce,
         sig,
     })
@@ -178,6 +238,7 @@ pub fn sign_with_policy(
         authorization: None,
         policy: Some(attestation),
         ts,
+        exp: None,
         nonce,
         sig,
     };
@@ -691,6 +752,85 @@ rules: []
             "2026-04-11T10:00:00.000Z", "2026-04-11T10:00:00.150Z",
         ).unwrap();
         assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_compound"));
+    }
+
+    // ─── expiration tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_sign_without_expiration() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        assert!(receipt.exp.is_none());
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_with_expiration_roundtrip() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let future = (chrono::Utc::now() + chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let receipt = sign_with_expiration(&key, &action, "agent", "owner", &future).unwrap();
+        assert_eq!(receipt.exp.as_deref(), Some(future.as_str()));
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_sign_with_expiration_expired_rejected() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let receipt = sign_with_expiration(&key, &action, "agent", "owner", &past).unwrap();
+        // verify() should reject expired receipt
+        let err = crate::verify::verify(&receipt, &vk).unwrap_err();
+        assert!(err.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn test_sign_with_expiration_allow_expired() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let past = (chrono::Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let receipt = sign_with_expiration(&key, &action, "agent", "owner", &past).unwrap();
+        // verify_allow_expired should accept
+        assert!(crate::verify::verify_allow_expired(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_expiration_in_signature_scope() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let future = (chrono::Utc::now() + chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut receipt = sign_with_expiration(&key, &action, "agent", "owner", &future).unwrap();
+        // Tamper: extend expiration
+        receipt.exp = Some(
+            (chrono::Utc::now() + chrono::Duration::days(365))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        );
+        assert!(crate::verify::verify(&receipt, &vk).is_err());
+    }
+
+    #[test]
+    fn test_expiration_absent_in_json_when_none() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(!json.contains("\"exp\""));
+    }
+
+    #[test]
+    fn test_expiration_present_in_json_when_set() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let future = "2027-01-01T00:00:00.000Z";
+        let receipt = sign_with_expiration(&key, &action, "agent", "owner", future).unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(json.contains("2027-01-01T00:00:00.000Z"));
     }
 
     #[test]

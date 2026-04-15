@@ -42,6 +42,10 @@ pub struct Receipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<PolicyAttestation>,
     pub ts: String,
+    /// Optional expiration time (RFC 3339). Inside the signature scope.
+    /// Absent = no expiration declared (backward compatible with pre-exp receipts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exp: Option<String>,
     pub nonce: String,
     pub sig: String,
 }

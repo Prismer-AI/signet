@@ -60,6 +60,44 @@ receipt.id = "rec_" + hex(SHA-256(signature))[0..16]
 
 This provides a short, collision-resistant identifier derived from the signature itself.
 
+## Signed vs Unsigned Fields
+
+Not all receipt fields are inside the Ed25519 signature scope. Building on unsigned fields for security-relevant decisions is unsafe.
+
+### v1/v4 Receipt
+
+| Field | Signed? | Notes |
+|-------|---------|-------|
+| `v` | ✅ | Receipt version |
+| `action` (tool, params, params_hash, target, transport, session, call_id, response_hash, trace_id, parent_receipt_id) | ✅ | All action fields are signed |
+| `signer` (pubkey, name, owner) | ✅ | |
+| `authorization` | ✅ | Delegation chain (v4) |
+| `policy` | ✅ | Policy attestation |
+| `ts` | ✅ | Timestamp |
+| `nonce` | ✅ | Replay protection |
+| `sig` | — | The signature itself |
+| `id` | — | Derived from sig, not independently signed |
+
+### v3 BilateralReceipt
+
+| Field | Signed? | Notes |
+|-------|---------|-------|
+| `agent_receipt` | ✅ (by server sig) | Embedded v1 receipt (also self-signed) |
+| `response` | ✅ (by server sig) | |
+| `server` | ✅ (by server sig) | |
+| `ts_response` | ✅ (by server sig) | |
+| `nonce` | ✅ (by server sig) | |
+| **`extensions`** | **❌ NOT SIGNED** | **Outside signature scope — tamper-free is not guaranteed** |
+
+### Security implications of `extensions`
+
+The `extensions` field on `BilateralReceipt` is deliberately excluded from the server's signature scope. **Do not store security-relevant metadata in `extensions`.**
+
+**Attack scenario:** A developer stores agent identity or trust scores in `extensions`, then verifies the receipt expecting that data to be tamper-proof. An attacker modifies `extensions` after signing without invalidating the signature. Any authorization decision based on that data is compromised.
+
+**Safe uses for `extensions`:** debugging metadata, display hints, non-security context.
+**Unsafe uses:** agent identity, trust scores, authorization claims, policy decisions. These belong in signed fields (`action.params`, `policy`, `authorization`, or a future `attestations` field).
+
 ## Audit Log Integrity
 
 ### Hash Chain

@@ -36,6 +36,7 @@ pub use sign_delegation::{sign_authorized, sign_delegation};
 pub use verify::{
     verify, verify_allow_expired, verify_any, verify_bilateral,
     verify_bilateral_with_options, verify_compound, BilateralVerifyOptions,
+    InMemoryNonceChecker, NonceChecker,
 };
 pub use verify_delegation::{
     verify_authorized, verify_chain as verify_delegation_chain, verify_delegation,

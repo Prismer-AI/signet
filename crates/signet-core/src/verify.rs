@@ -176,6 +176,56 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
     }
 }
 
+/// Trait for checking nonce replay. Implement with any backend (in-memory, Redis, DB).
+pub trait NonceChecker: Send + Sync {
+    /// Returns true if this nonce has been seen before (should be rejected).
+    fn is_replay(&self, nonce: &str) -> bool;
+    /// Record that this nonce has been seen.
+    fn record(&self, nonce: &str);
+}
+
+/// In-memory nonce checker with capacity limit and TTL.
+pub struct InMemoryNonceChecker {
+    seen: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    max_entries: usize,
+    ttl: std::time::Duration,
+}
+
+impl InMemoryNonceChecker {
+    pub fn new(max_entries: usize, ttl_secs: u64) -> Self {
+        Self {
+            seen: std::sync::Mutex::new(std::collections::HashMap::new()),
+            max_entries,
+            ttl: std::time::Duration::from_secs(ttl_secs),
+        }
+    }
+}
+
+impl NonceChecker for InMemoryNonceChecker {
+    fn is_replay(&self, nonce: &str) -> bool {
+        let mut map = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        // Evict expired entries
+        let cutoff = std::time::Instant::now() - self.ttl;
+        map.retain(|_, ts| *ts > cutoff);
+        map.contains_key(nonce)
+    }
+
+    fn record(&self, nonce: &str) {
+        let mut map = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        if map.len() >= self.max_entries {
+            // Evict oldest
+            if let Some(oldest_key) = map
+                .iter()
+                .min_by_key(|(_, ts)| *ts)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest_key);
+            }
+        }
+        map.insert(nonce.to_string(), std::time::Instant::now());
+    }
+}
+
 /// Options for bilateral receipt verification.
 pub struct BilateralVerifyOptions {
     /// Maximum allowed seconds between agent signing and server response.
@@ -187,6 +237,19 @@ pub struct BilateralVerifyOptions {
     /// only verifies self-consistency (the agent receipt is valid under *its own*
     /// embedded key) but cannot confirm the agent's identity is authorized.
     pub trusted_agent_pubkey: Option<VerifyingKey>,
+
+    /// Optional expected session ID. When set, the agent receipt's
+    /// action.session must match this value.
+    pub expected_session: Option<String>,
+
+    /// Optional expected call ID. When set, the agent receipt's
+    /// action.call_id must match this value.
+    pub expected_call_id: Option<String>,
+
+    /// Optional nonce checker for replay protection. Only the server nonce
+    /// is checked — not the agent nonce (which is already verified by the
+    /// unilateral path).
+    pub nonce_checker: Option<Box<dyn NonceChecker>>,
 }
 
 impl Default for BilateralVerifyOptions {
@@ -194,6 +257,9 @@ impl Default for BilateralVerifyOptions {
         Self {
             max_time_window_secs: 300,
             trusted_agent_pubkey: None,
+            expected_session: None,
+            expected_call_id: None,
+            nonce_checker: None,
         }
     }
 }
@@ -303,6 +369,40 @@ pub fn verify_bilateral_with_options(
                 options.max_time_window_secs
             )));
         }
+    }
+
+    // 5. Check session binding (Issue #4)
+    if let Some(ref expected) = options.expected_session {
+        let actual = receipt.agent_receipt.action.session.as_deref().unwrap_or("");
+        if actual != expected.as_str() {
+            return Err(SignetError::InvalidReceipt(format!(
+                "session mismatch: expected '{}', got '{}'",
+                expected, actual
+            )));
+        }
+    }
+
+    // 6. Check call_id binding (Issue #4)
+    if let Some(ref expected) = options.expected_call_id {
+        let actual = receipt.agent_receipt.action.call_id.as_deref().unwrap_or("");
+        if actual != expected.as_str() {
+            return Err(SignetError::InvalidReceipt(format!(
+                "call_id mismatch: expected '{}', got '{}'",
+                expected, actual
+            )));
+        }
+    }
+
+    // 7. Check server nonce replay (Issue #1)
+    // Only check the server nonce — agent nonce is already verified by verify().
+    if let Some(ref checker) = options.nonce_checker {
+        if checker.is_replay(&receipt.nonce) {
+            return Err(SignetError::InvalidReceipt(format!(
+                "bilateral nonce replay detected: {}",
+                receipt.nonce
+            )));
+        }
+        checker.record(&receipt.nonce);
     }
 
     Ok(())
@@ -717,6 +817,131 @@ mod tests {
             max_time_window_secs: 0,
             ..Default::default()
         };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    // ─── session/call_id cross-check (Issue #4) ──────────────────────
+
+    fn make_bilateral_with_ids(
+        session: Option<&str>,
+        call_id: Option<&str>,
+    ) -> (BilateralReceipt, VerifyingKey) {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let mut action = crate::test_helpers::test_action();
+        action.session = session.map(|s| s.to_string());
+        action.call_id = call_id.map(|s| s.to_string());
+        let agent_receipt = crate::sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = serde_json::json!({"text": "ok"});
+        let ts = (chrono::Utc::now() + chrono::Duration::seconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral = crate::sign::sign_bilateral(
+            &server_key, &agent_receipt, &response, "server", &ts,
+        ).unwrap();
+        (bilateral, server_vk)
+    }
+
+    #[test]
+    fn test_bilateral_session_match() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(Some("sess_123"), None);
+        let opts = BilateralVerifyOptions {
+            expected_session: Some("sess_123".to_string()),
+            ..Default::default()
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_session_mismatch() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(Some("sess_123"), None);
+        let opts = BilateralVerifyOptions {
+            expected_session: Some("sess_wrong".to_string()),
+            ..Default::default()
+        };
+        let err = verify_bilateral_with_options(&bilateral, &server_vk, &opts).unwrap_err();
+        assert!(err.to_string().contains("session mismatch"));
+        assert!(err.to_string().contains("sess_wrong"));
+        assert!(err.to_string().contains("sess_123"));
+    }
+
+    #[test]
+    fn test_bilateral_call_id_match() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(None, Some("call_abc"));
+        let opts = BilateralVerifyOptions {
+            expected_call_id: Some("call_abc".to_string()),
+            ..Default::default()
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_call_id_mismatch() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(None, Some("call_abc"));
+        let opts = BilateralVerifyOptions {
+            expected_call_id: Some("call_xyz".to_string()),
+            ..Default::default()
+        };
+        let err = verify_bilateral_with_options(&bilateral, &server_vk, &opts).unwrap_err();
+        assert!(err.to_string().contains("call_id mismatch"));
+        assert!(err.to_string().contains("call_xyz"));
+        assert!(err.to_string().contains("call_abc"));
+    }
+
+    #[test]
+    fn test_bilateral_session_unset_skips_check() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(Some("sess_123"), None);
+        // No expected_session = skip check
+        let opts = BilateralVerifyOptions::default();
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    // ─── bilateral nonce replay (Issue #1) ───────────────────────────
+
+    #[test]
+    fn test_bilateral_nonce_first_time_passes() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(None, None);
+        let checker = InMemoryNonceChecker::new(100, 300);
+        let opts = BilateralVerifyOptions {
+            nonce_checker: Some(Box::new(checker)),
+            ..Default::default()
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_nonce_replay_rejected() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(None, None);
+        let checker = InMemoryNonceChecker::new(100, 300);
+        // First verification: passes and records nonce
+        let opts = BilateralVerifyOptions {
+            nonce_checker: Some(Box::new(checker)),
+            ..Default::default()
+        };
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
+        // Second verification with same receipt: replay detected
+        let err = verify_bilateral_with_options(&bilateral, &server_vk, &opts).unwrap_err();
+        assert!(err.to_string().contains("nonce replay"));
+    }
+
+    #[test]
+    fn test_bilateral_nonce_different_receipts_pass() {
+        let (bilateral1, server_vk1) = make_bilateral_with_ids(None, None);
+        let (bilateral2, server_vk2) = make_bilateral_with_ids(None, None);
+        let checker = InMemoryNonceChecker::new(100, 300);
+        let opts1 = BilateralVerifyOptions {
+            nonce_checker: Some(Box::new(checker)),
+            ..Default::default()
+        };
+        assert!(verify_bilateral_with_options(&bilateral1, &server_vk1, &opts1).is_ok());
+        assert!(verify_bilateral_with_options(&bilateral2, &server_vk2, &opts1).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_nonce_no_checker_skips() {
+        let (bilateral, server_vk) = make_bilateral_with_ids(None, None);
+        let opts = BilateralVerifyOptions::default(); // no nonce_checker
+        // Can verify same receipt twice with no checker
+        assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
         assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
     }
 }

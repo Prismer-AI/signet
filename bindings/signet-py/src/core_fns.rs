@@ -188,6 +188,53 @@ fn verify_bilateral(
     }
 }
 
+/// Verify a bilateral receipt with session/call_id cross-check and optional nonce replay protection.
+#[pyfunction]
+#[pyo3(signature = (receipt, server_public_key, expected_session=None, expected_call_id=None, check_nonce=false, max_time_window_secs=300))]
+#[allow(clippy::too_many_arguments)]
+fn verify_bilateral_with_options(
+    py: Python<'_>,
+    receipt: crate::types::PyBilateralReceipt,
+    server_public_key: &str,
+    expected_session: Option<String>,
+    expected_call_id: Option<String>,
+    check_nonce: bool,
+    max_time_window_secs: u64,
+) -> PyResult<bool> {
+    let verifying_key = parse_verifying_key(server_public_key)?;
+    let inner = receipt.inner.clone();
+
+    // Build nonce checker if requested (in-memory, per-call — for persistent
+    // replay protection, use a shared checker at the application level)
+    let nonce_checker: Option<Box<dyn signet_core::NonceChecker>> = if check_nonce {
+        Some(Box::new(signet_core::InMemoryNonceChecker::new(10000, 600)))
+    } else {
+        None
+    };
+
+    let opts = signet_core::BilateralVerifyOptions {
+        max_time_window_secs,
+        trusted_agent_pubkey: None,
+        expected_session,
+        expected_call_id,
+        nonce_checker,
+    };
+
+    let result =
+        py.allow_threads(|| signet_core::verify_bilateral_with_options(&inner, &verifying_key, &opts));
+
+    match result {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(signet_core::SignetError::InvalidReceipt(ref msg))
+            if msg.contains("does not match") || msg.contains("mismatch") =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
 /// Create a delegation token granting scoped authority.
 #[pyfunction]
 #[pyo3(signature = (delegator_key_b64, delegator_name, delegate_pubkey_b64, delegate_name, scope_json, parent_scope_json=None))]
@@ -457,6 +504,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_any, m)?)?;
     m.add_function(wrap_pyfunction!(sign_bilateral, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_bilateral_with_options, m)?)?;
     m.add_function(wrap_pyfunction!(sign_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(verify_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(sign_authorized, m)?)?;

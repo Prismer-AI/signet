@@ -49,6 +49,7 @@ from signet_auth._signet import (
     verify_any,
     sign_bilateral,
     verify_bilateral,
+    verify_bilateral_with_options,
     # Delegation functions
     sign_delegation,
     verify_delegation,
@@ -124,6 +125,7 @@ __all__ = [
     "verify_any",
     "sign_bilateral",
     "verify_bilateral",
+    "verify_bilateral_with_options",
     # Delegation functions
     "sign_delegation",
     "verify_delegation",

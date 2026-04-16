@@ -224,6 +224,14 @@ def sign_bilateral(
     ts_response: str | None = None,
 ) -> BilateralReceipt: ...
 def verify_bilateral(receipt: BilateralReceipt, server_public_key: str) -> bool: ...
+def verify_bilateral_with_options(
+    receipt: BilateralReceipt,
+    server_public_key: str,
+    expected_session: str | None = None,
+    expected_call_id: str | None = None,
+    check_nonce: bool = False,
+    max_time_window_secs: int = 300,
+) -> bool: ...
 
 # ─── Delegation functions ────────────────────────────────────────────────────
 

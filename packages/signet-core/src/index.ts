@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired, wasm_verify_bilateral_with_options } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -312,6 +312,31 @@ export function signWithPolicy(
 
 export function computePolicyHash(policy: Policy): string {
   return wasm_compute_policy_hash(JSON.stringify(policy));
+}
+
+// ─── Bilateral verify options ───────────────────────────────────────────────
+
+export interface BilateralVerifyOptionsTS {
+  expectedSession?: string;
+  expectedCallId?: string;
+  maxTimeWindowSecs?: number;
+}
+
+export function verifyBilateralWithOptions(
+  receipt: unknown,
+  serverPublicKey: string,
+  options: BilateralVerifyOptionsTS = {},
+): boolean {
+  const bareKey = serverPublicKey.startsWith('ed25519:')
+    ? serverPublicKey.slice('ed25519:'.length)
+    : serverPublicKey;
+  return wasm_verify_bilateral_with_options(
+    JSON.stringify(receipt),
+    bareKey,
+    options.expectedSession ?? '',
+    options.expectedCallId ?? '',
+    BigInt(options.maxTimeWindowSecs ?? 300),
+  );
 }
 
 // ─── Expiration functions ───────────────────────────────────────────────────

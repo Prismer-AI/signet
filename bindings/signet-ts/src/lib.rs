@@ -315,6 +315,43 @@ pub fn wasm_verify_authorized(
     serde_json::to_string(&scope).map_err(|e| JsError::new(&e.to_string()))
 }
 
+// ─── Bilateral verify options ────────────────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn wasm_verify_bilateral_with_options(
+    receipt_json: &str,
+    server_pubkey_b64: &str,
+    expected_session: &str,
+    expected_call_id: &str,
+    max_time_window_secs: u64,
+) -> Result<bool, JsError> {
+    let receipt: signet_core::BilateralReceipt = serde_json::from_str(receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+    let key_bytes = BASE64.decode(server_pubkey_b64)
+        .map_err(|e| JsError::new(&format!("invalid server key: {e}")))?;
+    let arr: [u8; 32] = key_bytes.try_into()
+        .map_err(|_| JsError::new("server key must be 32 bytes"))?;
+    let server_vk = ed25519_dalek::VerifyingKey::from_bytes(&arr)
+        .map_err(|e| JsError::new(&format!("invalid server key: {e}")))?;
+
+    let opts = signet_core::BilateralVerifyOptions {
+        max_time_window_secs,
+        trusted_agent_pubkey: None,
+        expected_session: if expected_session.is_empty() { None } else { Some(expected_session.to_string()) },
+        expected_call_id: if expected_call_id.is_empty() { None } else { Some(expected_call_id.to_string()) },
+        nonce_checker: None, // WASM has no persistent state for nonce checking
+    };
+
+    match signet_core::verify_bilateral_with_options(&receipt, &server_vk, &opts) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(signet_core::SignetError::InvalidReceipt(ref msg))
+            if msg.contains("mismatch") || msg.contains("does not match") => Ok(false),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
+}
+
 // ─── Expiration functions ────────────────────────────────────────────────────
 
 #[wasm_bindgen]

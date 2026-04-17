@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### Receipt Expiration (Issue #3)
+- **signet-core**: `exp: Option<String>` field on `Receipt`, inside the signature scope
+- **signet-core**: `sign_with_expiration()` — sign with an RFC 3339 expiration time
+- **signet-core**: `verify()` rejects expired receipts by default
+- **signet-core**: `verify_allow_expired()` — audit/forensic override, skips expiration check
+- **signet-auth (Python)**: `sign_with_expiration()`, `verify_allow_expired()` bindings
+- **@signet-auth/core**: `signWithExpiration()`, `verifyAllowExpired()` TypeScript functions
+
+#### Bilateral Verify Options (Issues #1, #4)
+- **signet-core**: `expected_session` and `expected_call_id` on `BilateralVerifyOptions` — cross-check agent receipt fields against expected values (Issue #4)
+- **signet-core**: `NonceChecker` trait + `InMemoryNonceChecker` — replay protection for bilateral server nonces (Issue #1)
+- **signet-auth (Python)**: `verify_bilateral_with_options()` with session/call_id/nonce params
+- **@signet-auth/core**: `verifyBilateralWithOptions()` TypeScript function
+
+#### Documentation
+- **SECURITY.md**: Signed vs unsigned field tables for v1/v3/v4 receipts, extensions attack scenario warning (Issue #2)
+- **COMPLIANCE.md**: Compliance mapping for SOC 2, ISO 27001, EU AI Act, DORA, NIST AI RMF
+- **Codespaces**: `.devcontainer/` + `demo.sh` for one-click browser experience
+
+#### Ecosystem
+- **signet-action**: GitHub Action for CI audit chain verification
+- **dify-plugin-signet**: Dify plugin (local-first, no API key)
+- 5 example repos: LangChain, CrewAI, MCP, OpenAI Agents, Pydantic AI
+
+### Changed
+- `sign_inner()` extracted — `sign()`, `sign_with_expiration()`, `sign_with_policy()` are now thin wrappers (net -46 lines)
+- `verify_receipt_signature()` extracted — `verify()` and `verify_allow_expired()` share signature logic
+- CLI exit codes unified: 1=verification/policy fail, 2=approval needed, 3=general error
+- `cmd_policy.rs` uses `bail!()` instead of `process::exit()` — flows through main.rs error handler
+
+### Tests
+- 537 total tests (269 Rust core + 40 CLI + 195 Python + 33 TypeScript)
+
 ## [0.9.0] - 2026-04-13
 
 ### Added

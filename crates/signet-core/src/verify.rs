@@ -6,7 +6,8 @@ use crate::canonical;
 use crate::error::SignetError;
 use crate::receipt::{BilateralReceipt, CompoundReceipt, Receipt};
 
-pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
+/// Verify the Ed25519 signature on a v1/v4 receipt. Does NOT check expiration.
+fn verify_receipt_signature(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     let sig_b64 = receipt
         .sig
         .strip_prefix("ed25519:")
@@ -44,10 +45,13 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
 
     pubkey
         .verify(canonical_bytes.as_bytes(), &signature)
-        .map_err(|_| SignetError::SignatureMismatch)?;
+        .map_err(|_| SignetError::SignatureMismatch)
+}
 
-    // Check expiration if present (and not in allow_expired mode)
-    // Default verify() is strict — rejects expired receipts.
+pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
+    verify_receipt_signature(receipt, pubkey)?;
+
+    // Check expiration if present — default verify() is strict.
     if let Some(ref exp) = receipt.exp {
         let exp_dt = chrono::DateTime::parse_from_rfc3339(exp)
             .map_err(|e| SignetError::InvalidReceipt(format!("invalid exp timestamp: {e}")))?;
@@ -62,48 +66,11 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
 }
 
 /// Verify a receipt allowing expired receipts (for audit/forensic contexts).
-/// Same as `verify()` but does not reject receipts past their `exp` time.
 pub fn verify_allow_expired(
     receipt: &Receipt,
     pubkey: &VerifyingKey,
 ) -> Result<(), SignetError> {
-    let sig_b64 = receipt
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
-
-    let mut signable = serde_json::json!({
-        "v": receipt.v,
-        "action": receipt.action,
-        "signer": receipt.signer,
-        "ts": receipt.ts,
-        "nonce": receipt.nonce,
-    });
-    let obj = signable
-        .as_object_mut()
-        .ok_or_else(|| SignetError::InvalidReceipt("signable is not a JSON object".into()))?;
-    if let Some(ref policy) = receipt.policy {
-        obj.insert(
-            "policy".to_string(),
-            serde_json::to_value(policy).map_err(|e| {
-                SignetError::InvalidReceipt(format!("failed to serialize policy: {e}"))
-            })?,
-        );
-    }
-    if let Some(ref exp) = receipt.exp {
-        obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
-    }
-    let canonical_bytes = canonical::canonicalize(&signable)?;
-
-    pubkey
-        .verify(canonical_bytes.as_bytes(), &signature)
-        .map_err(|_| SignetError::SignatureMismatch)
-    // NOTE: deliberately does NOT check expiration
+    verify_receipt_signature(receipt, pubkey)
 }
 
 pub fn verify_compound(

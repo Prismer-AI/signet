@@ -1,6 +1,7 @@
 """signet-auth: Cryptographic action receipts for AI agents."""
 
 from signet_auth.agent import SigningAgent
+from signet_auth.decorator import signet_sign, sign, init as init_signer
 from signet_auth.server import VerifyOptions, ServerVerifyResult, verify_request
 from signet_auth._signet import (
     __version__,

@@ -879,7 +879,7 @@ fn test_sign_with_policy_cli_denied() {
         ])
         .assert()
         .failure()
-        .code(3)
+        .code(1)  // exit_codes::VERIFICATION_FAILED
         .stderr(predicate::str::contains("policy violation"));
 }
 

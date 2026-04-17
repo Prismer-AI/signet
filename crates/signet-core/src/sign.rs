@@ -41,16 +41,23 @@ pub(crate) fn compute_params_hash(action: &Action) -> Result<String, SignetError
     Ok(format!("sha256:{}", hex::encode(hash)))
 }
 
-pub fn sign(
+/// Internal options for sign_inner — controls which optional fields are
+/// included in the signable and the resulting Receipt.
+struct SignOptions {
+    exp: Option<String>,
+    policy: Option<crate::policy::PolicyAttestation>,
+}
+
+/// Core signing logic shared by sign(), sign_with_expiration(), and sign_with_policy().
+fn sign_inner(
     key: &SigningKey,
     action: &Action,
     signer_name: &str,
     signer_owner: &str,
+    opts: SignOptions,
 ) -> Result<Receipt, SignetError> {
-    // 1. Compute params_hash from params
     let params_hash = compute_params_hash(action)?;
 
-    // 2. Build action with computed hash
     let signed_action = Action {
         tool: action.tool.clone(),
         params: action.params.clone(),
@@ -64,25 +71,36 @@ pub fn sign(
         parent_receipt_id: action.parent_receipt_id.clone(),
     };
 
-    // 3. Build signer
     let signer = Signer {
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner.to_string(),
     };
 
-    // 4. Generate nonce + timestamp
     let nonce = generate_nonce();
     let ts = current_timestamp();
 
-    // 5. Build signable JSON, canonicalize, sign
-    let signable = serde_json::json!({
+    // Build signable with optional fields. JCS canonicalization makes
+    // key insertion order irrelevant.
+    let mut signable = serde_json::json!({
         "v": 1u8,
         "action": signed_action,
         "signer": signer,
         "ts": ts,
         "nonce": nonce,
     });
+    let obj = signable.as_object_mut().expect("just built as object");
+    if let Some(ref policy) = opts.policy {
+        obj.insert(
+            "policy".to_string(),
+            serde_json::to_value(policy)
+                .map_err(|e| SignetError::InvalidReceipt(format!("policy serialize: {e}")))?,
+        );
+    }
+    if let Some(ref exp) = opts.exp {
+        obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
+    }
+
     let canonical_bytes = canonical::canonicalize(&signable)?;
     let signature = key.sign(canonical_bytes.as_bytes());
     let sig = format_sig(&signature.to_bytes());
@@ -94,11 +112,23 @@ pub fn sign(
         action: signed_action,
         signer,
         authorization: None,
-        policy: None,
+        policy: opts.policy,
         ts,
-        exp: None,
+        exp: opts.exp,
         nonce,
         sig,
+    })
+}
+
+pub fn sign(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+) -> Result<Receipt, SignetError> {
+    sign_inner(key, action, signer_name, signer_owner, SignOptions {
+        exp: None,
+        policy: None,
     })
 }
 
@@ -111,53 +141,9 @@ pub fn sign_with_expiration(
     signer_owner: &str,
     expires_at: &str,
 ) -> Result<Receipt, SignetError> {
-    let params_hash = compute_params_hash(action)?;
-    let signed_action = Action {
-        tool: action.tool.clone(),
-        params: action.params.clone(),
-        params_hash,
-        target: action.target.clone(),
-        transport: action.transport.clone(),
-        session: action.session.clone(),
-        call_id: action.call_id.clone(),
-        response_hash: action.response_hash.clone(),
-        trace_id: action.trace_id.clone(),
-        parent_receipt_id: action.parent_receipt_id.clone(),
-    };
-
-    let signer = Signer {
-        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
-        name: signer_name.to_string(),
-        owner: signer_owner.to_string(),
-    };
-
-    let nonce = generate_nonce();
-    let ts = current_timestamp();
-
-    let signable = serde_json::json!({
-        "v": 1u8,
-        "action": signed_action,
-        "signer": signer,
-        "ts": ts,
-        "exp": expires_at,
-        "nonce": nonce,
-    });
-    let canonical_bytes = canonical::canonicalize(&signable)?;
-    let signature = key.sign(canonical_bytes.as_bytes());
-    let sig = format_sig(&signature.to_bytes());
-    let id = derive_id("rec", &signature.to_bytes());
-
-    Ok(Receipt {
-        v: 1,
-        id,
-        action: signed_action,
-        signer,
-        authorization: None,
-        policy: None,
-        ts,
+    sign_inner(key, action, signer_name, signer_owner, SignOptions {
         exp: Some(expires_at.to_string()),
-        nonce,
-        sig,
+        policy: None,
     })
 }
 
@@ -193,55 +179,10 @@ pub fn sign_with_policy(
         reason: eval.reason.clone(),
     };
 
-    let params_hash = compute_params_hash(action)?;
-    let signed_action = Action {
-        tool: action.tool.clone(),
-        params: action.params.clone(),
-        params_hash,
-        target: action.target.clone(),
-        transport: action.transport.clone(),
-        session: action.session.clone(),
-        call_id: action.call_id.clone(),
-        response_hash: action.response_hash.clone(),
-        trace_id: action.trace_id.clone(),
-        parent_receipt_id: action.parent_receipt_id.clone(),
-    };
-
-    let signer = Signer {
-        pubkey: format_pubkey(&key.verifying_key().to_bytes()),
-        name: signer_name.to_string(),
-        owner: signer_owner.to_string(),
-    };
-
-    let nonce = generate_nonce();
-    let ts = current_timestamp();
-
-    // Policy attestation is inside the signable — tampering breaks the signature
-    let signable = serde_json::json!({
-        "v": 1u8,
-        "action": signed_action,
-        "signer": signer,
-        "policy": attestation,
-        "ts": ts,
-        "nonce": nonce,
-    });
-    let canonical_bytes = canonical::canonicalize(&signable)?;
-    let signature = key.sign(canonical_bytes.as_bytes());
-    let sig = format_sig(&signature.to_bytes());
-    let id = derive_id("rec", &signature.to_bytes());
-
-    let receipt = Receipt {
-        v: 1,
-        id,
-        action: signed_action,
-        signer,
-        authorization: None,
-        policy: Some(attestation),
-        ts,
+    let receipt = sign_inner(key, action, signer_name, signer_owner, SignOptions {
         exp: None,
-        nonce,
-        sig,
-    };
+        policy: Some(attestation),
+    })?;
 
     Ok((receipt, eval))
 }

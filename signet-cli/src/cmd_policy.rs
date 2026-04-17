@@ -85,15 +85,15 @@ fn check(args: CheckArgs) -> Result<()> {
     match eval.decision {
         signet_core::RuleAction::Allow => {
             eprintln!("{decision_str} ({rules_str})");
+            Ok(())
         }
         signet_core::RuleAction::Deny => {
             eprintln!("{decision_str} by {rules_str}: {}", eval.reason);
-            std::process::exit(1);
+            anyhow::bail!("policy violation: {}", eval.reason);
         }
         signet_core::RuleAction::RequireApproval => {
             eprintln!("{decision_str} by {rules_str}: {}", eval.reason);
-            std::process::exit(2);
+            anyhow::bail!("requires approval: {}", eval.reason);
         }
     }
-    Ok(())
 }

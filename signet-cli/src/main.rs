@@ -112,17 +112,30 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+/// Exit codes used across all CLI commands.
+pub mod exit_codes {
+    /// Signature verification failed or policy denied.
+    pub const VERIFICATION_FAILED: i32 = 1;
+    /// Action requires human approval.
+    pub const REQUIRES_APPROVAL: i32 = 2;
+    /// General error (I/O, parse, key not found, etc.).
+    pub const GENERAL_ERROR: i32 = 3;
+}
+
 fn main() {
     match run() {
         Ok(()) => {}
         Err(e) => {
             let msg = format!("{e}");
-            if msg.contains("signature verification failed") {
+            if msg.contains("signature verification failed") || msg.contains("policy violation") {
                 eprintln!("Invalid: {e}");
-                process::exit(1);
+                process::exit(exit_codes::VERIFICATION_FAILED);
+            } else if msg.contains("requires approval") {
+                eprintln!("Approval required: {e}");
+                process::exit(exit_codes::REQUIRES_APPROVAL);
             } else {
                 eprintln!("Error: {e}");
-                process::exit(3);
+                process::exit(exit_codes::GENERAL_ERROR);
             }
         }
     }

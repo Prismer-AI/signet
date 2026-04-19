@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "signet-auth"
-version = "0.9.0"
+version = "0.9.1"
 description = "Cryptographic action receipts for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"

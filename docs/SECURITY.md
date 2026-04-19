@@ -128,6 +128,28 @@ record_hash = SHA-256(canonical({prev_hash, receipt}))
 - No remote attestation server (planned for v2).
 - Hash chain proves ordering and integrity, not completeness — a compromised agent could skip logging (`--no-log`).
 
+## Delegation Revocation
+
+Signet does not have an explicit revocation list. Delegation tokens are valid until their `expires` field (which is inside the signature scope and cannot be forged).
+
+**Recommended pattern: short-lived delegations.**
+
+```bash
+# Issue a 1-hour delegation — auto-expires, no revocation needed
+signet delegate create --from alice --to bot --to-name bot \
+    --tools Bash --ttl 1h
+```
+
+| Strategy | How | Tradeoff |
+|----------|-----|---------|
+| Short TTL (`--ttl 1h`) | Token expires automatically | Requires re-issuance for long tasks |
+| Medium TTL (`--ttl 24h`) | Daily rotation | Compromise window is at most 24h |
+| No expiration | Omit `--ttl` / `--expires` | Token valid forever — use only for testing |
+
+This is the same approach used by short-lived JWTs and X.509 certificates: keep token lifetime short enough that revocation is unnecessary.
+
+**Why no revocation list?** Signet receipts are offline-verifiable — adding a revocation list would require verifiers to check an external source, breaking the core offline property. If a future use case requires explicit revocation, a signed revocation receipt (verifiable in the same offline model) is the planned approach.
+
 ## Threat Model
 
 ### What Signet proves

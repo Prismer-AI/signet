@@ -164,9 +164,9 @@ Owner (alice) → Agent A (tools: [Bash, Read], max_depth: 0)
 ```
 
 ```bash
-# Create a delegation token
+# Create a delegation token (expires in 24 hours)
 signet delegate create --from alice --to deploy-bot --to-name deploy-bot \
-    --tools Bash,Read --targets "mcp://github" --max-depth 0
+    --tools Bash,Read --targets "mcp://github" --max-depth 0 --ttl 24h
 
 # Sign with authorization proof (v4 receipt)
 signet delegate sign --key deploy-bot --tool Bash \
@@ -175,6 +175,8 @@ signet delegate sign --key deploy-bot --tool Bash \
 # Verify: signature + chain + scope + root trust
 signet delegate verify-auth receipt.json --trusted-roots alice
 ```
+
+> **Best practice:** Use short-lived delegations (`--ttl 1h`, `--ttl 24h`) instead of long-lived or non-expiring tokens. If an agent is compromised, the delegation expires automatically. Re-issue tokens as needed. This is the same pattern used by short-lived JWTs and X.509 certificates.
 
 Or in Python:
 
@@ -697,7 +699,10 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --tool <substring>` | Filter by tool name |
 | `signet audit --verify` | Verify all receipt signatures |
 | `signet audit --export <file>` | Export records as JSON |
-| `signet delegate create ...` | Create a scoped delegation token for another agent |
+| `signet explore` | Browse receipts interactively (table, detail, stats, chain check) |
+| `signet explore --show N` | Inspect receipt #N with signature, policy, and chain info |
+| `signet explore --stats` | Receipt statistics by tool, signer, and version |
+| `signet delegate create ... --ttl 24h` | Create a scoped delegation token (short-lived) |
 | `signet delegate sign ... --chain <file>` | Sign with delegation proof and produce a v4 receipt |
 | `signet delegate verify-auth <receipt> --trusted-roots <name>` | Verify authorization chain, scope, and trusted root |
 | `signet policy validate <path>` | Validate policy syntax and print its hash |

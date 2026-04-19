@@ -39,8 +39,11 @@ pub struct CreateArgs {
     #[arg(long, default_value_t = 0)]
     pub max_depth: u32,
     /// Expiry (RFC 3339 UTC, e.g. 2026-12-31T23:59:59Z)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "ttl")]
     pub expires: Option<String>,
+    /// Time-to-live from now (e.g. 1h, 24h, 7d, 30m)
+    #[arg(long, conflicts_with = "expires")]
+    pub ttl: Option<String>,
     /// Parent scope JSON file (for scope narrowing validation)
     #[arg(long)]
     pub parent_scope: Option<String>,
@@ -110,6 +113,36 @@ fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<ed25519_dalek:
     Ok(ed25519_dalek::VerifyingKey::from_bytes(&arr)?)
 }
 
+fn parse_ttl(s: &str) -> Result<String> {
+    let s = s.trim();
+    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
+        (n, "d")
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, "h")
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, "m")
+    } else {
+        bail!("invalid TTL format '{}': expected e.g. 30m, 1h, 24h, 7d", s);
+    };
+
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid TTL number: '{}'", num_str))?;
+    if num == 0 {
+        bail!("TTL must be > 0");
+    }
+
+    let secs = match unit {
+        "m" => num * 60,
+        "h" => num * 3600,
+        "d" => num * 86400,
+        _ => unreachable!(),
+    };
+
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(secs as i64);
+    Ok(expires.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
 fn parse_tools_targets(s: &str) -> Result<Vec<String>> {
     if s == "*" {
         return Ok(vec!["*".to_string()]);
@@ -148,11 +181,17 @@ fn create(args: CreateArgs) -> Result<()> {
 
     let delegate_vk = resolve_pubkey(&dir, &args.to)?;
 
+    let expires = match (&args.expires, &args.ttl) {
+        (Some(exp), _) => Some(exp.clone()),
+        (_, Some(ttl)) => Some(parse_ttl(ttl)?),
+        _ => None,
+    };
+
     let scope = signet_core::Scope {
         tools: parse_tools_targets(&args.tools)?,
         targets: parse_tools_targets(&args.targets)?,
         max_depth: args.max_depth,
-        expires: args.expires,
+        expires,
         budget: None,
     };
 

@@ -446,6 +446,134 @@ fn test_delegate_create() {
 }
 
 #[test]
+fn test_delegate_create_with_ttl() {
+    let dir = tempdir().unwrap();
+    for name in ["owner-ttl", "agent-ttl"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "owner-ttl",
+            "--to",
+            "agent-ttl",
+            "--to-name",
+            "short-lived-agent",
+            "--tools",
+            "Bash",
+            "--ttl",
+            "1h",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(out).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("must be valid JSON");
+    // Must have an expires field
+    let expires = v["scope"]["expires"].as_str().expect("expires must be set");
+    // Should be roughly 1h from now (within a few seconds)
+    let exp_dt = chrono::DateTime::parse_from_rfc3339(expires).expect("valid RFC 3339");
+    let now = chrono::Utc::now();
+    let diff = exp_dt.signed_duration_since(now);
+    assert!(
+        diff.num_seconds() > 3500 && diff.num_seconds() <= 3600,
+        "TTL 1h should produce expires ~3600s from now, got {}s",
+        diff.num_seconds()
+    );
+}
+
+#[test]
+fn test_delegate_create_ttl_conflicts_with_expires() {
+    let dir = tempdir().unwrap();
+    for name in ["own-c", "agt-c"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "own-c",
+            "--to",
+            "agt-c",
+            "--to-name",
+            "x",
+            "--ttl",
+            "1h",
+            "--expires",
+            "2026-12-31T23:59:59Z",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot be used with"));
+}
+
+#[test]
+fn test_delegate_create_ttl_formats() {
+    let dir = tempdir().unwrap();
+    for name in ["own-f", "agt-f"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+
+    // Test 30m
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create", "--from", "own-f", "--to", "agt-f",
+            "--to-name", "x", "--ttl", "30m",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(out).unwrap()).unwrap();
+    let exp_dt = chrono::DateTime::parse_from_rfc3339(v["scope"]["expires"].as_str().unwrap()).unwrap();
+    let diff = exp_dt.signed_duration_since(chrono::Utc::now());
+    assert!(diff.num_seconds() > 1700 && diff.num_seconds() <= 1800, "30m TTL: got {}s", diff.num_seconds());
+
+    // Test 7d
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate", "create", "--from", "own-f", "--to", "agt-f",
+            "--to-name", "x", "--ttl", "7d",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(out).unwrap()).unwrap();
+    let exp_dt = chrono::DateTime::parse_from_rfc3339(v["scope"]["expires"].as_str().unwrap()).unwrap();
+    let diff = exp_dt.signed_duration_since(chrono::Utc::now());
+    assert!(diff.num_days() >= 6 && diff.num_days() <= 7, "7d TTL: got {} days", diff.num_days());
+}
+
+#[test]
 fn test_delegate_create_output_file() {
     let dir = tempdir().unwrap();
     for name in ["alice", "bot"] {

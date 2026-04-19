@@ -8,6 +8,7 @@ mod cmd_audit;
 mod cmd_claude;
 mod cmd_dashboard;
 mod cmd_delegate;
+mod cmd_explore;
 mod cmd_identity;
 mod cmd_policy;
 mod cmd_proxy;
@@ -55,6 +56,8 @@ enum Commands {
     },
     /// Run as MCP proxy — sign tool calls transparently
     Proxy(cmd_proxy::ProxyArgs),
+    /// Browse and inspect receipts interactively
+    Explore(cmd_explore::ExploreArgs),
     /// One-command setup: generate identity, sign test action, show audit
     Quickstart,
 }
@@ -111,6 +114,7 @@ fn run() -> Result<()> {
         Commands::Delegate { action } => cmd_delegate::run(action)?,
         Commands::Policy { action } => cmd_policy::run(action)?,
         Commands::Proxy(args) => cmd_proxy::run(args)?,
+        Commands::Explore(args) => cmd_explore::explore(args)?,
         Commands::Quickstart => cmd_quickstart::quickstart()?,
     }
     Ok(())

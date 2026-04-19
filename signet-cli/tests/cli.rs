@@ -1522,3 +1522,191 @@ fn test_proxy_bilateral_multiple_calls() {
         "should have 3 bilateral: {stderr}",
     );
 }
+
+// ─── explore ─────────────────────────────────────────────────────────────────
+
+/// Helper: create a key and sign N receipts with different tools.
+fn setup_explore_env(dir: &std::path::Path, key: &str, tools: &[&str]) {
+    signet()
+        .env("SIGNET_HOME", dir)
+        .args(["identity", "generate", "--name", key, "--unencrypted"])
+        .assert()
+        .success();
+
+    for tool in tools {
+        signet()
+            .env("SIGNET_HOME", dir)
+            .args([
+                "sign",
+                "--key",
+                key,
+                "--tool",
+                tool,
+                "--params",
+                &format!(r#"{{"tool":"{tool}"}}"#),
+                "--target",
+                "mcp://local",
+            ])
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn test_explore_default_table() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp1", &["bash", "read", "write"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3 receipts shown"))
+        .stdout(predicate::str::contains("bash"))
+        .stdout(predicate::str::contains("read"))
+        .stdout(predicate::str::contains("write"));
+}
+
+#[test]
+fn test_explore_empty() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No receipts found"));
+}
+
+#[test]
+fn test_explore_tool_filter() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp2", &["bash", "read", "bash", "write"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--tool", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 receipts shown"));
+}
+
+#[test]
+fn test_explore_signer_filter() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp3", &["bash", "read"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--signer", "exp3"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 receipts shown"));
+
+    // Non-existent signer
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--signer", "nonexistent"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No receipts found"));
+}
+
+#[test]
+fn test_explore_show_receipt() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp4", &["bash"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--show", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Receipt Details"))
+        .stdout(predicate::str::contains("bash"))
+        .stdout(predicate::str::contains("exp4"))
+        .stdout(predicate::str::contains("ed25519:"));
+}
+
+#[test]
+fn test_explore_show_full_json() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp5", &["read"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--show", "1", "--full"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""v": 1"#))
+        .stdout(predicate::str::contains(r#""tool": "read""#));
+}
+
+#[test]
+fn test_explore_show_out_of_range() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp6", &["bash"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--show", "999"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("out of range"));
+}
+
+#[test]
+fn test_explore_chain() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp7", &["bash", "read", "write"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--chain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("INTACT"))
+        .stdout(predicate::str::contains("3/3 valid"));
+}
+
+#[test]
+fn test_explore_stats() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp8", &["bash", "bash", "read", "write", "write", "write"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--stats"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Total receipts: 6"))
+        .stdout(predicate::str::contains("write"))
+        .stdout(predicate::str::contains("v1 (unilateral)"));
+}
+
+#[test]
+fn test_explore_tail() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp9", &["a", "b", "c", "d", "e"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--tail", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 receipts shown (of 5 total)"));
+}
+
+#[test]
+fn test_explore_since() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "exp10", &["bash", "read"]);
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--since", "1h"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 receipts shown"));
+}

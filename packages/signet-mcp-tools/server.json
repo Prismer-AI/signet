@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.prismer-ai/signet-mcp-tools",
+  "name": "io.github.Prismer-AI/signet-mcp-tools",
   "title": "Signet MCP Tools",
   "description": "MCP server exposing Signet cryptographic signing, verification, and content hash tools over stdio.",
   "version": "0.9.1",

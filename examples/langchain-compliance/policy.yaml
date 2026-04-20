@@ -1,0 +1,39 @@
+# Example policy for the LangChain compliance agent.
+# Used with `sign_with_policy()` or `signet sign --policy policy.yaml`.
+# See docs/specs/policy-engine-spec.md for full schema.
+
+version: 1
+name: "langchain-demo-policy"
+description: "Pre-sign policy for the LangChain compliance example"
+default_action: allow
+
+rules:
+  # Deny dangerous shell patterns. Note: string `contains` is NOT a security
+  # boundary — it catches casual misuse, not determined attackers.
+  - id: "deny-dangerous-shell"
+    match:
+      tool:
+        one_of: ["shell", "bash", "run"]
+      params:
+        command:
+          contains: "rm -rf"
+    action: deny
+    reason: "Destructive shell commands are prohibited"
+
+  # High-value calculator operations require approval. (Illustrative — the
+  # demo calculator takes strings, so this matches anything long.)
+  - id: "large-calc-requires-approval"
+    match:
+      tool: "calculator"
+      params:
+        expression:
+          contains: "1000000"
+    action: require_approval
+    reason: "Large-magnitude calculations need human review"
+
+  # Explicit allow list for the demo tools. Anything else falls to default.
+  - id: "allow-demo-tools"
+    match:
+      tool:
+        one_of: ["search", "calculator"]
+    action: allow

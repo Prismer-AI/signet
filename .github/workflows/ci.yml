@@ -150,6 +150,30 @@ jobs:
           npx tsc -p tsconfig.test.json
           node --test dist-test/tests/vercel-ai.test.js
 
+      - name: Test Codex plugin
+        run: |
+          cd plugins/codex
+          npm test
+
+      - name: Test Claude Code plugin
+        run: |
+          cd plugins/claude-code
+          npm test
+
+      - name: Install example dependencies
+        working-directory: examples/mcp-agent
+        run: npm install
+
+      - name: Smoke test MCP example verifier
+        run: |
+          cd examples/mcp-agent
+          npm run smoke
+
+      - name: End-to-end MCP bilateral example
+        run: |
+          cd examples/mcp-agent
+          npm run agent
+
   python-binding:
     name: Python binding (build + test)
     needs: [versioning, rust]

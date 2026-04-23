@@ -382,7 +382,8 @@ npm run verifier-server
 环境变量：
 
 - `SIGNET_TRUSTED_KEYS` — 逗号分隔的 `ed25519:<base64>` 公钥列表
-- `SIGNET_REQUIRE_SIGNATURE` — `true` 或 `false`（默认 `false`）
+- `SIGNET_REQUIRE_SIGNATURE` — `true` 或 `false`（默认 `true`）
+- `SIGNET_REQUIRE_TRUSTED_SIGNER` — `true` 或 `false`（默认 `true`）
 - `SIGNET_MAX_AGE` — 收据最大年龄，单位秒（默认 `300`）
 - `SIGNET_EXPECTED_TARGET` — 可选的预期 `receipt.action.target`
 

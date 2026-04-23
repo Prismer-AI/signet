@@ -34,7 +34,9 @@ const { secretKey } = generateKeypair();
 const inner = new StdioClientTransport({ command: "my-mcp-server" });
 const transport = new SigningTransport(inner, secretKey, "my-agent", "team", {
   target: "mcp://my-mcp-server",
+  trustedServerKeys: ["ed25519:..."],
   onDispatch: (receipt) => console.log("signed request", receipt.id),
+  onBilateral: (receipt) => console.log("trusted bilateral", receipt.id),
 });
 
 const client = new Client({ name: "my-agent", version: "1.0.0" }, {});
@@ -47,6 +49,11 @@ await client.callTool({
 ```
 
 Every outbound `tools/call` request gets a receipt injected into `params._meta._signet`.
+
+Notes:
+
+- `trustedServerKeys` is recommended whenever you expect bilateral receipts; without it, bilateral receipts are treated as integrity-only and do not trigger `onBilateral` by default.
+- `allowUntrustedBilateral: true` is an explicit compatibility opt-in if you still want `onBilateral` for integrity-only receipts.
 
 ## Related packages
 

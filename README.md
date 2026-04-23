@@ -1,8 +1,8 @@
 <h1 align="center">Signet</h1>
 
 <p align="center">
-  <strong>Your agents run on their infrastructure. The proof belongs to you.</strong><br/>
-  <sub>Cryptographic evidence for every agent tool call — signed, hash-chained, offline-verifiable. Independent of any provider.</sub>
+  <strong>Don't just log agent actions. Prove them.</strong><br/>
+  <sub>Cryptographic receipts for every AI agent tool call — signed, hash-chained, offline-verifiable. Independent of any provider.</sub>
 </p>
 
 <p align="center">
@@ -46,17 +46,39 @@
   <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Walkthrough: signing, audit log, and verification</a> · <a href="https://www.youtube.com/watch?v=PQnZC594qZc">▶ Demo: execution boundary &amp; MCP integration</a></sub>
 </p>
 
-**AI agents can already call Bash, GitHub, cloud APIs, and payment rails. Most teams still cannot prove exactly what the agent sent, who authorized it, or which policy was checked before it ran.**
+**Your AI agent just placed an order, deleted a row, sent an email, merged a PR. Can you prove exactly what it did — to an auditor, a customer, or yourself after an incident?**
 
-Signet is an independent verification layer for agent actions — one that sits outside the platforms your agents run on, and outside the vendors that host your logs.
+Signet is the **independent verification layer** for agent actions. Every tool call gets a signed receipt that anyone can verify offline, without trusting the platform that hosted the agent or the vendor that stored the logs.
 
-Platforms log what happened. Signet proves it. Provider-native logs are evidence only if you trust the provider. Signet receipts are verifiable by anyone, offline, without contacting anyone.
+> **Your agents run on their infrastructure. The proof belongs to you.**
+
+## Why Not Just Logs?
+
+Traditional logs tell you what a platform **says** happened. They're mutable, provider-dependent, and unverifiable without trusting the party that wrote them.
+
+Signet receipts are different. Modify any field — tool name, parameters, timestamp, signer — and the Ed25519 signature breaks. Delete or reorder entries and the SHA-256 hash chain breaks. Verification requires only the public key. No network call, no API, no login.
+
+| Ordinary logs | Signet receipts |
+| --- | --- |
+| Provider says it happened | Anyone can verify it, offline |
+| Mutable after the fact | Signature breaks on tamper |
+| No ordering proof | Hash chain breaks on delete/reorder |
+| Trust the log host | Verify with the public key |
+| One-sided claim | Bilateral co-signing available |
+
+Use logs for observability. Use Signet when you need **evidence**.
+
+## Who Is This For?
+
+- **MCP builders** — wrap any MCP server with `signet proxy`, sign every `tools/call`, no code changes
+- **Security / compliance teams** — tamper-evident audit trail that satisfies EU AI Act Art. 12, SOC 2 CC7.2, ISO 27001 A.8.15
+- **Enterprise agent platforms** — prove what the agent did, who authorized it, which policy was in force
+- **Framework users** — LangChain, CrewAI, Claude Code, Codex, OpenAI Agents, Vercel AI SDK — all supported
+- **Agent-to-agent deployments** — bilateral co-signing when both sides hold keys
 
 **If a tool call cannot be verified independently, it should not be trusted unconditionally.** This matters when an auditor asks for proof, when an incident happens on infrastructure you don't control, or when the question isn't "what does the console say" but "what actually happened."
 
 Each agent gets an Ed25519 identity. Every tool call can be signed, appended to a hash-chained audit trail, verified offline or before execution, co-signed by the server, bound to a delegation chain, and optionally bound to a policy decision.
-
-If Signet is useful to you, [star this repo](https://github.com/Prismer-AI/signet) to help more teams find it.
 
 The video above shows the full flow. The SVG below shows the CLI signing details, or jump to [See It Reject Bad Requests](#execution-boundary-demo) to watch the server block bad requests before they run.
 
@@ -119,6 +141,17 @@ receipt = agent.sign("github_create_issue", params={"title": "fix bug"})
 assert agent.verify(receipt)
 print(receipt.id)
 ```
+
+## Why Star This Repo?
+
+Signet is building a new category: **verifiable tool-call receipts for AI agents**. Starring isn't just a bookmark — it helps push cryptographic evidence for agent actions into the ecosystem so regulated industries, enterprise platforms, and framework users don't have to roll their own.
+
+- Working with **Microsoft Agent Governance Toolkit** (example merged in [PR #1196](https://github.com/microsoft/agent-governance-toolkit/pull/1196))
+- Named contributor in **LangChain's ComplianceBackend RFC** ([#35691](https://github.com/langchain-ai/langchain/issues/35691))
+- Conformance work toward the **IETF draft-farley-acta-signed-receipts** spec
+- Maps to **NIST NCCoE's four pillars** for AI agent identity and authorization (Q4 2026 Interoperability Profile)
+
+If you're building agents that need to survive an audit, an incident, or a third party asking "prove it" — star the repo, try it, open an issue.
 
 If you're new, start with one of these five paths:
 
@@ -390,6 +423,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     maxAge: 300,
   });
   if (!verified.ok) return { content: [{ type: "text", text: verified.error }], isError: true };
+  if (!verified.trusted) return { content: [{ type: "text", text: "untrusted signer" }], isError: true };
   console.log(`Verified: ${verified.signerName}`);
   // process tool call...
 });
@@ -436,7 +470,8 @@ Available tools:
 Environment variables:
 
 - `SIGNET_TRUSTED_KEYS` — comma-separated `ed25519:<base64>` public keys
-- `SIGNET_REQUIRE_SIGNATURE` — `true` or `false` (default `false`)
+- `SIGNET_REQUIRE_SIGNATURE` — `true` or `false` (default `true`)
+- `SIGNET_REQUIRE_TRUSTED_SIGNER` — `true` or `false` (default `true`)
 - `SIGNET_MAX_AGE` — max receipt age in seconds (default `300`)
 - `SIGNET_EXPECTED_TARGET` — optional expected `receipt.action.target`
 
@@ -649,7 +684,7 @@ SigningTransport (wraps any MCP transport)
     +---> Forwards request to MCP server (unchanged)
 ```
 
-Client-side signing works without changing the server. If you control the server too, add `verifyRequest()` and optional `signResponse()` for execution-boundary verification and bilateral receipts.
+Client-side signing works without changing the server. If you control the server too, add `verifyRequest()` and optional `signResponse()` for execution-boundary verification and bilateral receipts. `signResponse()` should only run after a successful trusted `verifyRequest()`.
 
 ## Action Receipt
 

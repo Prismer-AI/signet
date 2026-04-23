@@ -44,6 +44,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true,
     };
   }
+  if (!verified.trusted) {
+    return {
+      content: [{ type: "text", text: "untrusted signer" }],
+      isError: true,
+    };
+  }
 
   // process tool call...
 });
@@ -51,9 +57,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 Useful exports:
 
-- `verifyRequest()` checks signature validity, freshness, target binding, and tool/params matching
+- `verifyRequest()` checks signature validity, freshness, target binding, and tool/params matching, and tells you whether the signer is trusted
 - `NonceCache` adds replay protection
-- `signResponse()` lets the server co-sign a response after verification
+- `signResponse()` lets the server co-sign a response after a successful trusted `verifyRequest()`
 
 ## Related packages
 

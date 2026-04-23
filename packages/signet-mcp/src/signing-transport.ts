@@ -29,6 +29,10 @@ export interface SigningTransportOptions {
   onReceipt?: (receipt: CompoundReceipt) => void;
   onDispatch?: (receipt: SignetReceipt) => void;
   trustedServerKeys?: string[];  // "ed25519:<base64>" server pubkeys
+  /** Explicit opt-in for integrity-only bilateral handling when no trust anchors are configured. */
+  allowUntrustedBilateral?: boolean;
+  /** Fired for integrity-valid but untrusted bilateral receipts when allowUntrustedBilateral=true. */
+  onUntrustedBilateral?: (receipt: BilateralReceipt) => void;
   onBilateral?: (receipt: BilateralReceipt) => void;
 }
 
@@ -129,12 +133,17 @@ export class SigningTransport implements Transport {
                   this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
                 }
               } else {
-                // Sig valid but no trust anchors configured — accept but warn once
+                // Sig valid but no trust anchors configured — refuse trusted callback by default.
                 if (!this.warnedNoTrustAnchors) {
                   this.warnedNoTrustAnchors = true;
-                  this.onerror?.(new Error('bilateral receipt accepted without trustedServerKeys — set trustedServerKeys to verify server identity'));
+                  this.onerror?.(new Error(
+                    'bilateral receipt verified for integrity only — set trustedServerKeys or allowUntrustedBilateral=true to opt in',
+                  ));
                 }
-                this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+                if (this.opts.allowUntrustedBilateral) {
+                  this.opts.onUntrustedBilateral?.(bilateralMeta as BilateralReceipt);
+                  this.opts.onBilateral?.(bilateralMeta as BilateralReceipt);
+                }
               }
             }
           } catch (err) {

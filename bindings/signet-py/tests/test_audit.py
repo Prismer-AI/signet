@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import pytest
 import signet_auth
 
@@ -7,6 +9,19 @@ def _sign_receipt():
     kp = signet_auth.generate_keypair()
     action = signet_auth.Action("test_tool", params={"k": "v"})
     return signet_auth.sign(kp.secret_key, action, "test-agent", "owner")
+
+
+def _sign_bilateral():
+    agent_kp = signet_auth.generate_keypair()
+    server_kp = signet_auth.generate_keypair()
+    action = signet_auth.Action("test_tool", params={"k": "v"})
+    agent_receipt = signet_auth.sign(agent_kp.secret_key, action, "test-agent", "owner")
+    return signet_auth.sign_bilateral(
+        server_kp.secret_key,
+        agent_receipt,
+        {"ok": True},
+        "test-server",
+    )
 
 
 def test_audit_append(tmp_path):
@@ -83,4 +98,56 @@ def test_audit_verify_signatures(tmp_path):
     assert isinstance(result, signet_auth.VerifyResult)
     assert result.total == 3
     assert result.valid == 3
+    assert result.warnings == []
+    assert result.failures == []
+
+
+def test_audit_verify_signatures_v3_warns_on_integrity_only(tmp_path):
+    bilateral = _sign_bilateral()
+    audit_dir = Path(tmp_path) / "audit"
+    audit_dir.mkdir()
+    audit_file = audit_dir / f"{bilateral.ts_response[:10]}.jsonl"
+    audit_file.write_text(
+        json.dumps(
+            {
+                "receipt": json.loads(bilateral.to_json()),
+                "prev_hash": "sha256:0",
+                "record_hash": "sha256:1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = signet_auth.audit_verify_signatures(str(tmp_path))
+    assert result.total == 1
+    assert result.valid == 1
+    assert len(result.warnings) == 1
+    assert "integrity only" in result.warnings[0].reason
+    assert result.failures == []
+
+
+def test_audit_verify_signatures_v3_with_trusted_keys(tmp_path):
+    bilateral = _sign_bilateral()
+    audit_dir = Path(tmp_path) / "audit"
+    audit_dir.mkdir()
+    audit_file = audit_dir / f"{bilateral.ts_response[:10]}.jsonl"
+    audit_file.write_text(
+        json.dumps(
+            {
+                "receipt": json.loads(bilateral.to_json()),
+                "prev_hash": "sha256:0",
+                "record_hash": "sha256:1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = signet_auth.audit_verify_signatures(
+        str(tmp_path),
+        trusted_agent_keys=[bilateral.agent_receipt.signer.pubkey],
+        trusted_server_keys=[bilateral.server.pubkey],
+    )
+    assert result.total == 1
+    assert result.valid == 1
+    assert result.warnings == []
     assert result.failures == []

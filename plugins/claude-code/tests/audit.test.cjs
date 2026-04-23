@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const { Worker } = require('node:worker_threads');
 const audit = require('../lib/audit.cjs');
 
 function makeTmpDir() {
@@ -91,5 +92,64 @@ describe('audit.cjs', () => {
     assert.equal(read(tmpDir1).record_hash, read(tmpDir2).record_hash);
     fs.rmSync(tmpDir1, { recursive: true });
     fs.rmSync(tmpDir2, { recursive: true });
+  });
+
+  it('append serializes concurrent writers with a lock', async () => {
+    const tmpDir = makeTmpDir();
+    const gateBuffer = new SharedArrayBuffer(4);
+    const gate = new Int32Array(gateBuffer);
+    const workerScript = `
+      'use strict';
+      const { workerData, parentPort } = require('node:worker_threads');
+      const audit = require(workerData.auditPath);
+      const gate = new Int32Array(workerData.gateBuffer);
+      Atomics.wait(gate, 0, 0);
+      audit.append(workerData.tmpDir, workerData.receipt);
+      parentPort.postMessage('done');
+    `;
+    const auditPath = path.resolve(__dirname, '../lib/audit.cjs');
+    const workerCount = 8;
+
+    const completions = Array.from({ length: workerCount }, (_, index) => {
+      const receipt = fakeReceipt('Bash');
+      receipt.id = `rec_lock_${index}`;
+      receipt.nonce = `nonce_lock_${index}`;
+      receipt.ts = '2026-04-05T00:00:00.000Z';
+
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(workerScript, {
+          eval: true,
+          workerData: { auditPath, gateBuffer, tmpDir, receipt },
+        });
+        worker.once('message', resolve);
+        worker.once('error', reject);
+        worker.once('exit', (code) => {
+          if (code !== 0) {
+            reject(new Error(`worker exited with code ${code}`));
+          }
+        });
+      });
+    });
+
+    Atomics.store(gate, 0, 1);
+    Atomics.notify(gate, 0);
+    await Promise.all(completions);
+
+    const auditDir = path.join(tmpDir, 'audit');
+    const files = fs.readdirSync(auditDir).filter((file) => file.endsWith('.jsonl'));
+    assert.equal(files.length, 1);
+
+    const filepath = path.join(auditDir, files[0]);
+    assert.equal(fs.existsSync(filepath + '.lock'), false, 'lock file should be removed after append');
+
+    const lines = fs.readFileSync(filepath, 'utf8').trim().split('\n');
+    assert.equal(lines.length, workerCount);
+
+    const records = lines.map((line) => JSON.parse(line));
+    for (let index = 1; index < records.length; index++) {
+      assert.equal(records[index].prev_hash, records[index - 1].record_hash);
+    }
+
+    fs.rmSync(tmpDir, { recursive: true });
   });
 });

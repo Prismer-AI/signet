@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { generateKeypair, sign, verifyBilateral, type SignetAction, type SignetReceipt } from '@signet-auth/core';
-import { verifyRequest, signResponse } from '../src/index.js';
+import { verifyRequest, signResponse, NonceCache } from '../src/index.js';
 
 describe('@signet-auth/mcp-server verifyRequest', () => {
   const kp = generateKeypair();
@@ -39,6 +39,16 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     const receipt = (req.params._meta._signet) as SignetReceipt;
     const result = verifyRequest(req, { trustedKeys: [trustedKey(receipt)] });
     assert.strictEqual(result.ok, true, `Expected ok: true, got error: ${result.error}`);
+    assert.strictEqual(result.hasReceipt, true);
+    assert.strictEqual(result.trusted, true);
+  });
+
+  it('test_verify_signature_only_mode_marks_request_untrusted — valid sig + no trust anchors → ok: true, trusted: false', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const result = verifyRequest(req, { trustedKeys: [] });
+    assert.strictEqual(result.ok, true, `Expected ok: true, got error: ${result.error}`);
+    assert.strictEqual(result.hasReceipt, true);
+    assert.strictEqual(result.trusted, false);
   });
 
   it('test_verify_untrusted_key — valid sig but key not in trustedKeys → ok: false', () => {
@@ -71,12 +81,16 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     const result = verifyRequest(req, { requireSignature: true, trustedKeys: [] });
     assert.strictEqual(result.ok, false);
     assert(result.error?.includes('unsigned'), `Expected 'unsigned' in error, got: ${result.error}`);
+    assert.strictEqual(result.hasReceipt, false);
+    assert.strictEqual(result.trusted, false);
   });
 
   it('test_verify_unsigned_optional — no _signet + requireSignature=false → ok: true', () => {
     const req = { params: { name: 'echo', arguments: { message: 'hello' } } };
     const result = verifyRequest(req, { requireSignature: false, trustedKeys: [] });
     assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.hasReceipt, false);
+    assert.strictEqual(result.trusted, false);
   });
 
   it('test_verify_returns_signer_info — ok: true has signerName + signerPubkey', () => {
@@ -243,6 +257,27 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
   });
 });
 
+describe('@signet-auth/mcp-server NonceCache', () => {
+  it('keys replay protection by signer + nonce', () => {
+    const cache = new NonceCache(60_000, 10);
+
+    assert.strictEqual(cache.check('ed25519:signer-a', 'nonce-1'), true);
+    assert.strictEqual(cache.check('ed25519:signer-a', 'nonce-1'), false);
+    assert.strictEqual(cache.check('ed25519:signer-b', 'nonce-1'), true);
+
+    cache.destroy();
+  });
+
+  it('preserves one-argument check() for direct nonce-only callers', () => {
+    const cache = new NonceCache(60_000, 10);
+
+    assert.strictEqual(cache.check('nonce-1'), true);
+    assert.strictEqual(cache.check('nonce-1'), false);
+
+    cache.destroy();
+  });
+});
+
 describe('@signet-auth/mcp-server signResponse', () => {
   const agentKp = generateKeypair();
   const serverKp = generateKeypair();
@@ -269,9 +304,23 @@ describe('@signet-auth/mcp-server signResponse', () => {
     };
   }
 
+  function verifyTrustedRequest(req: ReturnType<typeof signedRequest>) {
+    const receipt = req.params._meta._signet as SignetReceipt;
+    const verified = verifyRequest(req, { trustedKeys: [receipt.signer.pubkey] });
+    assert.strictEqual(verified.ok, true, `Expected ok: true, got error: ${verified.error}`);
+    assert.strictEqual(verified.trusted, true);
+  }
+
+  function verifySignatureOnlyRequest(req: ReturnType<typeof signedRequest>) {
+    const verified = verifyRequest(req, { trustedKeys: [] });
+    assert.strictEqual(verified.ok, true, `Expected ok: true, got error: ${verified.error}`);
+    assert.strictEqual(verified.trusted, false);
+  }
+
   it('test_sign_response_produces_bilateral — sign valid request+response → returns v3 with correct fields', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const response = { content: [{ type: 'text', text: 'world' }] };
+    verifyTrustedRequest(req);
 
     const bilateral = signResponse(req, response, {
       serverKey: serverKp.secretKey,
@@ -291,6 +340,7 @@ describe('@signet-auth/mcp-server signResponse', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const agentReceipt = req.params._meta._signet as SignetReceipt;
     const response = { content: [{ type: 'text', text: 'world' }] };
+    verifyTrustedRequest(req);
 
     const bilateral = signResponse(req, response, {
       serverKey: serverKp.secretKey,
@@ -304,6 +354,7 @@ describe('@signet-auth/mcp-server signResponse', () => {
   it('test_sign_response_verifiable — produced v3 passes verifyBilateral() with server public key', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const response = { content: [{ type: 'text', text: 'world' }] };
+    verifyTrustedRequest(req);
 
     const bilateral = signResponse(req, response, {
       serverKey: serverKp.secretKey,
@@ -327,36 +378,70 @@ describe('@signet-auth/mcp-server signResponse', () => {
     );
   });
 
-  it('test_sign_response_pubkey_with_prefix — receipt.signer.pubkey already has ed25519: prefix → signResponse succeeds', () => {
-    // Fix #7: signResponse must handle prefixed pubkey in agent receipt (normal case)
+  it('test_sign_response_requires_verify_request_context — request with receipt but no prior verifyRequest() → throws Error', () => {
     const req = signedRequest('echo', { message: 'hello' });
-    const agentReceipt = req.params._meta._signet as SignetReceipt;
-
-    // Verify the receipt already has a prefixed pubkey (this is the normal case)
-    assert(agentReceipt.signer.pubkey.startsWith('ed25519:'),
-      `Expected prefixed pubkey in receipt, got: ${agentReceipt.signer.pubkey}`);
-
     const response = { content: [{ type: 'text', text: 'world' }] };
-    // Should not throw — prefix stripping must work correctly
+
+    assert.throws(
+      () => signResponse(req, response, { serverKey: serverKp.secretKey, serverName: 'test-server' }),
+      (err: Error) => {
+        assert(err.message.includes('verification context'), `Expected verification context error, got: ${err.message}`);
+        return true;
+      },
+    );
+  });
+
+  it('test_sign_response_rejects_untrusted_verification_context_by_default — verifyRequest() without trust anchors cannot co-sign', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = { content: [{ type: 'text', text: 'world' }] };
+    verifySignatureOnlyRequest(req);
+
+    assert.throws(
+      () => signResponse(req, response, { serverKey: serverKp.secretKey, serverName: 'test-server' }),
+      (err: Error) => {
+        assert(err.message.includes('without trust anchors'), `Expected trust-anchor error, got: ${err.message}`);
+        return true;
+      },
+    );
+  });
+
+  it('test_sign_response_allow_untrusted_request_opt_in — explicit opt-in preserves signature-only deployments', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = { content: [{ type: 'text', text: 'world' }] };
+    verifySignatureOnlyRequest(req);
+
     const bilateral = signResponse(req, response, {
       serverKey: serverKp.secretKey,
       serverName: 'test-server',
+      allowUntrustedRequest: true,
     });
 
     assert.strictEqual(bilateral.v, 3);
     assert(bilateral.sig.startsWith('ed25519:'));
   });
 
-  it('test_sign_response_pubkey_prefix_stripping — signResponse correctly strips ed25519: prefix when calling verify() internally', () => {
-    // Fix #7: signResponse must strip "ed25519:" prefix from receipt.signer.pubkey before
-    // passing to verify(), which expects bare base64. This test confirms the internal path
-    // works by checking that a normal (prefixed) receipt produces a valid bilateral, and
-    // that the bilateral's embedded agent_receipt retains the original prefixed pubkey.
+  it('test_sign_response_rejects_request_mutation_after_verification — request args changed after verifyRequest() → throws Error', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    verifyTrustedRequest(req);
+    req.params.arguments = { message: 'tampered' };
+    const response = { content: [{ type: 'text', text: 'world' }] };
+
+    assert.throws(
+      () => signResponse(req, response, { serverKey: serverKp.secretKey, serverName: 'test-server' }),
+      (err: Error) => {
+        assert(err.message.includes('changed after verification'), `Expected mutation error, got: ${err.message}`);
+        return true;
+      },
+    );
+  });
+
+  it('test_sign_response_pubkey_with_prefix — receipt.signer.pubkey already has ed25519: prefix → signResponse succeeds', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const agentReceipt = req.params._meta._signet as SignetReceipt;
+    verifyTrustedRequest(req);
 
     assert(agentReceipt.signer.pubkey.startsWith('ed25519:'),
-      `agent receipt must have prefixed pubkey, got: ${agentReceipt.signer.pubkey}`);
+      `Expected prefixed pubkey in receipt, got: ${agentReceipt.signer.pubkey}`);
 
     const response = { content: [{ type: 'text', text: 'world' }] };
     const bilateral = signResponse(req, response, {
@@ -364,11 +449,7 @@ describe('@signet-auth/mcp-server signResponse', () => {
       serverName: 'test-server',
     });
 
-    // verify() internally must have succeeded (prefix was stripped) — if it threw
-    // "invalid signature" the test would fail before reaching here
     assert.strictEqual(bilateral.v, 3);
-    assert(bilateral.sig.startsWith('ed25519:'));
-    // Embedded agent_receipt must preserve the original prefixed pubkey
     assert.strictEqual(bilateral.agent_receipt.signer.pubkey, agentReceipt.signer.pubkey);
   });
 });

@@ -134,9 +134,17 @@ class VerifyFailure:
     receipt_id: str
     reason: str
 
+class VerifyWarning:
+    file: str | None
+    line: int | None
+    receipt_id: str
+    reason: str
+
 class VerifyResult:
     total: int
     valid: int
+    @property
+    def warnings(self) -> list[VerifyWarning]: ...
     @property
     def failures(self) -> list[VerifyFailure]: ...
 
@@ -231,7 +239,17 @@ def verify_bilateral_with_options(
     expected_call_id: str | None = None,
     check_nonce: bool = False,
     max_time_window_secs: int = 300,
+    trusted_agent_public_key: str | None = None,
 ) -> bool: ...
+def verify_bilateral_detailed(
+    receipt: BilateralReceipt,
+    server_public_key: str,
+    expected_session: str | None = None,
+    expected_call_id: str | None = None,
+    check_nonce: bool = False,
+    max_time_window_secs: int = 300,
+    trusted_agent_public_key: str | None = None,
+) -> str: ...
 
 # ─── Delegation functions ────────────────────────────────────────────────────
 
@@ -324,4 +342,6 @@ def audit_verify_signatures(
     tool: str | None = None,
     signer: str | None = None,
     limit: int | None = None,
+    trusted_agent_keys: list[str] | None = None,
+    trusted_server_keys: list[str] | None = None,
 ) -> VerifyResult: ...

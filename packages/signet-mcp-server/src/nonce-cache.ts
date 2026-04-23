@@ -7,6 +7,7 @@ export class NonceCache {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private ttlMs: number;
   private maxSize: number;
+  private nextExpiry = Number.POSITIVE_INFINITY;
 
   /**
    * @param ttlMs Time-to-live for nonce entries in milliseconds. Default: 300_000 (5 min).
@@ -23,13 +24,20 @@ export class NonceCache {
    * Check and record a nonce. Returns true if the nonce is fresh (not seen before).
    * Returns false if the nonce is a duplicate (possible replay).
    */
-  check(nonce: string): boolean {
+  check(nonce: string): boolean;
+  check(signerPubkey: string, nonce: string): boolean;
+  check(signerOrNonce: string, nonce?: string): boolean {
     const now = Date.now();
-    const existing = this.seen.get(nonce);
+    const key = this.makeKey(signerOrNonce, nonce);
+    const existing = this.seen.get(key);
     if (existing !== undefined && existing > now) {
       return false;
     }
-    this.seen.set(nonce, now + this.ttlMs);
+    const expiry = now + this.ttlMs;
+    this.seen.set(key, expiry);
+    if (expiry < this.nextExpiry) {
+      this.nextExpiry = expiry;
+    }
     // Evict oldest entries if over capacity
     if (this.seen.size > this.maxSize) {
       const toRemove = this.seen.size - this.maxSize;
@@ -45,11 +53,23 @@ export class NonceCache {
   /** Remove expired entries. */
   prune(): void {
     const now = Date.now();
+    if (this.seen.size === 0) {
+      this.nextExpiry = Number.POSITIVE_INFINITY;
+      return;
+    }
+    if (this.nextExpiry > now) {
+      return;
+    }
+
+    let nextExpiry = Number.POSITIVE_INFINITY;
     for (const [nonce, expiry] of this.seen) {
       if (expiry <= now) {
         this.seen.delete(nonce);
+      } else if (expiry < nextExpiry) {
+        nextExpiry = expiry;
       }
     }
+    this.nextExpiry = this.seen.size === 0 ? Number.POSITIVE_INFINITY : nextExpiry;
   }
 
   /** Stop cleanup timer. Call when shutting down. */
@@ -59,10 +79,16 @@ export class NonceCache {
       this.cleanupTimer = null;
     }
     this.seen.clear();
+    this.nextExpiry = Number.POSITIVE_INFINITY;
   }
 
   /** Number of active entries (for testing/monitoring). */
   get size(): number {
     return this.seen.size;
+  }
+
+  private makeKey(signerOrNonce: string, nonce?: string): string {
+    if (nonce === undefined) return signerOrNonce;
+    return `${signerOrNonce}\u0000${nonce}`;
   }
 }

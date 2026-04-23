@@ -231,12 +231,45 @@ impl Default for BilateralVerifyOptions {
     }
 }
 
+/// Outcome for bilateral verification after signature and timestamp checks pass.
+///
+/// This only describes whether the embedded agent identity was anchored to an
+/// expected public key. Server trust still depends on the caller providing a
+/// trusted `server_pubkey` argument rather than a self-reported key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BilateralVerifyOutcome {
+    /// The bilateral receipt is internally consistent, but the embedded agent
+    /// identity was not checked against a trusted public key.
+    AgentSelfConsistent,
+    /// The bilateral receipt is internally consistent and the embedded agent
+    /// identity matched `trusted_agent_pubkey`.
+    AgentTrusted,
+}
+
+impl BilateralVerifyOutcome {
+    pub fn is_agent_trusted(self) -> bool {
+        matches!(self, Self::AgentTrusted)
+    }
+}
+
 /// Verify a bilateral receipt with default options (5-minute window).
 pub fn verify_bilateral(
     receipt: &BilateralReceipt,
     server_pubkey: &VerifyingKey,
 ) -> Result<(), SignetError> {
-    verify_bilateral_with_options(receipt, server_pubkey, &BilateralVerifyOptions::default())
+    verify_bilateral_detailed(receipt, server_pubkey).map(|_| ())
+}
+
+/// Verify a bilateral receipt with default options and return trust detail.
+pub fn verify_bilateral_detailed(
+    receipt: &BilateralReceipt,
+    server_pubkey: &VerifyingKey,
+) -> Result<BilateralVerifyOutcome, SignetError> {
+    verify_bilateral_with_options_detailed(
+        receipt,
+        server_pubkey,
+        &BilateralVerifyOptions::default(),
+    )
 }
 
 /// Verify a bilateral receipt with custom options.
@@ -245,6 +278,15 @@ pub fn verify_bilateral_with_options(
     server_pubkey: &VerifyingKey,
     options: &BilateralVerifyOptions,
 ) -> Result<(), SignetError> {
+    verify_bilateral_with_options_detailed(receipt, server_pubkey, options).map(|_| ())
+}
+
+/// Verify a bilateral receipt with custom options and return trust detail.
+pub fn verify_bilateral_with_options_detailed(
+    receipt: &BilateralReceipt,
+    server_pubkey: &VerifyingKey,
+    options: &BilateralVerifyOptions,
+) -> Result<BilateralVerifyOutcome, SignetError> {
     // 0. Cross-check: caller's key must match receipt.server.pubkey
     let receipt_server_b64 = receipt
         .server
@@ -372,7 +414,11 @@ pub fn verify_bilateral_with_options(
         checker.record(&receipt.nonce);
     }
 
-    Ok(())
+    Ok(if options.trusted_agent_pubkey.is_some() {
+        BilateralVerifyOutcome::AgentTrusted
+    } else {
+        BilateralVerifyOutcome::AgentSelfConsistent
+    })
 }
 
 #[cfg(test)]
@@ -581,6 +627,35 @@ mod tests {
         )
         .unwrap();
         assert!(verify_bilateral(&bilateral, &server_vk).is_ok());
+    }
+
+    #[test]
+    fn test_bilateral_detailed_defaults_to_self_consistent() {
+        let (agent_key, agent_vk) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "agent", "owner").unwrap();
+        let bilateral = sign::sign_bilateral(
+            &server_key,
+            &agent_receipt,
+            &json!({"content": [{"type": "text", "text": "ok"}]}),
+            "github-mcp",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )
+        .unwrap();
+
+        assert_eq!(
+            verify_bilateral_detailed(&bilateral, &server_vk).unwrap(),
+            BilateralVerifyOutcome::AgentSelfConsistent
+        );
+        let opts = BilateralVerifyOptions {
+            trusted_agent_pubkey: Some(agent_vk),
+            ..Default::default()
+        };
+        assert_eq!(
+            verify_bilateral_with_options_detailed(&bilateral, &server_vk, &opts).unwrap(),
+            BilateralVerifyOutcome::AgentTrusted
+        );
     }
 
     #[test]

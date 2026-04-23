@@ -124,14 +124,40 @@ fn parse_signing_key(secret_key: &str) -> PyResult<SigningKey> {
     }
 }
 
-fn parse_verifying_key(public_key: &str) -> PyResult<VerifyingKey> {
+pub(crate) fn parse_verifying_key(public_key: &str) -> PyResult<VerifyingKey> {
+    let b64 = public_key.strip_prefix("ed25519:").unwrap_or(public_key);
     let pubkey_bytes = B64
-        .decode(public_key)
+        .decode(b64)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 public key: {e}")))?;
     let pubkey_arr: [u8; 32] = pubkey_bytes
         .try_into()
         .map_err(|_| InvalidKeyError::new_err("public key must be 32 bytes"))?;
     VerifyingKey::from_bytes(&pubkey_arr).map_err(|e| InvalidKeyError::new_err(e.to_string()))
+}
+
+fn build_bilateral_options(
+    expected_session: Option<String>,
+    expected_call_id: Option<String>,
+    check_nonce: bool,
+    max_time_window_secs: u64,
+    trusted_agent_public_key: Option<String>,
+) -> PyResult<signet_core::BilateralVerifyOptions> {
+    let nonce_checker: Option<Box<dyn signet_core::NonceChecker>> = if check_nonce {
+        Some(Box::new(signet_core::InMemoryNonceChecker::new(10000, 600)))
+    } else {
+        None
+    };
+
+    Ok(signet_core::BilateralVerifyOptions {
+        max_time_window_secs,
+        trusted_agent_pubkey: match trusted_agent_public_key {
+            Some(key) => Some(parse_verifying_key(&key)?),
+            None => None,
+        },
+        expected_session,
+        expected_call_id,
+        nonce_checker,
+    })
 }
 
 #[pyfunction]
@@ -190,7 +216,7 @@ fn verify_bilateral(
 
 /// Verify a bilateral receipt with session/call_id cross-check and optional nonce replay protection.
 #[pyfunction]
-#[pyo3(signature = (receipt, server_public_key, expected_session=None, expected_call_id=None, check_nonce=false, max_time_window_secs=300))]
+#[pyo3(signature = (receipt, server_public_key, expected_session=None, expected_call_id=None, check_nonce=false, max_time_window_secs=300, trusted_agent_public_key=None))]
 #[allow(clippy::too_many_arguments)]
 fn verify_bilateral_with_options(
     py: Python<'_>,
@@ -200,25 +226,17 @@ fn verify_bilateral_with_options(
     expected_call_id: Option<String>,
     check_nonce: bool,
     max_time_window_secs: u64,
+    trusted_agent_public_key: Option<String>,
 ) -> PyResult<bool> {
     let verifying_key = parse_verifying_key(server_public_key)?;
     let inner = receipt.inner.clone();
-
-    // Build nonce checker if requested (in-memory, per-call — for persistent
-    // replay protection, use a shared checker at the application level)
-    let nonce_checker: Option<Box<dyn signet_core::NonceChecker>> = if check_nonce {
-        Some(Box::new(signet_core::InMemoryNonceChecker::new(10000, 600)))
-    } else {
-        None
-    };
-
-    let opts = signet_core::BilateralVerifyOptions {
-        max_time_window_secs,
-        trusted_agent_pubkey: None,
+    let opts = build_bilateral_options(
         expected_session,
         expected_call_id,
-        nonce_checker,
-    };
+        check_nonce,
+        max_time_window_secs,
+        trusted_agent_public_key,
+    )?;
 
     let result =
         py.allow_threads(|| signet_core::verify_bilateral_with_options(&inner, &verifying_key, &opts));
@@ -230,6 +248,48 @@ fn verify_bilateral_with_options(
             if msg.contains("does not match") || msg.contains("mismatch") =>
         {
             Ok(false)
+        }
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (receipt, server_public_key, expected_session=None, expected_call_id=None, check_nonce=false, max_time_window_secs=300, trusted_agent_public_key=None))]
+#[allow(clippy::too_many_arguments)]
+fn verify_bilateral_detailed(
+    py: Python<'_>,
+    receipt: crate::types::PyBilateralReceipt,
+    server_public_key: &str,
+    expected_session: Option<String>,
+    expected_call_id: Option<String>,
+    check_nonce: bool,
+    max_time_window_secs: u64,
+    trusted_agent_public_key: Option<String>,
+) -> PyResult<String> {
+    let verifying_key = parse_verifying_key(server_public_key)?;
+    let inner = receipt.inner.clone();
+    let opts = build_bilateral_options(
+        expected_session,
+        expected_call_id,
+        check_nonce,
+        max_time_window_secs,
+        trusted_agent_public_key,
+    )?;
+
+    let result = py.allow_threads(|| {
+        signet_core::verify_bilateral_with_options_detailed(&inner, &verifying_key, &opts)
+    });
+
+    match result {
+        Ok(signet_core::BilateralVerifyOutcome::AgentSelfConsistent) => {
+            Ok("agent_self_consistent".to_string())
+        }
+        Ok(signet_core::BilateralVerifyOutcome::AgentTrusted) => Ok("agent_trusted".to_string()),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok("invalid_signature".to_string()),
+        Err(signet_core::SignetError::InvalidReceipt(ref msg))
+            if msg.contains("does not match") || msg.contains("mismatch") =>
+        {
+            Ok("untrusted".to_string())
         }
         Err(e) => Err(to_py_err(e)),
     }
@@ -505,6 +565,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_bilateral, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral_with_options, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_bilateral_detailed, m)?)?;
     m.add_function(wrap_pyfunction!(sign_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(verify_delegation, m)?)?;
     m.add_function(wrap_pyfunction!(sign_authorized, m)?)?;

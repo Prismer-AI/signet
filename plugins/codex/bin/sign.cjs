@@ -5,18 +5,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-function main() {
-  const signetDir = process.env.SIGNET_HOME
+function writeStderr(stderr, message) {
+  stderr.write(message);
+}
+
+function processInput(raw, env = process.env, stderr = process.stderr) {
+  const signetDir = env.SIGNET_HOME
     || path.join(os.homedir(), '.signet');
   const keyPath = path.join(signetDir, 'keys', 'codex-agent.key');
 
-  // Read stdin
-  let raw;
-  try {
-    raw = fs.readFileSync(0, 'utf8');
-  } catch {
-    return;
-  }
   if (!raw || !raw.trim()) return;
 
   // Parse stdin JSON
@@ -24,7 +21,7 @@ function main() {
   try {
     input = JSON.parse(raw);
   } catch {
-    process.stderr.write('signet: failed to parse stdin JSON\n');
+    writeStderr(stderr, 'signet: failed to parse stdin JSON\n');
     return;
   }
 
@@ -43,7 +40,7 @@ function main() {
   try {
     key = signet.loadOrCreateKey(keyPath);
   } catch (err) {
-    process.stderr.write('signet: ' + err.message + '\n');
+    writeStderr(stderr, 'signet: ' + err.message + '\n');
     return;
   }
 
@@ -65,7 +62,7 @@ function main() {
   try {
     receipt = signet.sign(key.secretKey, action, 'codex-agent');
   } catch (err) {
-    process.stderr.write('signet: signing failed: ' + err.message + '\n');
+    writeStderr(stderr, 'signet: signing failed: ' + err.message + '\n');
     return;
   }
 
@@ -86,12 +83,26 @@ function main() {
   try {
     audit.append(signetDir, receipt, Object.keys(meta).length > 0 ? meta : null);
   } catch (err) {
-    process.stderr.write('signet: audit append failed: ' + err.message + '\n');
+    writeStderr(stderr, 'signet: audit append failed: ' + err.message + '\n');
   }
 }
 
-try {
-  main();
-} catch (err) {
-  process.stderr.write('signet: unexpected error: ' + err.message + '\n');
+function main() {
+  let raw;
+  try {
+    raw = fs.readFileSync(0, 'utf8');
+  } catch {
+    return;
+  }
+  processInput(raw);
 }
+
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    writeStderr(process.stderr, 'signet: unexpected error: ' + err.message + '\n');
+  }
+}
+
+module.exports = { main, processInput };

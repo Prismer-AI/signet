@@ -5,17 +5,28 @@ import { SigningTransport } from '@signet-auth/mcp';
 
 // Generate agent identity
 const { secretKey, publicKey } = generateKeypair();
+const serverKp = generateKeypair();
 console.log('Agent public key:', publicKey);
+console.log('Expected server public key:', `ed25519:${serverKp.publicKey}`);
+
+const serverEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([, value]) => value !== undefined),
+) as Record<string, string>;
+serverEnv.SIGNET_TRUSTED_KEYS = `ed25519:${publicKey}`;
+serverEnv.SIGNET_SERVER_SECRET_KEY = serverKp.secretKey;
+serverEnv.SIGNET_SERVER_PUBLIC_KEY = `ed25519:${serverKp.publicKey}`;
 
 // Create signed transport wrapping stdio
 const inner = new StdioClientTransport({
   command: 'npx',
   args: ['tsx', 'echo-server.ts'],
+  env: serverEnv,
 });
 
 const transport = new SigningTransport(inner as any, secretKey, 'demo-agent', 'demo-owner', {
   target: 'mcp://echo-server',
   transport: 'stdio',
+  trustedServerKeys: [`ed25519:${serverKp.publicKey}`],
   onDispatch: (receipt) => {
     console.log(`[dispatch] ${receipt.id} | tool: ${receipt.action.tool}`);
   },

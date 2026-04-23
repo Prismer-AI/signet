@@ -77,3 +77,42 @@ def test_session_match_call_id_mismatch():
         bilateral, server_kp.public_key,
         expected_session="s1", expected_call_id="c_wrong",
     ) is False
+
+
+def test_trusted_agent_public_key_match():
+    bilateral, server_kp = _make_bilateral()
+    assert signet_auth.verify_bilateral_with_options(
+        bilateral,
+        server_kp.public_key,
+        trusted_agent_public_key=bilateral.agent_receipt.signer.pubkey,
+    ) is True
+
+
+def test_trusted_agent_public_key_mismatch():
+    bilateral, server_kp = _make_bilateral()
+    other = signet_auth.generate_keypair()
+    assert signet_auth.verify_bilateral_with_options(
+        bilateral,
+        server_kp.public_key,
+        trusted_agent_public_key=other.public_key,
+    ) is False
+
+
+def test_verify_bilateral_detailed_self_consistent():
+    bilateral, server_kp = _make_bilateral()
+    assert (
+        signet_auth.verify_bilateral_detailed(bilateral, server_kp.public_key)
+        == "agent_self_consistent"
+    )
+
+
+def test_verify_bilateral_detailed_trusted():
+    bilateral, server_kp = _make_bilateral()
+    assert (
+        signet_auth.verify_bilateral_detailed(
+            bilateral,
+            server_kp.public_key,
+            trusted_agent_public_key=bilateral.agent_receipt.signer.pubkey,
+        )
+        == "agent_trusted"
+    )

@@ -1,21 +1,15 @@
 'use strict';
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-const SIGN_CJS = path.join(__dirname, '..', 'bin', 'sign.cjs');
+const { processInput } = require('../bin/sign.cjs');
 
 function runHook(stdinObj, env) {
   const input = JSON.stringify(stdinObj);
-  const result = execFileSync('node', [SIGN_CJS], {
-    input,
-    env: { ...process.env, ...env },
-    timeout: 10000,
-  });
-  return result.toString();
+  processInput(input, { ...process.env, ...env });
 }
 
 describe('bin/sign.cjs hook', () => {
@@ -197,23 +191,19 @@ describe('bin/sign.cjs hook', () => {
     fs.rmSync(tmpDir, { recursive: true });
   });
 
-  it('exits 0 on invalid stdin (no crash)', () => {
+  it('ignores invalid stdin without crashing', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
-    const result = execFileSync('node', [SIGN_CJS], {
-      input: 'not json',
-      env: { ...process.env, SIGNET_HOME: tmpDir },
-      timeout: 10000,
+    assert.doesNotThrow(() => {
+      processInput('not json', { ...process.env, SIGNET_HOME: tmpDir });
     });
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('exits 0 on empty stdin', () => {
+  it('ignores empty stdin', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'signet-hook-'));
-    const result = execFileSync('node', [SIGN_CJS], {
-      input: '',
-      env: { ...process.env, SIGNET_HOME: tmpDir },
-      timeout: 10000,
+    assert.doesNotThrow(() => {
+      processInput('', { ...process.env, SIGNET_HOME: tmpDir });
     });
-    fs.rmSync(tmpDir, { recursive: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

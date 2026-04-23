@@ -41,6 +41,7 @@ from signet_auth._signet import (
     ChainBreak,
     ChainStatus,
     VerifyFailure,
+    VerifyWarning,
     VerifyResult,
     # Core functions
     generate_keypair,
@@ -50,6 +51,7 @@ from signet_auth._signet import (
     verify_any,
     sign_bilateral,
     verify_bilateral,
+    verify_bilateral_detailed,
     verify_bilateral_with_options,
     # Delegation functions
     sign_delegation,
@@ -117,6 +119,7 @@ __all__ = [
     "ChainBreak",
     "ChainStatus",
     "VerifyFailure",
+    "VerifyWarning",
     "VerifyResult",
     # Core functions
     "generate_keypair",
@@ -126,6 +129,7 @@ __all__ = [
     "verify_any",
     "sign_bilateral",
     "verify_bilateral",
+    "verify_bilateral_detailed",
     "verify_bilateral_with_options",
     # Delegation functions
     "sign_delegation",

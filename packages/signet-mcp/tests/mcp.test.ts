@@ -337,4 +337,54 @@ describe('@signet-auth/mcp SigningTransport v3 bilateral extraction', () => {
     assert(errors.length > 0, 'onerror should have been called');
     assert(errors[0].message.includes('untrusted'), `Expected 'untrusted' in error, got: ${errors[0].message}`);
   });
+
+  it('test_bilateral_without_trust_anchors_not_forwarded_by_default — valid v3 with no trustedServerKeys → warning only', async () => {
+    const errors: Error[] = [];
+    let bilateralReceived: BilateralReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      onBilateral: (r) => { bilateralReceived = r; },
+    });
+    signing.onerror = (e) => { errors.push(e); };
+
+    await signing.send({ jsonrpc: '2.0', id: 14, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    const responseContent = { content: [{ type: 'text', text: 'world' }] };
+    const { result } = buildBilateralResponse(responseContent);
+    mock.simulateResponseWithMeta(14, responseContent, { _signet_bilateral: (result._meta as any)._signet_bilateral });
+
+    assert.strictEqual(bilateralReceived, null, 'onBilateral should not fire without trust anchors by default');
+    assert(errors.length > 0, 'onerror should have warned about missing trust anchors');
+    assert(
+      errors[0].message.includes('integrity only'),
+      `Expected integrity-only warning, got: ${errors[0].message}`,
+    );
+  });
+
+  it('test_bilateral_without_trust_anchors_can_opt_in — allowUntrustedBilateral=true preserves integrity-only callback', async () => {
+    const errors: Error[] = [];
+    let bilateralReceived: BilateralReceipt | null = null;
+    let untrustedReceived: BilateralReceipt | null = null;
+    const mock = new MockTransport();
+    const signing = new SigningTransport(mock, agentKp.secretKey, 'test-agent', 'owner', {
+      target: 'mcp://test-server',
+      transport: 'stdio',
+      allowUntrustedBilateral: true,
+      onBilateral: (r) => { bilateralReceived = r; },
+      onUntrustedBilateral: (r) => { untrustedReceived = r; },
+    });
+    signing.onerror = (e) => { errors.push(e); };
+
+    await signing.send({ jsonrpc: '2.0', id: 15, method: 'tools/call', params: { name: 'echo', arguments: { message: 'hello' } } });
+
+    const responseContent = { content: [{ type: 'text', text: 'world' }] };
+    const { result } = buildBilateralResponse(responseContent);
+    mock.simulateResponseWithMeta(15, responseContent, { _signet_bilateral: (result._meta as any)._signet_bilateral });
+
+    assert(bilateralReceived !== null, 'onBilateral should fire when allowUntrustedBilateral=true');
+    assert(untrustedReceived !== null, 'onUntrustedBilateral should fire when allowUntrustedBilateral=true');
+    assert(errors.length > 0, 'onerror should still warn about integrity-only verification');
+  });
 });

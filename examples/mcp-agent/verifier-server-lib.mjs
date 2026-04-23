@@ -7,11 +7,20 @@ import { verifyAny } from '@signet-auth/core';
 import { verifyRequest } from '@signet-auth/mcp-server';
 
 const DEFAULT_MAX_AGE = 300;
+const DEFAULT_REQUIRE_SIGNATURE = true;
+const DEFAULT_REQUIRE_TRUSTED_SIGNER = true;
+const TRUST_ANCHOR_REQUIRED_ERROR = 'trusted signer required but no trusted keys are configured';
+const SIGNATURE_ONLY_STATUS = 'signature-only';
+const TRUSTED_STATUS = 'trusted';
 
 export function loadVerifyOptions(env = process.env) {
   return {
     trustedKeys: splitCsv(env.SIGNET_TRUSTED_KEYS),
-    requireSignature: parseBoolean(env.SIGNET_REQUIRE_SIGNATURE, false),
+    requireSignature: parseBoolean(env.SIGNET_REQUIRE_SIGNATURE, DEFAULT_REQUIRE_SIGNATURE),
+    requireTrustedSigner: parseBoolean(
+      env.SIGNET_REQUIRE_TRUSTED_SIGNER,
+      DEFAULT_REQUIRE_TRUSTED_SIGNER,
+    ),
     maxAge: parseInteger(env.SIGNET_MAX_AGE, DEFAULT_MAX_AGE),
     ...(env.SIGNET_EXPECTED_TARGET ? { expectedTarget: env.SIGNET_EXPECTED_TARGET } : {}),
   };
@@ -71,6 +80,10 @@ export const TOOLS = [
           type: 'boolean',
           description: 'Whether to reject requests that do not include _meta._signet.',
         },
+        requireTrustedSigner: {
+          type: 'boolean',
+          description: 'Whether valid signatures must also match a configured trusted key.',
+        },
         maxAge: {
           type: 'integer',
           description: 'Maximum receipt age in seconds.',
@@ -123,12 +136,13 @@ export function createVerifierServer(verifyOptions = loadVerifyOptions()) {
 export function inspectCurrentRequest(request, verifyOptions, note) {
   const params = request.params ?? {};
   const hasReceipt = hasSignetReceipt(params);
-  const verification = verifyRequest(request, verifyOptions);
+  const verification = enforceVerifyPolicy(verifyRequest(request, verifyOptions), verifyOptions);
 
   return {
     server: {
       name: 'signet-verifier',
-      requireSignature: verifyOptions.requireSignature ?? false,
+      requireSignature: verifyOptions.requireSignature ?? DEFAULT_REQUIRE_SIGNATURE,
+      requireTrustedSigner: verifyOptions.requireTrustedSigner ?? DEFAULT_REQUIRE_TRUSTED_SIGNER,
       trustedKeyCount: verifyOptions.trustedKeys?.length ?? 0,
       maxAge: verifyOptions.maxAge ?? DEFAULT_MAX_AGE,
       expectedTarget: verifyOptions.expectedTarget ?? null,
@@ -143,8 +157,9 @@ export function inspectCurrentRequest(request, verifyOptions, note) {
       ok: verification.ok,
       signerName: verification.signerName ?? null,
       signerPubkey: verification.signerPubkey ?? null,
+      trusted: verification.trusted ?? false,
       error: verification.error ?? null,
-      status: deriveVerificationStatus(verification.ok, hasReceipt),
+      status: deriveVerificationStatus(verification, hasReceipt),
     },
   };
 }
@@ -173,11 +188,14 @@ export function verifySyntheticRequestPayload(args, defaultOptions) {
     ...defaultOptions,
     ...(Array.isArray(args.trustedKeys) ? { trustedKeys: args.trustedKeys.map(String) } : {}),
     ...(typeof args.requireSignature === 'boolean' ? { requireSignature: args.requireSignature } : {}),
+    ...(typeof args.requireTrustedSigner === 'boolean'
+      ? { requireTrustedSigner: args.requireTrustedSigner }
+      : {}),
     ...(typeof args.maxAge === 'number' ? { maxAge: args.maxAge } : {}),
     ...(typeof args.expectedTarget === 'string' ? { expectedTarget: args.expectedTarget } : {}),
   };
 
-  const result = verifyRequest({ params }, options);
+  const result = enforceVerifyPolicy(verifyRequest({ params }, options), options);
 
   return {
     request: {
@@ -188,10 +206,13 @@ export function verifySyntheticRequestPayload(args, defaultOptions) {
       ok: result.ok,
       signerName: result.signerName ?? null,
       signerPubkey: result.signerPubkey ?? null,
+      trusted: result.trusted ?? false,
       error: result.error ?? null,
+      status: deriveVerificationStatus(result, hasSignetReceipt(params)),
     },
     options: {
-      requireSignature: options.requireSignature ?? false,
+      requireSignature: options.requireSignature ?? DEFAULT_REQUIRE_SIGNATURE,
+      requireTrustedSigner: options.requireTrustedSigner ?? DEFAULT_REQUIRE_TRUSTED_SIGNER,
       trustedKeyCount: options.trustedKeys?.length ?? 0,
       maxAge: options.maxAge ?? DEFAULT_MAX_AGE,
       expectedTarget: options.expectedTarget ?? null,
@@ -215,11 +236,44 @@ function hasSignetReceipt(params) {
   return Boolean(params?._meta?._signet);
 }
 
-function deriveVerificationStatus(ok, hasReceipt) {
-  if (ok && hasReceipt) return 'verified';
-  if (ok) return 'unsigned-allowed';
+function enforceVerifyPolicy(result, verifyOptions) {
+  const requireTrustedSigner =
+    verifyOptions.requireTrustedSigner ?? DEFAULT_REQUIRE_TRUSTED_SIGNER;
+  if (!result.ok || !requireTrustedSigner || !result.hasReceipt || result.trusted) {
+    return result;
+  }
+
+  if ((verifyOptions.trustedKeys?.length ?? 0) === 0) {
+    return {
+      ...result,
+      ok: false,
+      error: TRUST_ANCHOR_REQUIRED_ERROR,
+      trusted: false,
+    };
+  }
+
+  return {
+    ...result,
+    ok: false,
+    error: result.error ?? 'signer is not trusted',
+    trusted: false,
+  };
+}
+
+function deriveVerificationStatus(result, hasReceipt) {
+  if (result.ok && hasReceipt && result.trusted) return TRUSTED_STATUS;
+  if (result.ok && hasReceipt) return SIGNATURE_ONLY_STATUS;
+  if (okForUnsignedRequest(result, hasReceipt)) return 'unsigned-allowed';
+  if (result.error === TRUST_ANCHOR_REQUIRED_ERROR) return 'trust-not-configured';
+  if (typeof result.error === 'string' && result.error.startsWith('untrusted signer:')) {
+    return 'untrusted-signer';
+  }
   if (hasReceipt) return 'rejected';
   return 'unsigned-rejected';
+}
+
+function okForUnsignedRequest(result, hasReceipt) {
+  return result.ok && !hasReceipt;
 }
 
 function splitCsv(value) {

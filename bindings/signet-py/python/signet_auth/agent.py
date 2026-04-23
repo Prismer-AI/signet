@@ -278,6 +278,8 @@ class SigningAgent:
         since: str | datetime | None = None,
         tool: str | None = None,
         limit: int | None = None,
+        trusted_agent_keys: list[str] | None = None,
+        trusted_server_keys: list[str] | None = None,
     ) -> VerifyResult:
         """Verify signatures on this agent's audit records."""
         return _audit_verify_signatures(
@@ -286,6 +288,8 @@ class SigningAgent:
             tool=tool,
             signer=self._name,
             limit=limit,
+            trusted_agent_keys=trusted_agent_keys,
+            trusted_server_keys=trusted_server_keys,
         )
 
     @property

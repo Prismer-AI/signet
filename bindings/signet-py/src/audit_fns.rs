@@ -6,8 +6,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
 use crate::errors::to_py_err;
+use crate::core_fns::parse_verifying_key;
 use crate::types::{
     PyAuditRecord, PyChainBreak, PyChainStatus, PyReceipt, PyVerifyFailure, PyVerifyResult,
+    PyVerifyWarning,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,7 +117,7 @@ fn audit_verify_chain(py: Python<'_>, dir: String) -> PyResult<PyChainStatus> {
 // ─── audit_verify_signatures ──────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (dir, *, since=None, tool=None, signer=None, limit=None))]
+#[pyo3(signature = (dir, *, since=None, tool=None, signer=None, limit=None, trusted_agent_keys=None, trusted_server_keys=None))]
 fn audit_verify_signatures(
     py: Python<'_>,
     dir: String,
@@ -123,11 +125,23 @@ fn audit_verify_signatures(
     tool: Option<String>,
     signer: Option<String>,
     limit: Option<usize>,
+    trusted_agent_keys: Option<Vec<String>>,
+    trusted_server_keys: Option<Vec<String>>,
 ) -> PyResult<PyVerifyResult> {
     let filter = build_filter(py, since, tool, signer, limit)?;
     let path = Path::new(&dir).to_path_buf();
+    let parse_keys = |keys: Option<Vec<String>>| -> PyResult<Vec<ed25519_dalek::VerifyingKey>> {
+        keys.unwrap_or_default()
+            .into_iter()
+            .map(|key| parse_verifying_key(&key))
+            .collect()
+    };
+    let options = signet_core::audit::AuditVerifyOptions {
+        trusted_agent_pubkeys: parse_keys(trusted_agent_keys)?,
+        trusted_server_pubkeys: parse_keys(trusted_server_keys)?,
+    };
     let result = py
-        .allow_threads(|| signet_core::audit::verify_signatures(&path, &filter))
+        .allow_threads(|| signet_core::audit::verify_signatures_with_options(&path, &filter, &options))
         .map_err(to_py_err)?;
 
     let failures = result
@@ -144,10 +158,25 @@ fn audit_verify_signatures(
             reason: f.reason,
         })
         .collect();
+    let warnings = result
+        .warnings
+        .into_iter()
+        .map(|w| PyVerifyWarning {
+            file: if w.file.is_empty() {
+                None
+            } else {
+                Some(w.file)
+            },
+            line: if w.line == 0 { None } else { Some(w.line) },
+            receipt_id: w.receipt_id,
+            reason: w.reason,
+        })
+        .collect();
 
     Ok(PyVerifyResult {
         total: result.total,
         valid: result.valid,
+        warnings,
         failures,
     })
 }

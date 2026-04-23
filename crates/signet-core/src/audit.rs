@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -50,6 +51,7 @@ pub struct ChainBreak {
 pub struct VerifyResult {
     pub total: usize,
     pub valid: usize,
+    pub warnings: Vec<VerifyWarning>,
     pub failures: Vec<VerifyFailure>,
 }
 
@@ -59,6 +61,32 @@ pub struct VerifyFailure {
     pub line: usize,
     pub receipt_id: String,
     pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyWarning {
+    pub file: String,
+    pub line: usize,
+    pub receipt_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Default)]
+pub struct AuditVerifyOptions {
+    /// Optional trusted server public keys for v3 bilateral receipts.
+    /// When empty, v3 server verification falls back to the self-reported
+    /// `receipt.server.pubkey` and produces a warning instead of a trust anchor.
+    pub trusted_server_pubkeys: Vec<VerifyingKey>,
+    /// Optional trusted agent public keys. For v1/v2 this constrains the signer.
+    /// For v3 this constrains the embedded agent receipt signer.
+    pub trusted_agent_pubkeys: Vec<VerifyingKey>,
+}
+
+#[derive(Debug)]
+struct LocatedAuditRecord {
+    record: AuditRecord,
+    file: String,
+    line: usize,
 }
 
 fn audit_dir(base: &Path) -> PathBuf {
@@ -245,14 +273,29 @@ pub fn append_violation(
 }
 
 pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, SignetError> {
+    Ok(query_with_locations(dir, filter)?
+        .into_iter()
+        .map(|record| record.record)
+        .collect())
+}
+
+fn query_with_locations(
+    dir: &Path,
+    filter: &AuditFilter,
+) -> Result<Vec<LocatedAuditRecord>, SignetError> {
     let files = sorted_audit_files(dir, false)?; // newest first
     let mut results = Vec::new();
 
     for file in files {
         let content = fs::read_to_string(&file)?;
+        let fname = file
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let lines: Vec<&str> = content.lines().collect();
 
-        for line in lines.iter().rev() {
+        for (idx, line) in lines.iter().enumerate().rev() {
             if line.trim().is_empty() {
                 continue;
             }
@@ -293,7 +336,11 @@ pub fn query(dir: &Path, filter: &AuditFilter) -> Result<Vec<AuditRecord>, Signe
                 }
             }
 
-            results.push(record);
+            results.push(LocatedAuditRecord {
+                record,
+                file: fname.clone(),
+                line: idx + 1,
+            });
 
             if let Some(limit) = filter.limit {
                 if results.len() >= limit {
@@ -369,15 +416,46 @@ pub fn verify_chain(dir: &Path) -> Result<ChainStatus, SignetError> {
 }
 
 pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResult, SignetError> {
+    verify_signatures_with_options(dir, filter, &AuditVerifyOptions::default())
+}
+
+fn parse_prefixed_verifying_key(label: &str, pubkey: &str) -> Result<VerifyingKey, String> {
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::Engine;
 
-    let records = query(dir, filter)?;
+    let b64 = pubkey
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| format!("{label} missing prefix"))?;
+    let bytes = BASE64
+        .decode(b64)
+        .map_err(|e| format!("{label} base64: {e}"))?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| format!("{label} not 32 bytes"))?;
+    VerifyingKey::from_bytes(&arr).map_err(|e| format!("{label} invalid: {e}"))
+}
+
+fn matching_trusted_key<'a>(
+    actual: &VerifyingKey,
+    trusted_keys: &'a [VerifyingKey],
+) -> Option<&'a VerifyingKey> {
+    trusted_keys
+        .iter()
+        .find(|trusted| trusted.as_bytes() == actual.as_bytes())
+}
+
+pub fn verify_signatures_with_options(
+    dir: &Path,
+    filter: &AuditFilter,
+    options: &AuditVerifyOptions,
+) -> Result<VerifyResult, SignetError> {
+    let records = query_with_locations(dir, filter)?;
     let mut valid = 0usize;
+    let mut warnings = Vec::new();
     let mut failures = Vec::new();
 
-    for record in &records {
-        let receipt = &record.receipt;
+    for located in &records {
+        let receipt = &located.record.receipt;
 
         // Extract receipt id for error reporting
         let receipt_id = receipt
@@ -385,123 +463,134 @@ pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResul
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let push_failure = |reason: String, failures: &mut Vec<VerifyFailure>| {
+            failures.push(VerifyFailure {
+                file: located.file.clone(),
+                line: located.line,
+                receipt_id: receipt_id.clone(),
+                reason,
+            });
+        };
 
         let version = receipt.get("v").and_then(|v| v.as_u64()).unwrap_or(1);
 
         if version == 3 {
-            // v3: parse as BilateralReceipt and verify_bilateral using the self-reported server key
+            // v3: verify bilateral receipts, optionally anchoring the server and
+            // agent keys to trusted inputs supplied by the caller.
             let bilateral: crate::BilateralReceipt = match serde_json::from_value(receipt.clone()) {
                 Ok(b) => b,
                 Err(e) => {
-                    failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: format!("v3 parse: {e}"),
-                    });
+                    push_failure(format!("v3 parse: {e}"), &mut failures);
                     continue;
                 }
             };
-            let server_pubkey_b64 = match bilateral.server.pubkey.strip_prefix("ed25519:") {
-                Some(b) => b,
-                None => {
-                    failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: "server pubkey missing prefix".to_string(),
-                    });
-                    continue;
-                }
-            };
-            let server_bytes = match BASE64.decode(server_pubkey_b64) {
-                Ok(b) => b,
-                Err(e) => {
-                    failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: format!("server pubkey base64: {e}"),
-                    });
-                    continue;
-                }
-            };
-            let server_arr: [u8; 32] = match server_bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: "server pubkey not 32 bytes".to_string(),
-                    });
-                    continue;
-                }
-            };
-            let server_vk = match ed25519_dalek::VerifyingKey::from_bytes(&server_arr) {
+            let server_vk = match parse_prefixed_verifying_key("server pubkey", &bilateral.server.pubkey)
+            {
                 Ok(vk) => vk,
-                Err(e) => {
-                    failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: format!("server pubkey invalid: {e}"),
-                    });
+                Err(reason) => {
+                    push_failure(reason, &mut failures);
                     continue;
                 }
             };
-            match crate::verify_bilateral(&bilateral, &server_vk) {
-                Ok(()) => valid += 1,
-                Err(e) => failures.push(VerifyFailure {
-                    file: String::new(),
-                    line: 0,
-                    receipt_id,
-                    reason: format!("bilateral verification failed: {e}"),
-                }),
+            let agent_vk = match parse_prefixed_verifying_key(
+                "agent pubkey",
+                &bilateral.agent_receipt.signer.pubkey,
+            ) {
+                Ok(vk) => vk,
+                Err(reason) => {
+                    push_failure(reason, &mut failures);
+                    continue;
+                }
+            };
+
+            let trusted_server = matching_trusted_key(&server_vk, &options.trusted_server_pubkeys);
+            if !options.trusted_server_pubkeys.is_empty() && trusted_server.is_none() {
+                push_failure("untrusted server pubkey".to_string(), &mut failures);
+                continue;
+            }
+
+            let trusted_agent = matching_trusted_key(&agent_vk, &options.trusted_agent_pubkeys);
+            if !options.trusted_agent_pubkeys.is_empty() && trusted_agent.is_none() {
+                push_failure("untrusted agent pubkey".to_string(), &mut failures);
+                continue;
+            }
+
+            let verify_options = crate::BilateralVerifyOptions {
+                trusted_agent_pubkey: trusted_agent.cloned(),
+                ..Default::default()
+            };
+
+            match crate::verify_bilateral_with_options_detailed(
+                &bilateral,
+                trusted_server.unwrap_or(&server_vk),
+                &verify_options,
+            ) {
+                Ok(crate::BilateralVerifyOutcome::AgentTrusted) if trusted_server.is_some() => {
+                    valid += 1
+                }
+                Ok(crate::BilateralVerifyOutcome::AgentTrusted) => {
+                    valid += 1;
+                    warnings.push(VerifyWarning {
+                        file: located.file.clone(),
+                        line: located.line,
+                        receipt_id: receipt_id.clone(),
+                        reason: "bilateral receipt verified with a trusted agent key, but server identity was checked only against self-reported receipt.server.pubkey".to_string(),
+                    });
+                }
+                Ok(crate::BilateralVerifyOutcome::AgentSelfConsistent) => {
+                    valid += 1;
+                    warnings.push(VerifyWarning {
+                        file: located.file.clone(),
+                        line: located.line,
+                        receipt_id: receipt_id.clone(),
+                        reason: if trusted_server.is_some() {
+                            "bilateral receipt verified with a trusted server key, but embedded agent identity was not anchored to trusted_agent_pubkeys".to_string()
+                        } else {
+                            "bilateral receipt verified for integrity only; audit used receipt.server.pubkey from the record and did not supply trusted_server_pubkeys or trusted_agent_pubkeys".to_string()
+                        },
+                    });
+                }
+                Err(e) => push_failure(
+                    format!("bilateral verification failed: {e}"),
+                    &mut failures,
+                ),
             }
             continue; // skip the v1/v2 path below
         }
 
         // Existing v1/v2: decode pubkey from receipt["signer"]["pubkey"]
         let pubkey_result = (|| -> Result<ed25519_dalek::VerifyingKey, String> {
-            let b64 = receipt
+            let pubkey = receipt
                 .get("signer")
                 .and_then(|s| s.get("pubkey"))
                 .and_then(|p| p.as_str())
-                .ok_or("missing signer.pubkey")?
-                .strip_prefix("ed25519:")
-                .ok_or("missing ed25519: prefix")?;
-            let bytes = BASE64.decode(b64).map_err(|e| format!("base64: {e}"))?;
-            let arr: [u8; 32] = bytes.try_into().map_err(|_| "not 32 bytes")?;
-            ed25519_dalek::VerifyingKey::from_bytes(&arr).map_err(|e| format!("{e}"))
+                .ok_or("missing signer.pubkey")?;
+            parse_prefixed_verifying_key("signer pubkey", pubkey)
         })();
 
         match pubkey_result {
             Ok(vk) => {
+                if !options.trusted_agent_pubkeys.is_empty()
+                    && matching_trusted_key(&vk, &options.trusted_agent_pubkeys).is_none()
+                {
+                    push_failure("untrusted signer pubkey".to_string(), &mut failures);
+                    continue;
+                }
                 let receipt_str = serde_json::to_string(receipt)
                     .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
                 match crate::verify_any(&receipt_str, &vk) {
                     Ok(()) => valid += 1,
-                    Err(_) => failures.push(VerifyFailure {
-                        file: String::new(),
-                        line: 0,
-                        receipt_id,
-                        reason: "signature mismatch".to_string(),
-                    }),
+                    Err(_) => push_failure("signature mismatch".to_string(), &mut failures),
                 }
             }
-            Err(reason) => failures.push(VerifyFailure {
-                file: String::new(),
-                line: 0,
-                receipt_id,
-                reason: format!("invalid pubkey: {reason}"),
-            }),
+            Err(reason) => push_failure(format!("invalid pubkey: {reason}"), &mut failures),
         }
     }
 
     Ok(VerifyResult {
         total: records.len(),
         valid,
+        warnings,
         failures,
     })
 }
@@ -705,6 +794,7 @@ mod tests {
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.total, 3);
         assert_eq!(result.valid, 3);
+        assert!(result.warnings.is_empty());
         assert!(result.failures.is_empty());
     }
 
@@ -843,7 +933,69 @@ mod tests {
         append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.valid, 1);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0]
+            .reason
+            .contains("verified for integrity only"));
         assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_audit_verify_signatures_v3_with_trusted_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, agent_vk) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral =
+            sign::sign_bilateral(&server_key, &agent_receipt, &response, "test-server", &ts)
+                .unwrap();
+
+        append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+        let result = verify_signatures_with_options(
+            dir.path(),
+            &AuditFilter::default(),
+            &AuditVerifyOptions {
+                trusted_server_pubkeys: vec![server_vk],
+                trusted_agent_pubkeys: vec![agent_vk],
+            },
+        )
+        .unwrap();
+        assert_eq!(result.valid, 1);
+        assert!(result.warnings.is_empty());
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_audit_verify_signatures_v3_untrusted_server_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, agent_vk) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let (_, wrong_server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral =
+            sign::sign_bilateral(&server_key, &agent_receipt, &response, "test-server", &ts)
+                .unwrap();
+
+        append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+        let result = verify_signatures_with_options(
+            dir.path(),
+            &AuditFilter::default(),
+            &AuditVerifyOptions {
+                trusted_server_pubkeys: vec![wrong_server_vk],
+                trusted_agent_pubkeys: vec![agent_vk],
+            },
+        )
+        .unwrap();
+        assert_eq!(result.valid, 0);
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.failures.len(), 1);
+        assert_eq!(result.failures[0].reason, "untrusted server pubkey");
     }
 
     #[test]
@@ -870,6 +1022,7 @@ mod tests {
 
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.valid, 2);
+        assert_eq!(result.warnings.len(), 1);
         assert!(result.failures.is_empty());
     }
 
@@ -898,6 +1051,7 @@ mod tests {
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.total, 1);
         assert_eq!(result.valid, 1);
+        assert!(result.warnings.is_empty());
         assert!(result.failures.is_empty());
     }
 
@@ -968,6 +1122,7 @@ mod tests {
 
         let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(result.valid, 1);
+        assert!(result.warnings.is_empty());
         assert!(result.failures.is_empty());
     }
 }

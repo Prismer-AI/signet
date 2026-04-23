@@ -34,9 +34,9 @@ pub use receipt::{
 pub use sign::{sign, sign_bilateral, sign_compound, sign_with_expiration, sign_with_policy};
 pub use sign_delegation::{sign_authorized, sign_delegation};
 pub use verify::{
-    verify, verify_allow_expired, verify_any, verify_bilateral,
-    verify_bilateral_with_options, verify_compound, BilateralVerifyOptions,
-    InMemoryNonceChecker, NonceChecker,
+    verify, verify_allow_expired, verify_any, verify_bilateral, verify_bilateral_detailed,
+    verify_bilateral_with_options, verify_bilateral_with_options_detailed, verify_compound,
+    BilateralVerifyOptions, BilateralVerifyOutcome, InMemoryNonceChecker, NonceChecker,
 };
 pub use verify_delegation::{
     verify_authorized, verify_chain as verify_delegation_chain, verify_delegation,

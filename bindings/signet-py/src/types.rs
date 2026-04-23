@@ -342,6 +342,21 @@ pub struct PyVerifyFailure {
     pub reason: String,
 }
 
+// ─── VerifyWarning ────────────────────────────────────────────────────────────
+
+#[pyclass(name = "VerifyWarning")]
+#[derive(Clone)]
+pub struct PyVerifyWarning {
+    #[pyo3(get)]
+    pub file: Option<String>,
+    #[pyo3(get)]
+    pub line: Option<usize>,
+    #[pyo3(get)]
+    pub receipt_id: String,
+    #[pyo3(get)]
+    pub reason: String,
+}
+
 // ─── VerifyResult ─────────────────────────────────────────────────────────────
 
 #[pyclass(name = "VerifyResult")]
@@ -350,11 +365,17 @@ pub struct PyVerifyResult {
     pub total: usize,
     #[pyo3(get)]
     pub valid: usize,
+    pub warnings: Vec<PyVerifyWarning>,
     pub failures: Vec<PyVerifyFailure>,
 }
 
 #[pymethods]
 impl PyVerifyResult {
+    #[getter]
+    fn warnings(&self) -> Vec<PyVerifyWarning> {
+        self.warnings.clone()
+    }
+
     #[getter]
     fn failures(&self) -> Vec<PyVerifyFailure> {
         self.failures.clone()
@@ -563,6 +584,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyChainBreak>()?;
     m.add_class::<PyChainStatus>()?;
     m.add_class::<PyVerifyFailure>()?;
+    m.add_class::<PyVerifyWarning>()?;
     m.add_class::<PyVerifyResult>()?;
     m.add_class::<PyServerInfo>()?;
     m.add_class::<PyBilateralReceipt>()?;

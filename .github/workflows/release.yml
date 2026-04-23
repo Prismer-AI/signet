@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate-version:
@@ -119,6 +119,8 @@ jobs:
     name: Attach binaries to release
     needs: [build, python, python-sdist]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v5
@@ -144,6 +146,7 @@ jobs:
     needs: [python, python-sdist]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/download-artifact@v5

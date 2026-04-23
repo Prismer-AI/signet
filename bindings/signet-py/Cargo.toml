@@ -11,8 +11,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 signet-core = { path = "../../crates/signet-core" }
-pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
-pythonize = "0.23"
+pyo3 = { version = "0.24.1", features = ["extension-module", "abi3-py310"] }
+pythonize = "0.24"
 serde_json = "1"
 base64 = "0.22"
 ed25519-dalek = "2"

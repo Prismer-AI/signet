@@ -2,6 +2,7 @@
 """Minimal mock MCP server for proxy integration tests.
 Reads JSON-RPC from stdin, writes responses to stdout."""
 import json
+import os
 import sys
 
 for line in sys.stdin:
@@ -30,9 +31,18 @@ for line in sys.stdin:
         params = msg.get("params", {})
         has_signet = "yes" if params.get("_meta", {}).get("_signet") else "no"
         tool_name = params.get("name", "unknown")
+        arguments = params.get("arguments", {})
         # Echo back the receipt ID if signed
         signet_data = params.get("_meta", {}).get("_signet", {})
         receipt_id = signet_data.get("id", "none")
+        payload = {
+            "tool": tool_name,
+            "signed": has_signet,
+            "receipt_id": receipt_id,
+        }
+        if tool_name == "envcheck":
+            names = arguments.get("names", [])
+            payload["env"] = {name: os.environ.get(name) for name in names}
         resp = {
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -40,11 +50,7 @@ for line in sys.stdin:
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps({
-                            "tool": tool_name,
-                            "signed": has_signet,
-                            "receipt_id": receipt_id,
-                        }),
+                        "text": json.dumps(payload),
                     }
                 ]
             },

@@ -39,7 +39,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@signet-auth/core": "^0.9.1"
   },
   "devDependencies": {

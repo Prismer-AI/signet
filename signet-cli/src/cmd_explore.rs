@@ -284,10 +284,16 @@ fn show_chain_status(dir: &Path) -> Result<()> {
         "Signatures:    {}/{} valid",
         verify_result.valid, verify_result.total
     );
+    if !verify_result.warnings.is_empty() {
+        println!("\nSignature warnings:");
+        for w in &verify_result.warnings {
+            println!("  {} ({}:{}): {}", w.receipt_id, w.file, w.line, w.reason);
+        }
+    }
     if !verify_result.failures.is_empty() {
         println!("\nSignature failures:");
         for f in &verify_result.failures {
-            println!("  {} ({}): {}", f.receipt_id, f.file, f.reason);
+            println!("  {} ({}:{}): {}", f.receipt_id, f.file, f.line, f.reason);
         }
     }
 

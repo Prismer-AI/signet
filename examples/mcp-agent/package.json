@@ -10,10 +10,14 @@
     "smoke": "node --test verifier-server.test.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@signet-auth/core": "file:../../packages/signet-core",
     "@signet-auth/mcp": "file:../../packages/signet-mcp",
     "@signet-auth/mcp-server": "file:../../packages/signet-mcp-server",
     "tsx": "^4"
+  },
+  "overrides": {
+    "@hono/node-server": "^1.19.13",
+    "hono": "^4.12.14"
   }
 }

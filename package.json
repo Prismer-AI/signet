@@ -13,5 +13,10 @@
   },
   "dependencies": {
     "puppeteer-core": "^24.40.0"
+  },
+  "overrides": {
+    "@hono/node-server": "^1.19.13",
+    "basic-ftp": "^5.2.3",
+    "hono": "^4.12.14"
   }
 }

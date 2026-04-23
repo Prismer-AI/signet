@@ -9,7 +9,25 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 /// Env vars always filtered from child process (Signet's own secrets).
-const ALWAYS_FILTER: &[&str] = &["SIGNET_PASSPHRASE"];
+const ALWAYS_FILTER: &[&str] = &["SIGNET_PASSPHRASE", "SIGNET_SECRET_KEY"];
+
+/// Common credentials filtered by default. Use `--allow-env NAME` to forward
+/// a specific variable to the child process when it is actually required.
+const DEFAULT_FILTER_EXACT: &[&str] = &[
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AZURE_OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "SLACK_BOT_TOKEN",
+];
+
+const DEFAULT_FILTER_SUFFIXES: &[&str] = &["_API_KEY", "_TOKEN", "_ACCESS_TOKEN"];
 
 /// Aggressive env filter: strips vars whose name contains these patterns.
 /// Only applied when --env-filter is explicitly enabled.
@@ -17,8 +35,147 @@ fn is_sensitive_env(name: &str) -> bool {
     let upper = name.to_uppercase();
     upper.contains("SECRET")
         || upper.contains("PASSWORD")
+        || upper.contains("PASSPHRASE")
         || upper.contains("PRIVATE_KEY")
         || upper.contains("CREDENTIAL")
+}
+
+fn is_default_filtered_env(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    DEFAULT_FILTER_EXACT.iter().any(|candidate| upper == *candidate)
+        || DEFAULT_FILTER_SUFFIXES
+            .iter()
+            .any(|suffix| upper.ends_with(suffix))
+}
+
+fn is_env_allowed(name: &str, allow_env: &[String]) -> bool {
+    allow_env
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+fn should_forward_env(name: &str, allow_env: &[String], aggressive_filter: bool) -> bool {
+    if ALWAYS_FILTER.iter().any(|candidate| candidate.eq_ignore_ascii_case(name)) {
+        return false;
+    }
+    if is_env_allowed(name, allow_env) {
+        return true;
+    }
+    if is_default_filtered_env(name) {
+        return false;
+    }
+    if aggressive_filter && is_sensitive_env(name) {
+        return false;
+    }
+    true
+}
+
+#[derive(Debug, Clone)]
+struct ParsedTarget {
+    program: String,
+    args: Vec<String>,
+}
+
+fn split_command_line(input: &str) -> Result<Vec<String>> {
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum QuoteMode {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote_mode = QuoteMode::None;
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match quote_mode {
+            QuoteMode::None => match ch {
+                '\'' => quote_mode = QuoteMode::Single,
+                '"' => quote_mode = QuoteMode::Double,
+                '\\' => {
+                    let escaped = chars
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("--target ends with an escape"))?;
+                    current.push(escaped);
+                }
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        parts.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(ch),
+            },
+            QuoteMode::Single => match ch {
+                '\'' => quote_mode = QuoteMode::None,
+                _ => current.push(ch),
+            },
+            QuoteMode::Double => match ch {
+                '"' => quote_mode = QuoteMode::None,
+                '\\' => {
+                    let escaped = chars
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("--target ends with an escape"))?;
+                    match escaped {
+                        '"' | '\\' | '$' | '`' => current.push(escaped),
+                        other => {
+                            current.push('\\');
+                            current.push(other);
+                        }
+                    }
+                }
+                _ => current.push(ch),
+            },
+        }
+    }
+
+    if quote_mode != QuoteMode::None {
+        bail!("--target has an unterminated quote");
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    Ok(parts)
+}
+
+fn token_requires_shell(token: &str) -> bool {
+    matches!(token, "|" | "||" | "&&" | ";" | "&" | ">" | ">>" | "<" | "<<" | "2>" | "2>>")
+        || token.contains("$(")
+        || token.contains('`')
+}
+
+fn parse_target(target: &str, allow_shell_syntax: bool) -> Result<ParsedTarget> {
+    let parts = split_command_line(target)?;
+    let Some(program) = parts.first() else {
+        bail!("--target cannot be empty");
+    };
+    if !allow_shell_syntax {
+        if let Some(token) = parts.iter().find(|token| token_requires_shell(token)) {
+            bail!(
+                "--target uses shell syntax ({token}); pass --shell to opt in to shell execution"
+            );
+        }
+    }
+    Ok(ParsedTarget {
+        program: program.clone(),
+        args: parts[1..].to_vec(),
+    })
+}
+
+fn derive_target_uri(parts: &[String]) -> String {
+    let first = parts.first().map(|s| s.as_str()).unwrap_or("local");
+    let meaningful = match first {
+        "npx" | "node" | "python" | "python3" | "bun" | "deno" | "cargo" | "go" => {
+            parts.get(1).map(|s| s.as_str()).unwrap_or(first)
+        }
+        _ => first,
+    };
+    let name = std::path::Path::new(meaningful)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(meaningful);
+    format!("mcp://{name}")
 }
 
 /// Stale pending request timeout (seconds). Entries older than this are
@@ -64,6 +221,11 @@ pub struct ProxyArgs {
     #[arg(long)]
     pub target: String,
 
+    /// Execute --target through a shell (`sh -c` / `cmd /C`).
+    /// Disabled by default to avoid shell injection.
+    #[arg(long)]
+    pub shell: bool,
+
     /// Signing key name (from keystore)
     #[arg(long)]
     pub key: String,
@@ -81,10 +243,13 @@ pub struct ProxyArgs {
     pub policy: Option<String>,
 
     /// Enable aggressive env filtering (strips vars with SECRET, PASSWORD, etc.)
-    /// By default, only SIGNET_PASSPHRASE is filtered so MCP servers can access
-    /// their own auth tokens (GITHUB_TOKEN, OPENAI_API_KEY, etc.)
+    /// By default, common tokens/API keys are already filtered.
     #[arg(long)]
     pub env_filter: bool,
+
+    /// Explicitly allow a filtered env var through to the child process.
+    #[arg(long, action = clap::ArgAction::Append, value_name = "NAME")]
+    pub allow_env: Vec<String>,
 }
 
 pub fn run(args: ProxyArgs) -> Result<()> {
@@ -126,41 +291,43 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         bail!("--target cannot be empty");
     }
 
+    let parsed_target = parse_target(&args.target, args.shell)?;
+    let display_target = if args.shell {
+        args.target.clone()
+    } else if parsed_target.args.is_empty() {
+        parsed_target.program.clone()
+    } else {
+        format!("{} {}", parsed_target.program, parsed_target.args.join(" "))
+    };
+
     let target_uri = if args.target_uri.is_empty() {
-        // Use the command name (first token) as best-effort URI.
-        // "npx @modelcontextprotocol/server-github" → "mcp://server-github"
-        // "python3 server.py --port 3000" → "mcp://server.py"
-        let first = args.target.split_whitespace().next().unwrap_or("local");
-        // Skip common launchers (npx, node, python3, etc.) and use the next arg
-        let meaningful = match first {
-            "npx" | "node" | "python" | "python3" | "bun" | "deno" | "cargo" | "go" =>
-                args.target.split_whitespace().nth(1).unwrap_or(first),
-            _ => first,
-        };
-        // Strip path prefix, keep filename
-        let name = std::path::Path::new(meaningful)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(meaningful);
-        format!("mcp://{name}")
+        let mut parts = Vec::with_capacity(parsed_target.args.len() + 1);
+        parts.push(parsed_target.program.clone());
+        parts.extend(parsed_target.args.iter().cloned());
+        derive_target_uri(&parts)
     } else {
         args.target_uri.clone()
     };
 
-    eprintln!("[signet proxy] target: {}", args.target);
+    eprintln!("[signet proxy] target: {}", display_target);
     eprintln!("[signet proxy] target_uri: {}", target_uri);
     eprintln!("[signet proxy] agent key: {} ({})", signer_name, info.pubkey);
     eprintln!("[signet proxy] server key: {} (ephemeral)", server_pubkey_b64);
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 
-    // Use shell to handle quoting, paths with spaces, and shell features.
-    let mut command = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.args(["/C", &args.target]);
-        c
+    let mut command = if args.shell {
+        if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/C", &args.target]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", &args.target]);
+            c
+        }
     } else {
-        let mut c = Command::new("sh");
-        c.args(["-c", &args.target]);
+        let mut c = Command::new(&parsed_target.program);
+        c.args(&parsed_target.args);
         c
     };
     command
@@ -168,24 +335,26 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
-    // Always remove Signet's own secrets. Optionally strip broader patterns.
-    for key in ALWAYS_FILTER {
-        command.env_remove(key);
+    // Forward a filtered environment instead of ambient inheritance.
+    command.env_clear();
+    for (k, v) in std::env::vars() {
+        if should_forward_env(&k, &args.allow_env, args.env_filter) {
+            command.env(&k, &v);
+        }
+    }
+    if args.shell {
+        eprintln!("[signet proxy] shell mode: enabled");
     }
     if args.env_filter {
-        // Aggressive mode: also strip vars matching SECRET, PASSWORD, etc.
-        command.env_clear();
-        for (k, v) in std::env::vars() {
-            if !is_sensitive_env(&k) && !ALWAYS_FILTER.iter().any(|&f| k == f) {
-                command.env(&k, &v);
-            }
-        }
         eprintln!("[signet proxy] env: aggressive filtering enabled");
+    }
+    if !args.allow_env.is_empty() {
+        eprintln!("[signet proxy] env: allowlisted {}", args.allow_env.join(", "));
     }
 
     let mut child = command
         .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to spawn '{}': {e}", args.target))?;
+        .map_err(|e| anyhow::anyhow!("failed to spawn '{}': {e}", display_target))?;
 
     let child_stdin = child
         .stdin

@@ -1,5 +1,7 @@
 use assert_cmd::Command;
+use base64::Engine;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::fs;
 use tempfile::tempdir;
 
@@ -1257,6 +1259,91 @@ fn test_audit_verify() {
 }
 
 #[test]
+fn test_audit_verify_bilateral_warns_without_trusted_keys() {
+    let dir = tempdir().unwrap();
+    let (agent_key, _) = signet_core::generate_keypair();
+    let (server_key, _) = signet_core::generate_keypair();
+    let action = signet_core::Action {
+        tool: "bash".to_string(),
+        params: serde_json::json!({"cmd":"echo hi"}),
+        params_hash: String::new(),
+        target: "mcp://local".to_string(),
+        transport: "stdio".to_string(),
+        session: None,
+        call_id: None,
+        response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
+    };
+    let receipt = signet_core::sign(&agent_key, &action, "agent", "").unwrap();
+    let bilateral = signet_core::sign_bilateral(
+        &server_key,
+        &receipt,
+        &serde_json::json!({"ok": true}),
+        "server",
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )
+    .unwrap();
+    signet_core::audit::append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--verify"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1/1 signatures valid"))
+        .stdout(predicate::str::contains("Warnings:"))
+        .stdout(predicate::str::contains("integrity only"));
+}
+
+#[test]
+fn test_audit_verify_bilateral_with_trusted_keys() {
+    let dir = tempdir().unwrap();
+    let (agent_key, agent_vk) = signet_core::generate_keypair();
+    let (server_key, server_vk) = signet_core::generate_keypair();
+    let action = signet_core::Action {
+        tool: "bash".to_string(),
+        params: serde_json::json!({"cmd":"echo hi"}),
+        params_hash: String::new(),
+        target: "mcp://local".to_string(),
+        transport: "stdio".to_string(),
+        session: None,
+        call_id: None,
+        response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
+    };
+    let receipt = signet_core::sign(&agent_key, &action, "agent", "").unwrap();
+    let bilateral = signet_core::sign_bilateral(
+        &server_key,
+        &receipt,
+        &serde_json::json!({"ok": true}),
+        "server",
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )
+    .unwrap();
+    signet_core::audit::append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+
+    let agent_pubkey = base64::engine::general_purpose::STANDARD.encode(agent_vk.as_bytes());
+    let server_pubkey = base64::engine::general_purpose::STANDARD.encode(server_vk.as_bytes());
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "audit",
+            "--verify",
+            "--trusted-agent-key",
+            &agent_pubkey,
+            "--trusted-server-key",
+            &server_pubkey,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1/1 signatures valid"))
+        .stdout(predicate::str::contains("Warnings:").not());
+}
+
+#[test]
 fn test_verify_chain() {
     let dir = tempdir().unwrap();
     signet()
@@ -1340,7 +1427,7 @@ fn run_proxy(
     key: &str,
     input: &str,
     extra_args: &[&str],
-) -> (String, String) {
+) -> (std::process::ExitStatus, String, String) {
     use std::io::Write;
     use std::process::{Command as StdCommand, Stdio};
 
@@ -1368,12 +1455,24 @@ fn run_proxy(
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    (stdout, stderr)
+    (output.status, stdout, stderr)
 }
 
 fn mock_server_cmd() -> String {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     format!("python3 {}/tests/mock_mcp_server.py", manifest_dir)
+}
+
+fn parse_mock_tool_payload(stdout: &str) -> Value {
+    let line = stdout
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .expect("mock server should emit a JSON-RPC line");
+    let response: Value = serde_json::from_str(line).expect("stdout should be valid JSON-RPC");
+    let text = response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("mock tool response should contain text");
+    serde_json::from_str(text).expect("mock tool text should be valid JSON")
 }
 
 #[test]
@@ -1390,7 +1489,8 @@ fn test_proxy_signs_tools_call() {
         "\n",
     );
 
-    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "proxykey", input, &[]);
+    let (status, stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "proxykey", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Proxy should have signed the call
     assert!(
@@ -1400,10 +1500,8 @@ fn test_proxy_signs_tools_call() {
 
     // Server should have received the _signet receipt
     // The "signed" field is inside a nested JSON string, so it appears escaped
-    assert!(
-        stdout.contains(r#"\"signed\": \"yes\""#) || stdout.contains(r#""signed": "yes""#),
-        "server should see _signet in params: {stdout}",
-    );
+    let payload = parse_mock_tool_payload(&stdout);
+    assert_eq!(payload["signed"], "yes", "server should see _signet in params: {stdout}");
 }
 
 #[test]
@@ -1420,7 +1518,8 @@ fn test_proxy_passthrough_non_tools_call() {
         "\n",
     );
 
-    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "passkey", input, &[]);
+    let (status, stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "passkey", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Should NOT log signing for initialize
     assert!(
@@ -1449,7 +1548,8 @@ fn test_proxy_writes_audit_log() {
         "\n",
     );
 
-    let (_stdout, _stderr) = run_proxy(dir.path(), &mock_server_cmd(), "auditkey", input, &[]);
+    let (status, _stdout, _stderr) = run_proxy(dir.path(), &mock_server_cmd(), "auditkey", input, &[]);
+    assert!(status.success());
 
     // Audit log should exist
     let audit_dir = dir.path().join("audit");
@@ -1481,9 +1581,10 @@ fn test_proxy_no_log_skips_audit() {
         "\n",
     );
 
-    let (_stdout, stderr) = run_proxy(
+    let (status, _stdout, stderr) = run_proxy(
         dir.path(), &mock_server_cmd(), "nologkey", input, &["--no-log"],
     );
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Should still sign
     assert!(stderr.contains("[signet proxy] signed:"));
@@ -1514,10 +1615,11 @@ fn test_proxy_with_policy_allowed() {
         "\n",
     );
 
-    let (_stdout, stderr) = run_proxy(
+    let (status, _stdout, stderr) = run_proxy(
         dir.path(), &mock_server_cmd(), "polkey", input,
         &["--policy", policy_path.to_str().unwrap()],
     );
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     assert!(stderr.contains("[signet proxy] signed:"), "should sign with policy: {stderr}");
 }
@@ -1543,10 +1645,11 @@ fn test_proxy_with_policy_denied() {
         "\n",
     );
 
-    let (_stdout, stderr) = run_proxy(
+    let (status, _stdout, stderr) = run_proxy(
         dir.path(), &mock_server_cmd(), "denkey", input,
         &["--policy", policy_path.to_str().unwrap()],
     );
+    assert!(status.success(), "proxy should return a handled JSON-RPC error: {stderr}");
 
     assert!(
         stderr.contains("DENIED") || stderr.contains("policy violation"),
@@ -1569,7 +1672,8 @@ fn test_proxy_multiple_messages() {
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write","arguments":{"path":"a.txt"}}}"#, "\n",
     );
 
-    let (stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multikey", input, &[]);
+    let (status, stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multikey", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Should sign exactly 2 tools/call, not initialize
     let sign_count = stderr.matches("[signet proxy] signed:").count();
@@ -1593,7 +1697,8 @@ fn test_proxy_bilateral_cosigning() {
         r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"test"}}}"#, "\n",
     );
 
-    let (_stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "bilatkey", input, &[]);
+    let (status, _stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "bilatkey", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Should sign the request
     assert!(
@@ -1642,13 +1747,201 @@ fn test_proxy_bilateral_multiple_calls() {
         r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bash","arguments":{}}}"#, "\n",
     );
 
-    let (_stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multibi", input, &[]);
+    let (status, _stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "multibi", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
 
     // Should sign 3 and bilateral 3
     assert!(
         stderr.contains("3 signed, 3 bilateral"),
         "should have 3 bilateral: {stderr}",
     );
+}
+
+#[test]
+fn test_proxy_rejects_shell_syntax_without_shell_flag() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "shellkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello"}}}"#,
+        "\n",
+    );
+
+    let target = format!("{} && true", mock_server_cmd());
+    let (status, _stdout, stderr) = run_proxy(dir.path(), &target, "shellkey", input, &[]);
+
+    assert!(!status.success(), "proxy should reject shell syntax");
+    assert!(
+        stderr.contains("pass --shell to opt in to shell execution"),
+        "stderr should explain why shell syntax was rejected: {stderr}",
+    );
+}
+
+#[test]
+fn test_proxy_shell_flag_allows_shell_syntax() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "shellok", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello"}}}"#,
+        "\n",
+    );
+
+    let target = format!("{} && true", mock_server_cmd());
+    let (status, stdout, stderr) = run_proxy(dir.path(), &target, "shellok", input, &["--shell"]);
+
+    assert!(status.success(), "proxy should allow shell mode: {stderr}");
+    assert!(stderr.contains("shell mode: enabled"), "shell mode should be logged: {stderr}");
+    let payload = parse_mock_tool_payload(&stdout);
+    assert_eq!(payload["signed"], "yes", "server should still receive signed request: {stdout}");
+}
+
+#[test]
+fn test_proxy_filters_default_sensitive_env() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "envkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"envcheck","arguments":{"names":["OPENAI_API_KEY","PUBLIC_VALUE"]}}}"#,
+        "\n",
+    );
+
+    let bin = assert_cmd::cargo::cargo_bin("signet");
+    let output = std::process::Command::new(bin)
+        .env("SIGNET_HOME", dir.path())
+        .env("OPENAI_API_KEY", "top-secret")
+        .env("PUBLIC_VALUE", "visible")
+        .args(["proxy", "--target", &mock_server_cmd(), "--key", "envkey"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .expect("run proxy");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(output.status.success(), "proxy should succeed: {stderr}");
+    let payload = parse_mock_tool_payload(&stdout);
+    assert_eq!(payload["env"]["PUBLIC_VALUE"], "visible", "public env should pass through: {stdout}");
+    assert!(payload["env"]["OPENAI_API_KEY"].is_null(), "sensitive env should be filtered by default: {stdout}");
+}
+
+#[test]
+fn test_proxy_allow_env_overrides_default_filter() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "allowenv", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"envcheck","arguments":{"names":["OPENAI_API_KEY"]}}}"#,
+        "\n",
+    );
+
+    let bin = assert_cmd::cargo::cargo_bin("signet");
+    let output = std::process::Command::new(bin)
+        .env("SIGNET_HOME", dir.path())
+        .env("OPENAI_API_KEY", "top-secret")
+        .args([
+            "proxy",
+            "--target",
+            &mock_server_cmd(),
+            "--key",
+            "allowenv",
+            "--allow-env",
+            "OPENAI_API_KEY",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .expect("run proxy");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(output.status.success(), "proxy should succeed: {stderr}");
+    let payload = parse_mock_tool_payload(&stdout);
+    assert_eq!(payload["env"]["OPENAI_API_KEY"], "top-secret", "allowlist should forward the requested env var: {stdout}");
+    assert!(
+        stderr.contains("allowlisted OPENAI_API_KEY"),
+        "allowlist usage should be logged: {stderr}",
+    );
+}
+
+#[test]
+fn test_proxy_aggressive_env_filter_blocks_generic_secret_names() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "aggenv", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"envcheck","arguments":{"names":["INTERNAL_SECRET","PUBLIC_VALUE"]}}}"#,
+        "\n",
+    );
+
+    let bin = assert_cmd::cargo::cargo_bin("signet");
+    let output = std::process::Command::new(bin)
+        .env("SIGNET_HOME", dir.path())
+        .env("INTERNAL_SECRET", "super-secret")
+        .env("PUBLIC_VALUE", "visible")
+        .args([
+            "proxy",
+            "--target",
+            &mock_server_cmd(),
+            "--key",
+            "aggenv",
+            "--env-filter",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .expect("run proxy");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(output.status.success(), "proxy should succeed: {stderr}");
+    let payload = parse_mock_tool_payload(&stdout);
+    assert_eq!(payload["env"]["PUBLIC_VALUE"], "visible", "public env should pass through: {stdout}");
+    assert!(payload["env"]["INTERNAL_SECRET"].is_null(), "aggressive mode should filter generic secret names: {stdout}");
 }
 
 // ─── explore ─────────────────────────────────────────────────────────────────

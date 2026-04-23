@@ -125,6 +125,7 @@ main {
   font-size: 12px;
 }
 .filters input { width: 160px; }
+.filters input.wide { width: 280px; }
 .filters input::placeholder { color: var(--ink3); }
 .filters button {
   background: var(--ink);
@@ -140,6 +141,12 @@ main {
   transition: background 0.15s;
 }
 .filters button:hover { background: var(--accent2); }
+.filters-note {
+  color: var(--ink3);
+  font-size: 12px;
+  margin: -10px 0 18px;
+  font-style: italic;
+}
 
 /* ── Table ── */
 table { width: 100%; border-collapse: collapse; }
@@ -429,6 +436,13 @@ function truncate(s, n) {
   return s && s.length > n ? s.slice(0, n) + '\u2026' : (s || '');
 }
 
+function splitKeyRefs(raw) {
+  return (raw || '')
+    .split(/[\s,]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
 // ── Timeline ──
 
 async function renderTimeline() {
@@ -557,10 +571,37 @@ async function renderChain() {
 
 async function renderSignatures() {
   const app = $('#app');
-  app.replaceChildren(h('div', {class: 'loading'}, 'Verifying signatures\u2026'));
+  const trustedAgent = $('#s-trusted-agent')?.value || '';
+  const trustedServer = $('#s-trusted-server')?.value || '';
+
+  const filters = h('div', null,
+    h('div', {class: 'filters'},
+      h('input', {
+        id: 's-trusted-agent',
+        class: 'wide',
+        placeholder: 'Trusted agent keys or names (comma separated)\u2026',
+        value: trustedAgent
+      }),
+      h('input', {
+        id: 's-trusted-server',
+        class: 'wide',
+        placeholder: 'Trusted server keys or names (comma separated)\u2026',
+        value: trustedServer
+      }),
+      h('button', {onclick: () => renderSignatures()}, 'Verify')
+    ),
+    h('div', {class: 'filters-note'},
+      'Leave trust anchors blank for compatibility mode. Bilateral receipts without trusted keys are verified for integrity only and reported as warnings.')
+  );
+
+  app.replaceChildren(filters, h('div', {class: 'loading'}, 'Verifying signatures\u2026'));
 
   try {
-    const result = await fetchJSON('/api/verify-signatures');
+    const params = new URLSearchParams();
+    if (trustedAgent.trim()) params.set('trusted_agent_key', trustedAgent.trim());
+    if (trustedServer.trim()) params.set('trusted_server_key', trustedServer.trim());
+    const query = params.toString();
+    const result = await fetchJSON(`/api/verify-signatures${query ? `?${query}` : ''}`);
     const pct = result.total > 0 ? (result.valid / result.total * 100) : 100;
     const allValid = result.valid === result.total;
 
@@ -573,7 +614,25 @@ async function renderSignatures() {
       )
     );
 
-    const parts = [card];
+    const parts = [filters, card];
+
+    if (result.warnings && result.warnings.length > 0) {
+      parts.push(h('div', {class: 'section-head'}, 'Verification Warnings'));
+      const warningTable = h('table', null,
+        h('thead', null, h('tr', null,
+          h('th', null, 'Receipt'), h('th', null, 'File'), h('th', null, 'Line'), h('th', null, 'Reason')
+        )),
+        h('tbody', null, ...result.warnings.map(w =>
+          h('tr', null,
+            h('td', {class: 'mono'}, truncate(w.receipt_id, 24)),
+            h('td', {class: 'mono'}, w.file),
+            h('td', null, String(w.line)),
+            h('td', null, w.reason)
+          )
+        ))
+      );
+      parts.push(warningTable);
+    }
 
     if (result.failures && result.failures.length > 0) {
       parts.push(h('div', {class: 'section-head'}, 'Verification Failures'));
@@ -595,7 +654,7 @@ async function renderSignatures() {
 
     app.replaceChildren(...parts);
   } catch (e) {
-    app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));
+    app.replaceChildren(filters, h('div', {class: 'empty'}, `Error: ${e.message}`));
   }
 }
 

@@ -118,6 +118,7 @@ fn audit_verify_chain(py: Python<'_>, dir: String) -> PyResult<PyChainStatus> {
 
 #[pyfunction]
 #[pyo3(signature = (dir, *, since=None, tool=None, signer=None, limit=None, trusted_agent_keys=None, trusted_server_keys=None))]
+#[allow(clippy::too_many_arguments)]
 fn audit_verify_signatures(
     py: Python<'_>,
     dir: String,

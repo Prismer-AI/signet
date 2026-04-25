@@ -11,8 +11,12 @@
       },
       "target": {
         "type": "string",
-        "description": "Logical target written into receipt.action.target. The active session key is appended as a fragment when present (e.g. openclaw://gateway/local#sessionKey).",
+        "description": "Logical target written into receipt.action.target verbatim. Signet policies match this string literally, so keep it stable across deployments to avoid silently dropping target-bound deny/approval rules.",
         "default": "openclaw://gateway/local"
+      },
+      "signerOwner": {
+        "type": "string",
+        "description": "DEPRECATED no-op. The receipt's signer.owner is taken from the identity metadata stored by `signet identity create --owner <name>`. Kept in the schema so configs from earlier scaffolds still validate; remove it from your config when convenient."
       },
       "policy": {
         "type": "string",

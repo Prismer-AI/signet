@@ -1,6 +1,8 @@
 export interface SignetPluginConfig {
   keyName?: string;
   target?: string;
+  /** @deprecated owner is taken from identity metadata; this field is ignored. */
+  signerOwner?: string;
   policy?: string;
   trustBundle?: string;
   auditDir?: string;

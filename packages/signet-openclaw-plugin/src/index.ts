@@ -103,6 +103,7 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
     properties: {
       keyName: { type: "string", default: "openclaw-agent" },
       target: { type: "string", default: "openclaw://gateway/local" },
+      signerOwner: { type: "string", description: "Deprecated no-op; owner comes from identity metadata." },
       policy: { type: "string" },
       trustBundle: { type: "string" },
       auditDir: { type: "string" },
@@ -121,6 +122,13 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
     log.info?.(
       `[signet] plugin armed: key=${cfg.keyName} target=${cfg.target} policy=${cfg.policy ?? "none"}`,
     );
+
+    const deprecated = api.pluginConfig as { signerOwner?: unknown } | undefined;
+    if (deprecated && typeof deprecated.signerOwner === "string") {
+      log.warn?.(
+        "[signet] plugins.entries.signet.config.signerOwner is deprecated and ignored. Owner is read from identity metadata.",
+      );
+    }
 
     api.on(
       "before_tool_call",
@@ -165,11 +173,10 @@ async function handleBeforeToolCall(
   log: PluginLoggerLike,
 ): Promise<BeforeToolCallResult> {
   try {
-    const target = ctx.sessionKey ? `${cfg.target}#${ctx.sessionKey}` : cfg.target;
     const receipt = (await client.sign({
       key: cfg.keyName,
       tool: event.toolName,
-      target,
+      target: cfg.target,
       params: event.params,
       policy: cfg.policy,
       auditEncryptParams: cfg.encryptParams,
@@ -177,7 +184,7 @@ async function handleBeforeToolCall(
 
     const receiptId = typeof receipt.id === "string" ? receipt.id : "<unknown>";
     log.info?.(
-      `[signet] signed ${event.toolName} (call=${event.toolCallId ?? "?"}) → ${receiptId}`,
+      `[signet] signed ${event.toolName} (call=${event.toolCallId ?? "?"} session=${ctx.sessionKey ?? "?"}) → ${receiptId}`,
     );
     return {};
   } catch (err) {

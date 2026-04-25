@@ -1,6 +1,5 @@
 export interface SignetPluginConfig {
   keyName?: string;
-  signerOwner?: string;
   target?: string;
   policy?: string;
   trustBundle?: string;
@@ -9,11 +8,11 @@ export interface SignetPluginConfig {
   encryptParams?: boolean;
   signetBin?: string;
   blockOnSignFailure?: boolean;
+  priority?: number;
 }
 
 export interface ResolvedSignetPluginConfig {
   keyName: string;
-  signerOwner: string;
   target: string;
   policy?: string;
   trustBundle?: string;
@@ -22,18 +21,18 @@ export interface ResolvedSignetPluginConfig {
   encryptParams: boolean;
   signetBin?: string;
   blockOnSignFailure: boolean;
+  priority: number;
 }
 
 export const DEFAULT_KEY_NAME = "openclaw-agent";
-export const DEFAULT_SIGNER_OWNER = "openclaw";
 export const DEFAULT_TARGET = "openclaw://gateway/local";
 export const DEFAULT_PASSPHRASE_ENV = "SIGNET_PASSPHRASE";
+export const DEFAULT_PRIORITY = 50;
 
 export function resolveConfig(input: SignetPluginConfig | undefined): ResolvedSignetPluginConfig {
   const cfg = input ?? {};
   return {
     keyName: cfg.keyName ?? DEFAULT_KEY_NAME,
-    signerOwner: cfg.signerOwner ?? DEFAULT_SIGNER_OWNER,
     target: cfg.target ?? DEFAULT_TARGET,
     policy: cfg.policy,
     trustBundle: cfg.trustBundle,
@@ -42,6 +41,7 @@ export function resolveConfig(input: SignetPluginConfig | undefined): ResolvedSi
     encryptParams: cfg.encryptParams ?? false,
     signetBin: cfg.signetBin,
     blockOnSignFailure: cfg.blockOnSignFailure ?? true,
+    priority: cfg.priority ?? DEFAULT_PRIORITY,
   };
 }
 

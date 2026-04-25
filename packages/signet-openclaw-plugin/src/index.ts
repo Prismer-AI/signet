@@ -8,15 +8,11 @@ import {
   type SignetPluginConfig,
 } from "./types.js";
 
-interface OpenClawApiLike {
-  pluginConfig?: Record<string, unknown>;
-  logger?: { info?: (msg: string, meta?: unknown) => void; warn?: (msg: string, meta?: unknown) => void; error?: (msg: string, meta?: unknown) => void };
-  registerHook?: (
-    events: string | string[],
-    handler: (event: BeforeToolCallEvent) => Promise<BeforeToolCallResult> | BeforeToolCallResult,
-    opts?: Record<string, unknown>,
-  ) => void;
-  registerSecurityAuditCollector?: (collector: SecurityAuditCollectorLike) => void;
+interface PluginLoggerLike {
+  info?: (msg: string) => void;
+  warn?: (msg: string) => void;
+  error?: (msg: string) => void;
+  debug?: (msg: string) => void;
 }
 
 interface BeforeToolCallEvent {
@@ -24,12 +20,6 @@ interface BeforeToolCallEvent {
   params: Record<string, unknown>;
   runId?: string;
   toolCallId?: string;
-}
-
-interface BeforeToolCallResult {
-  params?: Record<string, unknown>;
-  block?: boolean;
-  blockReason?: string;
 }
 
 interface AfterToolCallEvent {
@@ -42,16 +32,52 @@ interface AfterToolCallEvent {
   durationMs?: number;
 }
 
-interface SecurityAuditCollectorLike {
-  id: string;
-  collect: () => Promise<SecurityAuditFinding[]> | SecurityAuditFinding[];
+interface ToolHookContext {
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  runId?: string;
+  toolName: string;
+  toolCallId?: string;
 }
+
+interface BeforeToolCallResult {
+  params?: Record<string, unknown>;
+  block?: boolean;
+  blockReason?: string;
+}
+
+type SecurityAuditSeverity = "info" | "warn" | "critical";
 
 interface SecurityAuditFinding {
   checkId: string;
-  status: "pass" | "warn" | "fail" | "info";
-  message: string;
-  details?: Record<string, unknown>;
+  severity: SecurityAuditSeverity;
+  title: string;
+  detail: string;
+  remediation?: string;
+}
+
+interface SecurityAuditContextLike {
+  stateDir?: string;
+  configPath?: string;
+}
+
+interface OpenClawApiLike {
+  pluginConfig?: Record<string, unknown>;
+  logger: PluginLoggerLike;
+  on: (
+    hookName: string,
+    handler: (
+      event: BeforeToolCallEvent | AfterToolCallEvent,
+      ctx: ToolHookContext,
+    ) => Promise<BeforeToolCallResult | void> | BeforeToolCallResult | void,
+    opts?: { priority?: number },
+  ) => void;
+  registerSecurityAuditCollector: (
+    collector: (
+      ctx: SecurityAuditContextLike,
+    ) => SecurityAuditFinding[] | Promise<SecurityAuditFinding[]>,
+  ) => void;
 }
 
 interface DefinedPluginEntryLike {
@@ -76,7 +102,6 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
     additionalProperties: false,
     properties: {
       keyName: { type: "string", default: "openclaw-agent" },
-      signerOwner: { type: "string", default: "openclaw" },
       target: { type: "string", default: "openclaw://gateway/local" },
       policy: { type: "string" },
       trustBundle: { type: "string" },
@@ -85,39 +110,39 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
       encryptParams: { type: "boolean", default: false },
       signetBin: { type: "string" },
       blockOnSignFailure: { type: "boolean", default: true },
+      priority: { type: "number", default: 50 },
     },
   },
   register(api) {
     const cfg = resolveConfig(api.pluginConfig as SignetPluginConfig | undefined);
-    const log = api.logger ?? {};
+    const log = api.logger;
     const client = createClient(cfg);
 
-    log.info?.(`[signet] plugin armed: key=${cfg.keyName} target=${cfg.target} policy=${cfg.policy ?? "none"}`);
-
-    api.registerHook?.(
-      "before_tool_call",
-      async (event) => handleBeforeToolCall(event, cfg, client, log),
-      { pluginId: PLUGIN_ID },
+    log.info?.(
+      `[signet] plugin armed: key=${cfg.keyName} target=${cfg.target} policy=${cfg.policy ?? "none"}`,
     );
 
-    api.registerHook?.(
+    api.on(
+      "before_tool_call",
+      async (event, ctx) =>
+        handleBeforeToolCall(event as BeforeToolCallEvent, ctx, cfg, client, log),
+      { priority: cfg.priority },
+    );
+
+    api.on(
       "after_tool_call",
       (event) => {
-        const after = event as unknown as AfterToolCallEvent;
+        const after = event as AfterToolCallEvent;
         if (after.error) {
           log.warn?.(
             `[signet] tool errored: ${after.toolName} (${after.toolCallId ?? "?"}): ${after.error}`,
           );
         }
-        return {};
       },
-      { pluginId: PLUGIN_ID },
+      { priority: cfg.priority },
     );
 
-    api.registerSecurityAuditCollector?.({
-      id: "signet:plugin",
-      collect: () => collectSecurityFindings(cfg),
-    });
+    api.registerSecurityAuditCollector(() => collectSecurityFindings(cfg));
   },
 };
 
@@ -134,15 +159,17 @@ function createClient(cfg: ResolvedSignetPluginConfig): SignetNodeClient {
 
 async function handleBeforeToolCall(
   event: BeforeToolCallEvent,
+  ctx: ToolHookContext,
   cfg: ResolvedSignetPluginConfig,
   client: SignetNodeClient,
-  log: NonNullable<OpenClawApiLike["logger"]>,
+  log: PluginLoggerLike,
 ): Promise<BeforeToolCallResult> {
   try {
+    const target = ctx.sessionKey ? `${cfg.target}#${ctx.sessionKey}` : cfg.target;
     const receipt = (await client.sign({
       key: cfg.keyName,
       tool: event.toolName,
-      target: cfg.target,
+      target,
       params: event.params,
       policy: cfg.policy,
       auditEncryptParams: cfg.encryptParams,
@@ -169,40 +196,65 @@ async function handleBeforeToolCall(
   }
 }
 
-async function collectSecurityFindings(
+function collectSecurityFindings(
   cfg: ResolvedSignetPluginConfig,
-): Promise<SecurityAuditFinding[]> {
+): SecurityAuditFinding[] {
   const findings: SecurityAuditFinding[] = [];
 
   findings.push({
     checkId: "signet:configured",
-    status: "pass",
-    message: `Signet plugin enabled (key=${cfg.keyName})`,
-    details: { target: cfg.target, encryptParams: cfg.encryptParams },
+    severity: "info",
+    title: "Signet plugin enabled",
+    detail: `Tool calls are signed with identity '${cfg.keyName}' and emitted under target ${cfg.target}.`,
   });
 
   findings.push({
     checkId: "signet:policy",
-    status: cfg.policy ? "pass" : "info",
-    message: cfg.policy
-      ? `Policy enforced from ${cfg.policy}`
-      : "No policy configured — every signed call is allowed",
+    severity: cfg.policy ? "info" : "warn",
+    title: cfg.policy ? "Signet policy enforced" : "No Signet policy configured",
+    detail: cfg.policy
+      ? `Policy file: ${cfg.policy}. Denied tool calls are blocked before execution.`
+      : "Every signed call is allowed. Tool execution is observable but not gated.",
+    remediation: cfg.policy
+      ? undefined
+      : "Set plugins.entries.signet.config.policy to a Signet policy YAML to enforce deny rules.",
   });
 
   findings.push({
     checkId: "signet:trust-bundle",
-    status: cfg.trustBundle ? "pass" : "info",
-    message: cfg.trustBundle
-      ? `Trust bundle pinned at ${cfg.trustBundle}`
-      : "No trust bundle pinned — verifiers must supply one out-of-band",
+    severity: cfg.trustBundle ? "info" : "warn",
+    title: cfg.trustBundle ? "Trust bundle pinned" : "No trust bundle pinned",
+    detail: cfg.trustBundle
+      ? `Bundle file: ${cfg.trustBundle}. External verifiers can use the same bundle to anchor signatures.`
+      : "Verifiers must supply a trust bundle out-of-band when validating receipts emitted by this gateway.",
+    remediation: cfg.trustBundle
+      ? undefined
+      : "Set plugins.entries.signet.config.trustBundle to a published trust bundle path.",
   });
 
   findings.push({
     checkId: "signet:fail-mode",
-    status: cfg.blockOnSignFailure ? "pass" : "warn",
-    message: cfg.blockOnSignFailure
-      ? "Sign failures abort tool calls (fail-closed)"
-      : "Sign failures are logged but tool calls proceed (fail-open)",
+    severity: cfg.blockOnSignFailure ? "info" : "warn",
+    title: cfg.blockOnSignFailure
+      ? "Sign failures fail-closed"
+      : "Sign failures fail-open",
+    detail: cfg.blockOnSignFailure
+      ? "If signing or policy evaluation errors, the tool call is blocked. Safe default."
+      : "If signing or policy evaluation errors, the tool call still runs. Audit log may have gaps.",
+    remediation: cfg.blockOnSignFailure
+      ? undefined
+      : "Set plugins.entries.signet.config.blockOnSignFailure=true unless you accept silent audit gaps.",
+  });
+
+  findings.push({
+    checkId: "signet:params-encryption",
+    severity: cfg.encryptParams ? "info" : "info",
+    title: cfg.encryptParams
+      ? "Tool params encrypted at rest"
+      : "Tool params stored in clear in audit log",
+    detail: cfg.encryptParams
+      ? "action.params is wrapped in an XChaCha20-Poly1305 envelope keyed off the signing key."
+      : "Receipts include tool parameters in clear text. External auditors can read them without unlocking the signing key.",
   });
 
   return findings;

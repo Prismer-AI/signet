@@ -6,26 +6,21 @@
     "properties": {
       "keyName": {
         "type": "string",
-        "description": "Signet identity name in ~/.signet/identities/. The plugin shells out to the local `signet` CLI to sign with this key.",
+        "description": "Signet identity name in ~/.signet/identities/. The plugin shells out to the local `signet` CLI to sign with this key. The receipt's signer.owner is taken from the identity's stored metadata, not from this plugin config.",
         "default": "openclaw-agent"
-      },
-      "signerOwner": {
-        "type": "string",
-        "description": "Owner string written into receipt.signer.owner.",
-        "default": "openclaw"
       },
       "target": {
         "type": "string",
-        "description": "Logical target written into receipt.action.target. Recommended: openclaw://gateway/<gatewayId>.",
+        "description": "Logical target written into receipt.action.target. The active session key is appended as a fragment when present (e.g. openclaw://gateway/local#sessionKey).",
         "default": "openclaw://gateway/local"
       },
       "policy": {
         "type": "string",
-        "description": "Optional path to a Signet policy YAML. If set and the policy denies a tool call, the plugin returns {block:true} from before_tool_call."
+        "description": "Optional path to a Signet policy YAML. If set and the policy denies a tool call, the plugin returns {block:true} from before_tool_call so OpenClaw skips execution."
       },
       "trustBundle": {
         "type": "string",
-        "description": "Optional path to a Signet trust bundle YAML/JSON. Reserved for future verification flows; currently surfaced for parity with verify CLI."
+        "description": "Optional path to a Signet trust bundle YAML/JSON. Surfaced in the security audit collector so operators can confirm verifiers have an anchor."
       },
       "auditDir": {
         "type": "string",
@@ -47,8 +42,13 @@
       },
       "blockOnSignFailure": {
         "type": "boolean",
-        "description": "When true, a signing or policy failure aborts the tool call. When false, failures are logged and the call proceeds.",
+        "description": "When true (default), a signing or policy failure aborts the tool call. When false, failures are logged and the call proceeds.",
         "default": true
+      },
+      "priority": {
+        "type": "number",
+        "description": "Hook priority. Higher values run earlier. OpenClaw runs before_tool_call hooks in descending priority order.",
+        "default": 50
       }
     }
   }

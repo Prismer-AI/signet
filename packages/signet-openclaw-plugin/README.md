@@ -39,13 +39,18 @@ Add the plugin to your OpenClaw config (`~/.openclaw/config.json`):
           "target": "openclaw://gateway/local",
           "policy": "/Users/me/.signet/policies/openclaw.yaml",
           "encryptParams": true,
-          "blockOnSignFailure": true
+          "blockOnSignFailure": true,
+          "priority": 50
         }
       }
     }
   }
 }
 ```
+
+> **Note**: `receipt.signer.owner` is taken from the identity's stored metadata
+> (set with `signet identity create --owner <name>`), not from this plugin
+> config — Signet's CLI does not accept a per-call owner override.
 
 If your identity is passphrase-protected, export it before starting the gateway:
 
@@ -56,11 +61,11 @@ openclaw start
 
 ## What the plugin registers
 
-| Hook                   | Behavior                                                                                       |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `before_tool_call`     | Signs the call. On policy `deny` returns `{ block: true, blockReason }`.                        |
-| `after_tool_call`      | Logs tool errors (warning level).                                                               |
-| Security audit collector | Emits `signet:configured`, `signet:policy`, `signet:trust-bundle`, `signet:fail-mode` checks.  |
+| Hook | Behavior |
+| --- | --- |
+| `before_tool_call` | Signs the call via `api.on('before_tool_call', ...)`. On policy `deny` returns `{ block: true, blockReason }`. |
+| `after_tool_call` | Logs tool errors (warning level). |
+| Security audit collector | Emits `signet:configured`, `signet:policy`, `signet:trust-bundle`, `signet:fail-mode`, `signet:params-encryption` findings. |
 
 ## Verifying receipts
 
@@ -74,18 +79,18 @@ signet audit --verify --trust-bundle ./trust.yaml
 
 ## Configuration reference
 
-| Field                | Default                       | Notes                                                                                                       |
-| -------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `keyName`            | `openclaw-agent`              | Identity name in `~/.signet/identities/`.                                                                   |
-| `signerOwner`        | `openclaw`                    | Written into `receipt.signer.owner`.                                                                        |
-| `target`             | `openclaw://gateway/local`    | Logical target string. Recommended: `openclaw://gateway/<gatewayId>`.                                       |
-| `policy`             | (none)                        | Path to a Signet policy YAML. When set, denials block tool execution.                                       |
-| `trustBundle`        | (none)                        | Reserved for future verification flows; surfaced today for parity with the verify CLI.                      |
-| `auditDir`           | (CLI default — `~/.signet`)   | Override `SIGNET_HOME`.                                                                                     |
-| `passphraseEnv`      | `SIGNET_PASSPHRASE`           | Env var that holds the keystore passphrase.                                                                 |
-| `encryptParams`      | `false`                       | Encrypt `action.params` in the audit log.                                                                   |
-| `signetBin`          | (uses `$PATH`)                | Path to the `signet` binary.                                                                                |
-| `blockOnSignFailure` | `true`                        | Fail-closed (`true`) aborts the tool call on signing errors; fail-open (`false`) logs and lets the call run. |
+| Field | Default | Notes |
+| --- | --- | --- |
+| `keyName` | `openclaw-agent` | Identity name in `~/.signet/identities/`. Owner comes from identity metadata, not plugin config. |
+| `target` | `openclaw://gateway/local` | Logical target string; the active session key is appended as a fragment. |
+| `policy` | (none) | Path to a Signet policy YAML. When set, denials block tool execution. |
+| `trustBundle` | (none) | Surfaced in the security audit collector so operators see whether verifiers have an anchor. |
+| `auditDir` | (CLI default — `~/.signet`) | Override `SIGNET_HOME`. |
+| `passphraseEnv` | `SIGNET_PASSPHRASE` | Env var that holds the keystore passphrase. |
+| `encryptParams` | `false` | Encrypt `action.params` in the audit log. |
+| `signetBin` | (uses `$PATH`) | Path to the `signet` binary. |
+| `blockOnSignFailure` | `true` | Fail-closed (`true`) aborts the tool call on signing errors; fail-open (`false`) logs and lets the call run. |
+| `priority` | `50` | Hook priority. Higher values run earlier in OpenClaw's `before_tool_call` chain. |
 
 ## License
 

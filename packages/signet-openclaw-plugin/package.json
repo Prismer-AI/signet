@@ -1,0 +1,63 @@
+{
+  "name": "@signet-auth/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "Signet plugin for OpenClaw — Ed25519-signed audit receipts and policy enforcement for every tool call",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "signet",
+    "audit",
+    "ed25519",
+    "ai-agents",
+    "tool-calls"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-openclaw-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-openclaw-plugin"
+  },
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npx tsc",
+    "test": "npx tsc"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "openclaw": {
+    "extensions": ["./src/index.ts"],
+    "runtimeExtensions": ["./dist/src/index.js"],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2",
+      "minGatewayVersion": "2026.3.24-beta.2"
+    },
+    "build": {
+      "openclawVersion": "2026.3.24-beta.2"
+    }
+  },
+  "dependencies": {
+    "@signet-auth/node": "^0.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

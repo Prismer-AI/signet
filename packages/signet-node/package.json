@@ -1,0 +1,41 @@
+{
+  "name": "@signet-auth/node",
+  "version": "0.10.0",
+  "description": "Node-only local operator helpers for Signet using the signet CLI",
+  "keywords": [
+    "signet",
+    "node",
+    "audit",
+    "cli",
+    "receipts",
+    "operators"
+  ],
+  "homepage": "https://github.com/Prismer-AI/signet/tree/main/packages/signet-node#readme",
+  "bugs": {
+    "url": "https://github.com/Prismer-AI/signet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Prismer-AI/signet.git",
+    "directory": "packages/signet-node"
+  },
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npx tsc",
+    "test": "npx tsc && node --test dist/tests/node.test.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  },
+  "license": "Apache-2.0 OR MIT"
+}

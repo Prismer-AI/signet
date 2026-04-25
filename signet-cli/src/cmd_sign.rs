@@ -23,6 +23,9 @@ pub struct SignArgs {
     pub target: String,
     #[arg(long)]
     pub hash_only: bool,
+    /// Encrypt action.params in the audit log while keeping the signed receipt output unchanged.
+    #[arg(long)]
+    pub encrypt_params: bool,
     #[arg(long)]
     pub output: Option<String>,
     /// Skip writing to audit log
@@ -31,9 +34,25 @@ pub struct SignArgs {
     /// Policy file (YAML/JSON) — evaluate before signing
     #[arg(long)]
     pub policy: Option<String>,
+    /// Logical session identifier for the originating agent conversation.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Tool-call identifier from the host runtime (e.g. MCP id, OpenClaw toolCallId).
+    #[arg(long)]
+    pub call_id: Option<String>,
+    /// Trace identifier for cross-receipt correlation.
+    #[arg(long)]
+    pub trace_id: Option<String>,
+    /// Parent receipt id for chained execution proofs.
+    #[arg(long)]
+    pub parent_receipt_id: Option<String>,
 }
 
 pub fn sign(args: SignArgs) -> Result<()> {
+    if args.hash_only && args.encrypt_params {
+        anyhow::bail!("--encrypt-params cannot be used with --hash-only");
+    }
+
     let dir = signet_core::default_signet_dir();
     let info = signet_core::load_key_info(&dir, &args.key)?;
 
@@ -80,11 +99,11 @@ pub fn sign(args: SignArgs) -> Result<()> {
             params_hash: format!("sha256:{}", hex::encode(hash)),
             target: args.target,
             transport: "stdio".to_string(),
-            session: None,
-            call_id: None,
+            session: args.session.clone(),
+            call_id: args.call_id.clone(),
             response_hash: None,
-            trace_id: None,
-            parent_receipt_id: None,
+            trace_id: args.trace_id.clone(),
+            parent_receipt_id: args.parent_receipt_id.clone(),
         }
     } else {
         Action {
@@ -93,11 +112,11 @@ pub fn sign(args: SignArgs) -> Result<()> {
             params_hash: String::new(),
             target: args.target,
             transport: "stdio".to_string(),
-            session: None,
-            call_id: None,
+            session: args.session.clone(),
+            call_id: args.call_id.clone(),
             response_hash: None,
-            trace_id: None,
-            parent_receipt_id: None,
+            trace_id: args.trace_id.clone(),
+            parent_receipt_id: args.parent_receipt_id.clone(),
         }
     };
 
@@ -112,7 +131,10 @@ pub fn sign(args: SignArgs) -> Result<()> {
         } else {
             eval.matched_rules.join(", ")
         };
-        eprintln!("Policy \"{}\": {} ({})", eval.policy_name, eval.decision, rules_str);
+        eprintln!(
+            "Policy \"{}\": {} ({})",
+            eval.policy_name, eval.decision, rules_str
+        );
 
         match eval.decision {
             signet_core::RuleAction::Allow => {
@@ -120,7 +142,9 @@ pub fn sign(args: SignArgs) -> Result<()> {
             }
             signet_core::RuleAction::Deny | signet_core::RuleAction::RequireApproval => {
                 if !args.no_log {
-                    if let Err(e) = signet_core::audit::append_violation(&dir, &action, &info.name, &eval) {
+                    if let Err(e) =
+                        signet_core::audit::append_violation(&dir, &action, &info.name, &eval)
+                    {
                         eprintln!("Warning: failed to log violation: {e}");
                     }
                 }
@@ -139,7 +163,11 @@ pub fn sign(args: SignArgs) -> Result<()> {
 
     if !args.no_log {
         let receipt_json = serde_json::to_value(&receipt)?;
-        signet_core::audit::append(&dir, &receipt_json)?;
+        if args.encrypt_params {
+            signet_core::audit::append_encrypted(&dir, &receipt_json, &sk)?;
+        } else {
+            signet_core::audit::append(&dir, &receipt_json)?;
+        }
     }
 
     match args.output {

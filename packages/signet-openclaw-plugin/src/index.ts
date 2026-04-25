@@ -180,6 +180,9 @@ async function handleBeforeToolCall(
       params: event.params,
       policy: cfg.policy,
       auditEncryptParams: cfg.encryptParams,
+      session: ctx.sessionKey,
+      callId: event.toolCallId,
+      traceId: ctx.runId,
     })) as { id?: unknown };
 
     const receiptId = typeof receipt.id === "string" ? receipt.id : "<unknown>";

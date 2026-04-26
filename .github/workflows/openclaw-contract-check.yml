@@ -44,7 +44,10 @@ jobs:
         # exit code 1 (drift). Steps that fail before contract runs (checkout,
         # setup-node, gh-api outage during fetch) leave outputs.exit_code empty,
         # so this step is skipped and no false-positive issue is filed.
-        if: github.event_name == 'schedule' && steps.contract.outputs.exit_code == '1'
+        # `failure()` is required because GitHub Actions defaults to a
+        # `success()` guard, which would skip this step exactly in the drift
+        # case (the contract step exits 1 and marks the job failed).
+        if: failure() && github.event_name == 'schedule' && steps.contract.outputs.exit_code == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

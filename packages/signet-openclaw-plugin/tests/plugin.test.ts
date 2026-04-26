@@ -350,6 +350,66 @@ rules: []
     assert.ok(recoveryLogs.length >= 1, "recovery via successful sign must be logged");
   });
 
+  it("(h) state un-latches after a transient recovery: bypass re-fires when sign breaks again", async () => {
+    const home = await createSignetHome();
+    // blockOnSignFailure=false so failures are silent (state must surface them)
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    // Initial: identity missing -> sign fails -> bypass=critical
+    const r1 = await plugin.callBeforeToolCall({ toolName: "bash", params: {} });
+    assert.deepEqual(r1, {}, "fail-open lets call through");
+    let findings = await plugin.collectFindings();
+    assert.equal(findings.find((f) => f.checkId === "signet:bypass")?.severity, "critical");
+
+    // Operator fixes setup
+    await createIdentity(home, "openclaw-agent");
+
+    // Successful sign clears state to ok
+    const r2 = await plugin.callBeforeToolCall(
+      { toolName: "bash", params: {}, toolCallId: "c-1" },
+      { sessionKey: "s" },
+    );
+    assert.deepEqual(r2, {});
+    findings = await plugin.collectFindings();
+    assert.equal(
+      findings.find((f) => f.checkId === "signet:readiness")?.severity,
+      "info",
+      "readiness clears after successful sign",
+    );
+    assert.equal(
+      findings.find((f) => f.checkId === "signet:bypass"),
+      undefined,
+      "bypass clears after successful sign",
+    );
+
+    // Setup breaks again — operator deletes identity files (simulate).
+    // signet stores keys at <home>/keys/<name>.{pub,key}.
+    const fs = await import("node:fs/promises");
+    await fs.rm(join(home, "keys"), { recursive: true, force: true });
+
+    // Next sign fails, fail-open -> call still goes through but state must
+    // re-flag bypass instead of staying latched to "ok".
+    const r3 = await plugin.callBeforeToolCall(
+      { toolName: "bash", params: {}, toolCallId: "c-2" },
+      { sessionKey: "s" },
+    );
+    assert.deepEqual(r3, {}, "fail-open still allows call");
+    findings = await plugin.collectFindings();
+    assert.equal(
+      findings.find((f) => f.checkId === "signet:readiness")?.severity,
+      "critical",
+      "readiness must re-degrade after sign failure",
+    );
+    assert.ok(
+      findings.find((f) => f.checkId === "signet:bypass"),
+      "signet:bypass must re-fire after sign failure",
+    );
+  });
+
   it("re-reads SIGNET_PASSPHRASE on every call (passphrase fix mid-session takes effect)", async () => {
     const home = await createSignetHome();
     // Encrypted identity

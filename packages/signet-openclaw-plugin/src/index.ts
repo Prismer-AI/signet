@@ -412,6 +412,13 @@ async function signActiveCall(
 
     const message = err instanceof Error ? err.message : String(err);
     log.error?.(`[signet] sign failed for ${event.toolName}: ${message}`);
+    // Reflect the failure in runtime state so the audit collector stays
+    // honest after a transient recovery breaks again. Without this,
+    // `lastProbeStatus` would stay {ok:true} forever after one successful
+    // sign and signet:bypass would never re-fire even though every sign
+    // since then has been failing.
+    state.lastProbeStatus = classifySelfCheckError(err, cfg);
+    state.lastProbeAt = Date.now();
     if (cfg.blockOnSignFailure) {
       return { block: true, blockReason: `signet sign failed: ${message}` };
     }

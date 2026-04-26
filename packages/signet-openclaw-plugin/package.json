@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/openclaw-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Signet plugin for OpenClaw — Ed25519-signed audit receipts and policy enforcement for every tool call",
   "keywords": [
     "openclaw",
@@ -57,7 +57,7 @@
     }
   },
   "dependencies": {
-    "@signet-auth/node": "^0.9.2"
+    "@signet-auth/node": "^0.9.3"
   },
   "devDependencies": {
     "@types/node": "^22",

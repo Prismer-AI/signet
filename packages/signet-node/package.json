@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/node",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Node-only local operator helpers for Signet using the signet CLI",
   "keywords": [
     "signet",

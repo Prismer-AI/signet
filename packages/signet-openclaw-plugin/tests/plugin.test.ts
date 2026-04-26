@@ -410,6 +410,48 @@ rules: []
     );
   });
 
+  it("(i) per-call payload errors do NOT taint readiness (BigInt / circular refs)", async () => {
+    const home = await createSignetHome();
+    await createIdentity(home, "openclaw-agent");
+
+    // blockOnSignFailure=false so we can observe state without the call being blocked
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    // Confirm initial state is healthy
+    let findings = await plugin.collectFindings();
+    assert.equal(findings.find((f) => f.checkId === "signet:readiness")?.severity, "info");
+
+    // BigInt cannot be JSON.stringify'd — sign() throws TypeError before the
+    // CLI ever spawns. This is a per-call payload bug, not a signet failure.
+    const badParams = { count: 9007199254740993n } as unknown as Record<string, unknown>;
+    const r = await plugin.callBeforeToolCall({ toolName: "bash", params: badParams });
+    assert.deepEqual(r, {}, "fail-open allows the call through");
+
+    findings = await plugin.collectFindings();
+    const readiness = findings.find((f) => f.checkId === "signet:readiness");
+    assert.equal(
+      readiness?.severity,
+      "info",
+      `payload error must NOT flip readiness; got ${readiness?.severity} (${readiness?.title})`,
+    );
+    assert.equal(
+      findings.find((f) => f.checkId === "signet:bypass"),
+      undefined,
+      "signet:bypass must NOT fire on payload errors",
+    );
+
+    // A subsequent good call still works
+    const r2 = await plugin.callBeforeToolCall(
+      { toolName: "bash", params: { cmd: "ls" }, toolCallId: "c-1" },
+      { sessionKey: "s" },
+    );
+    assert.deepEqual(r2, {});
+  });
+
   it("re-reads SIGNET_PASSPHRASE on every call (passphrase fix mid-session takes effect)", async () => {
     const home = await createSignetHome();
     // Encrypted identity

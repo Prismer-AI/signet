@@ -1,4 +1,9 @@
-import { SignetNodeClient } from "@signet-auth/node";
+import {
+  SignetCliError,
+  SignetCliTimeoutError,
+  SignetCliVersionError,
+  SignetNodeClient,
+} from "@signet-auth/node";
 
 import {
   assertConfigCompatible,
@@ -412,18 +417,39 @@ async function signActiveCall(
 
     const message = err instanceof Error ? err.message : String(err);
     log.error?.(`[signet] sign failed for ${event.toolName}: ${message}`);
-    // Reflect the failure in runtime state so the audit collector stays
-    // honest after a transient recovery breaks again. Without this,
-    // `lastProbeStatus` would stay {ok:true} forever after one successful
-    // sign and signet:bypass would never re-fire even though every sign
-    // since then has been failing.
-    state.lastProbeStatus = classifySelfCheckError(err, cfg);
-    state.lastProbeAt = Date.now();
+    // Reflect SYSTEM failures in runtime state so the audit collector
+    // stays honest after a transient recovery breaks again. Per-call
+    // payload errors (TypeError from JSON.stringify on BigInt /
+    // circular refs, etc.) are NOT readiness failures — they prove
+    // the tool call had bad params, not that signet is broken. Filter
+    // by error class so only failures that originated in the spawned
+    // CLI (or a hung binary, or ENOENT) flip readiness.
+    if (isSignetSystemFailure(err)) {
+      state.lastProbeStatus = classifySelfCheckError(err, cfg);
+      state.lastProbeAt = Date.now();
+    }
     if (cfg.blockOnSignFailure) {
       return { block: true, blockReason: `signet sign failed: ${message}` };
     }
     return {};
   }
+}
+
+function isSignetSystemFailure(err: unknown): boolean {
+  if (
+    err instanceof SignetCliError ||
+    err instanceof SignetCliTimeoutError ||
+    err instanceof SignetCliVersionError
+  ) {
+    return true;
+  }
+  // Raw ENOENT from execFile (binary missing) shows up as { code: "ENOENT" }
+  // before any SignetCli* class can wrap it.
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === "ENOENT") {
+    return true;
+  }
+  return false;
 }
 
 function collectSecurityFindings(

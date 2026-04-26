@@ -186,6 +186,62 @@ esac
     );
   });
 
+  it("re-probes when wrapper shim coalesces stderr into stdout", async () => {
+    const home = await createHome();
+    const stubPath = join(home, "swappable-signet-3");
+
+    // Working binary first.
+    const goodScript = `#!/usr/bin/env bash\nexec "${signetBin}" "$@"\n`;
+    await writeFile(stubPath, goodScript, { mode: 0o755 });
+
+    const client = new SignetNodeClient({ signetBin: stubPath, signetHome: home });
+    await client.runRaw(["identity", "generate", "--name", "node-shim", "--unencrypted"]);
+
+    await client.sign({
+      key: "node-shim",
+      tool: "bash",
+      params: { cmd: "ls" },
+      target: "openclaw://gateway/local",
+      session: "agent:shim:thread-1",
+    });
+
+    // Swap to a shim that redirects stderr to stdout (a common wrapper habit).
+    const coalescingScript = `#!/usr/bin/env bash
+case "$1" in
+  --version) echo "signet 0.0.99-shim" ;;
+  sign)
+    if [ "$2" = "--help" ]; then
+      echo "Usage: signet sign --key <KEY> --tool <TOOL> --target <TARGET>"
+      exit 0
+    fi
+    # Coalesce stderr into stdout, like 'cmd 2>&1' wrappers.
+    echo "error: unexpected argument '--session' found"
+    exit 2
+    ;;
+esac
+`;
+    await writeFile(stubPath, coalescingScript, { mode: 0o755 });
+
+    await assert.rejects(
+      () =>
+        client.sign({
+          key: "node-shim",
+          tool: "bash",
+          params: { cmd: "ls" },
+          target: "openclaw://gateway/local",
+          session: "agent:shim:thread-2",
+        }),
+      (err: unknown) => {
+        assert.ok(
+          err instanceof SignetCliVersionError,
+          `expected SignetCliVersionError when shim coalesces stderr, got ${err?.constructor?.name}`,
+        );
+        assert.equal(err.cliVersion, "0.0.99-shim");
+        return true;
+      },
+    );
+  });
+
   it("preserves real sign() error when binary swap is unrelated", async () => {
     const home = await createHome();
     const stubPath = join(home, "swappable-signet-2");

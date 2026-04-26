@@ -113,8 +113,10 @@ const REQUIRED_SIGN_FLAGS = ["--session", "--call-id", "--trace-id", "--parent-r
 
 const UNKNOWN_FLAG_STDERR_RE = /(?:unexpected|unrecognized|unknown) argument/i;
 
-function looksLikeUnknownFlagFailure(stderr: string): boolean {
-  return UNKNOWN_FLAG_STDERR_RE.test(stderr);
+function looksLikeUnknownFlagFailure(err: SignetCliError): boolean {
+  // Wrapper shims sometimes coalesce stderr into stdout. Inspect both streams
+  // so cached compat recovery still kicks in for those launchers.
+  return UNKNOWN_FLAG_STDERR_RE.test(err.stderr) || UNKNOWN_FLAG_STDERR_RE.test(err.stdout);
 }
 
 export class SignetNodeClient {
@@ -250,7 +252,7 @@ export class SignetNodeClient {
       if (
         sessionFieldsRequested &&
         err instanceof SignetCliError &&
-        looksLikeUnknownFlagFailure(err.stderr)
+        looksLikeUnknownFlagFailure(err)
       ) {
         this.signCompatProbe = null;
         await this.assertSignCompatibility();

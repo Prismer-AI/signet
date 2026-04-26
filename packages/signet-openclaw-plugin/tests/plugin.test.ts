@@ -256,6 +256,100 @@ rules: []
     assert.deepEqual(result, {}, "happy path sign returns {} (no block)");
   });
 
+  it("(e) malformed policy file is caught by self-check, not by first tool call", async () => {
+    const home = await createSignetHome();
+    await createIdentity(home, "openclaw-agent");
+    const policyPath = join(home, "broken-policy.yaml");
+    await writeFile(policyPath, "this is: not valid: signet policy yaml: : :\n");
+
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      policy: policyPath,
+    });
+
+    // Self-check should have failed at register() time; readiness=critical
+    const findings = await plugin.collectFindings();
+    const readiness = findings.find((f) => f.checkId === "signet:readiness");
+    assert.equal(
+      readiness?.severity,
+      "critical",
+      `broken policy should make readiness critical, got ${readiness?.severity}`,
+    );
+    const policyFinding = findings.find((f) => f.checkId === "signet:policy");
+    assert.equal(
+      policyFinding?.severity,
+      "critical",
+      "policy finding must escalate to critical when configured but plugin not operational",
+    );
+  });
+
+  it("(f) blockOnSignFailure=false + failed self-check -> signet:bypass=critical fires", async () => {
+    const home = await createSignetHome();
+    // Real binary, real home, NO identity. blockOnSignFailure=false makes
+    // sign errors fail-open. allowDegraded stays false (default), so plugin
+    // loads in active mode but signActiveCall will silently swallow errors.
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    // Tool call should NOT block (because blockOnSignFailure=false)
+    const result = await plugin.callBeforeToolCall({ toolName: "bash", params: { cmd: "ls" } });
+    assert.deepEqual(
+      result,
+      {},
+      "blockOnSignFailure=false must let the call through even on sign failure",
+    );
+
+    // But audit collector MUST surface the bypass even though we are in
+    // active mode (not passive). This is the codex round 3 finding: prior
+    // version only emitted signet:bypass when mode=passive.
+    const findings = await plugin.collectFindings();
+    const bypass = findings.find((f) => f.checkId === "signet:bypass");
+    assert.ok(bypass, "signet:bypass must fire when sign fails AND blockOnSignFailure=false");
+    assert.equal(bypass.severity, "critical");
+    assert.match(bypass.detail, /blockOnSignFailure=false|UNSIGNED and UNAUDITED/i);
+  });
+
+  it("(g) fail-closed startup + later successful sign clears stale readiness state", async () => {
+    const home = await createSignetHome();
+    // Plugin loads with no identity -> active mode but startup self-check fails.
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+    });
+
+    // Verify initial state is critical
+    const findings1 = await plugin.collectFindings();
+    assert.equal(findings1.find((f) => f.checkId === "signet:readiness")?.severity, "critical");
+
+    // Operator fixes setup
+    await createIdentity(home, "openclaw-agent");
+
+    // First post-fix call: signActiveCall succeeds, state must clear
+    const result = await plugin.callBeforeToolCall(
+      { toolName: "bash", params: { cmd: "ls" }, toolCallId: "c-1" },
+      { sessionKey: "s" },
+    );
+    assert.deepEqual(result, {}, "post-fix sign must succeed");
+
+    const findings2 = await plugin.collectFindings();
+    const readiness = findings2.find((f) => f.checkId === "signet:readiness");
+    assert.equal(
+      readiness?.severity,
+      "info",
+      `readiness must clear to info after successful sign, got ${readiness?.severity}`,
+    );
+    assert.match(String(readiness?.title), /operational/);
+
+    const recoveryLogs = plugin.state.logs.filter((l) =>
+      /readiness recovered after successful sign/i.test(l.msg),
+    );
+    assert.ok(recoveryLogs.length >= 1, "recovery via successful sign must be logged");
+  });
+
   it("re-reads SIGNET_PASSPHRASE on every call (passphrase fix mid-session takes effect)", async () => {
     const home = await createSignetHome();
     // Encrypted identity

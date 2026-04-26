@@ -248,9 +248,20 @@ async function runSelfCheck(
       target: cfg.target,
       params: {},
       noLog: true,
+      // Pass policy so the probe surfaces missing/broken policy files at
+      // startup. Without this a malformed policy yaml looks healthy until
+      // the first real tool call. The probe must use the same code path
+      // as production sign calls do.
+      policy: cfg.policy,
     });
     return { ok: true };
   } catch (err) {
+    // Policy denial is NOT a self-check failure — the plugin is healthy,
+    // it just happens that "signet:self-check" was denied. The whole
+    // point of having a policy is to deny stuff, so this is expected.
+    if (isPolicyDenialError(err)) {
+      return { ok: true };
+    }
     return classifySelfCheckError(err, cfg);
   }
 }
@@ -320,7 +331,7 @@ async function handleBeforeToolCall(
     // Recovered: fall through to active path.
   }
 
-  return signActiveCall(event, ctx, cfg, client, log);
+  return signActiveCall(event, ctx, cfg, client, log, state);
 }
 
 async function maybeReprobePassive(
@@ -358,6 +369,7 @@ async function signActiveCall(
   cfg: ResolvedSignetPluginConfig,
   client: SignetNodeClient,
   log: PluginLoggerLike,
+  state: PluginRuntimeState,
 ): Promise<BeforeToolCallResult> {
   try {
     const receipt = (await client.sign({
@@ -376,11 +388,25 @@ async function signActiveCall(
     log.info?.(
       `[signet] signed ${event.toolName} (call=${event.toolCallId ?? "?"} session=${ctx.sessionKey ?? "?"}) → ${receiptId}`,
     );
+    // A successful sign is the strongest possible readiness proof. Clear any
+    // stale failed-self-check state so the audit collector and dashboards
+    // reflect current operational reality.
+    if (!state.lastProbeStatus.ok) {
+      state.lastProbeStatus = { ok: true };
+      state.lastProbeAt = Date.now();
+      log.info?.(`[signet] readiness recovered after successful sign of ${event.toolName}.`);
+    }
     return {};
   } catch (err) {
     if (isPolicyDenialError(err)) {
       const reason = extractPolicyReason(err);
       log.warn?.(`[signet] policy denied ${event.toolName}: ${reason}`);
+      // Policy denial is a healthy outcome (the plugin is doing its job),
+      // so it counts as a readiness success too.
+      if (!state.lastProbeStatus.ok) {
+        state.lastProbeStatus = { ok: true };
+        state.lastProbeAt = Date.now();
+      }
       return { block: true, blockReason: `signet policy: ${reason}` };
     }
 
@@ -402,27 +428,53 @@ function collectSecurityFindings(
   // Runtime readiness drives the headline check. Config-only "plugin
   // enabled" was misleading when the plugin loaded but signing was broken.
   const status = state.lastProbeStatus;
+
+  // "Effectively bypassing" = sign attempts will not gate tool calls.
+  // Two independent paths cause this:
+  //   1. Passive mode (allowDegraded=true and startup probe failed) —
+  //      hooks short-circuit before sign.
+  //   2. Active mode + blockOnSignFailure=false + probe failed —
+  //      signActiveCall catches the error and returns {} instead of
+  //      blocking, so the tool call runs unsigned.
+  // Both cases must surface as signet:bypass=critical.
+  const effectivelyBypassing =
+    !status.ok &&
+    (state.mode === "passive" || cfg.blockOnSignFailure === false);
+
+  let readinessTitle: string;
+  let readinessDetail: string;
+  if (status.ok) {
+    readinessTitle = "Signet plugin operational";
+    readinessDetail = `Tool calls are signed with identity '${cfg.keyName}' and emitted under target ${cfg.target}.`;
+  } else if (state.mode === "passive") {
+    readinessTitle = "Signet plugin in PASSIVE mode (not signing, not enforcing)";
+    readinessDetail = `Reason: ${status.reason}.`;
+  } else if (cfg.blockOnSignFailure === false) {
+    readinessTitle = "Signet plugin armed but startup self-check failed (fail-open: tool calls run unsigned)";
+    readinessDetail = `Reason: ${status.reason}.`;
+  } else {
+    readinessTitle = "Signet plugin armed but startup self-check failed (tool calls will block)";
+    readinessDetail = `Reason: ${status.reason}.`;
+  }
+
   findings.push({
     checkId: "signet:readiness",
-    severity: status.ok ? "info" : state.mode === "passive" ? "critical" : "critical",
-    title: status.ok
-      ? "Signet plugin operational"
-      : state.mode === "passive"
-        ? "Signet plugin in PASSIVE mode (not signing, not enforcing)"
-        : "Signet plugin armed but startup self-check failed (tool calls will block)",
-    detail: status.ok
-      ? `Tool calls are signed with identity '${cfg.keyName}' and emitted under target ${cfg.target}.`
-      : `Reason: ${status.reason}.`,
+    severity: status.ok ? "info" : "critical",
+    title: readinessTitle,
+    detail: readinessDetail,
     remediation: status.ok ? undefined : status.remediation,
   });
 
-  if (!status.ok && state.mode === "passive") {
+  if (effectivelyBypassing) {
+    const cause = state.mode === "passive"
+      ? "allowDegraded=true and the startup self-check failed"
+      : "blockOnSignFailure=false and the startup self-check failed";
     findings.push({
       checkId: "signet:bypass",
       severity: "critical",
       title: "Signet bypass active — tool calls run UNSIGNED and UNAUDITED",
       detail:
-        `allowDegraded=true and the startup self-check failed (${status.reason}). ` +
+        `${cause} (${status.reason}). ` +
         `Every OpenClaw tool call runs without a Signet receipt, without policy ` +
         `enforcement, and without an audit log entry. This deployment is currently ` +
         `unprotected.`,

@@ -333,11 +333,17 @@ jobs:
   npm-node:
     # @signet-auth/node shells out to the local `signet` CLI and is API-coupled
     # to the matching CLI flags. Publishing it before signet-cli@<VERSION> is
-    # available on crates.io would let early adopters npm-install the wrapper,
-    # `cargo install` an older signet binary from crates, and trip the runtime
-    # SignetCliVersionError probe. Wait for crates so that order is impossible.
-    name: Publish to npm (@signet-auth/node, after CLI release)
-    needs: [validate-version, crates]
+    # actually INSTALLABLE from crates.io (not just published) would let early
+    # adopters npm-install the wrapper, `cargo install` an older signet binary
+    # from the still-stale crates index, and trip the runtime
+    # SignetCliVersionError probe.
+    #
+    # Wait for `smoke-cargo`, which already sleeps 60s for crates.io index
+    # propagation AND does an end-to-end `cargo install signet-cli` + sign +
+    # verify roundtrip. If smoke-cargo passes, the CLI is provably installable
+    # before this job uploads the wrapper to npm.
+    name: Publish to npm (@signet-auth/node, after CLI installable)
+    needs: [validate-version, smoke-cargo]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

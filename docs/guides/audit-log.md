@@ -70,6 +70,16 @@ signet audit --since 7d --tool deploy --signer ci-bot --limit 20
 ```bash
 signet audit --export report.json
 signet audit --since 24h --export today.json
+signet audit --since 24h --export today-readable.json --decrypt-params
+```
+
+When `--decrypt-params` is used, the export preserves the original hash-chained `receipt` and adds a `materialized_receipt` field with locally decrypted `action.params`.
+
+### Inspect decrypted params locally
+
+```bash
+signet explore --show 1 --decrypt-params
+signet explore --show 1 --full --decrypt-params
 ```
 
 ## Verifying Integrity

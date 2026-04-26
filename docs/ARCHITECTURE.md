@@ -95,6 +95,10 @@ MCP middleware. `SigningTransport` wraps any MCP `Transport` and intercepts `too
 
 MCP servers don't need changes — they ignore unknown `_meta` fields.
 
+### @signet-auth/node (TypeScript, Node-only)
+
+Local operator helper backed by the `signet` CLI. This package is intentionally separate from `@signet-auth/core`: it assumes filesystem access, a local `SIGNET_HOME`, and a `signet` binary on the host. It handles Node-side workflows such as local audit export, signature verification, and materializing encrypted audit params without pulling those runtime assumptions into the pure WASM core package.
+
 ## Data Flow
 
 ### Signing

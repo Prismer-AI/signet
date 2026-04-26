@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/Prismer-AI/signet?style=flat-square&label=release)](https://github.com/Prismer-AI/signet/releases/latest)
 [![crates.io](https://img.shields.io/crates/v/signet-core.svg)](https://crates.io/crates/signet-core)
 [![PyPI](https://img.shields.io/pypi/v/signet-auth.svg)](https://pypi.org/project/signet-auth/)
-[![npm packages](https://img.shields.io/badge/npm-5%20packages-cb3837.svg)](https://www.npmjs.com/org/signet-auth)
+[![npm packages](https://img.shields.io/badge/npm-6%20packages-cb3837.svg)](https://www.npmjs.com/org/signet-auth)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue.svg)](LICENSE-APACHE)
 [![Stars](https://img.shields.io/github/stars/Prismer-AI/signet.svg)](https://github.com/Prismer-AI/signet/stargazers)
 
@@ -18,6 +18,7 @@ TypeScript 包：
 [`@signet-auth/mcp`](https://www.npmjs.com/package/@signet-auth/mcp) ·
 [`@signet-auth/mcp-server`](https://www.npmjs.com/package/@signet-auth/mcp-server) ·
 [`@signet-auth/mcp-tools`](https://www.npmjs.com/package/@signet-auth/mcp-tools) ·
+[`@signet-auth/node`](https://www.npmjs.com/package/@signet-auth/node) ·
 [`@signet-auth/vercel-ai`](https://www.npmjs.com/package/@signet-auth/vercel-ai)
 
 [![English](https://img.shields.io/badge/English-lightgrey?style=flat-square)](README.md)
@@ -226,6 +227,9 @@ npm install @signet-auth/core @signet-auth/mcp
 
 # TypeScript（MCP 服务端验证）
 npm install @signet-auth/mcp-server
+
+# TypeScript（Node 本地审计 / operator helper）
+npm install @signet-auth/node
 
 # TypeScript（Vercel AI SDK 中间件）
 npm install @signet-auth/vercel-ai
@@ -731,8 +735,9 @@ signet/
 │   ├── signet-core/          @signet-auth/core — TypeScript 封装
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport 中间件
 │   ├── signet-mcp-server/    @signet-auth/mcp-server — 服务端验证
-│   ├── signet-vercel-ai/     @signet-auth/vercel-ai — Vercel AI SDK 中间件
-│   └── signet-mcp-tools/     @signet-auth/mcp-tools — 独立 MCP 签名服务
+│   ├── signet-mcp-tools/     @signet-auth/mcp-tools — 独立 MCP 签名服务
+│   ├── signet-node/          @signet-auth/node — Node 本地审计 / operator helper
+│   └── signet-vercel-ai/     @signet-auth/vercel-ai — Vercel AI SDK 中间件
 ├── examples/
 │   ├── wasm-roundtrip/       WASM 验证测试
 │   └── mcp-agent/            MCP agent + echo server 示例
@@ -764,6 +769,7 @@ cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
 cd packages/signet-mcp-server && npm run build
 cd packages/signet-mcp-tools && npm run build
+cd packages/signet-node && npm run build
 cd packages/signet-vercel-ai && npm run build
 ```
 
@@ -791,6 +797,7 @@ cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
+cd packages/signet-node && npm test
 
 # Vercel AI SDK 测试
 cd packages/signet-vercel-ai && npm test

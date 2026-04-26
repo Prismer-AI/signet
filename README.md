@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/SDKs-333?style=flat-square" alt="SDKs">
   <a href="https://crates.io/crates/signet-core"><img src="https://img.shields.io/crates/v/signet-core?style=flat-square&labelColor=black&color=dea584&logo=rust&logoColor=white&label=signet--core" alt="crates.io"></a>
   <a href="https://pypi.org/project/signet-auth/"><img src="https://img.shields.io/pypi/v/signet-auth?style=flat-square&labelColor=black&color=3775A9&logo=python&logoColor=white&label=signet--auth" alt="PyPI"></a>
-  <a href="https://www.npmjs.com/org/signet-auth"><img src="https://img.shields.io/badge/npm-5%20packages-cb3837?style=flat-square&labelColor=black&logo=npm&logoColor=white" alt="npm packages"></a>
+  <a href="https://www.npmjs.com/org/signet-auth"><img src="https://img.shields.io/badge/npm-6%20packages-cb3837?style=flat-square&labelColor=black&logo=npm&logoColor=white" alt="npm packages"></a>
 </p>
 
 <p align="center">
@@ -27,6 +27,7 @@
     <a href="https://www.npmjs.com/package/@signet-auth/mcp"><code>@signet-auth/mcp</code></a> ·
     <a href="https://www.npmjs.com/package/@signet-auth/mcp-server"><code>@signet-auth/mcp-server</code></a> ·
     <a href="https://www.npmjs.com/package/@signet-auth/mcp-tools"><code>@signet-auth/mcp-tools</code></a> ·
+    <a href="https://www.npmjs.com/package/@signet-auth/node"><code>@signet-auth/node</code></a> ·
     <a href="https://www.npmjs.com/package/@signet-auth/vercel-ai"><code>@signet-auth/vercel-ai</code></a>
   </sub>
 </p>
@@ -288,6 +289,9 @@ npm install @signet-auth/core @signet-auth/mcp
 
 # TypeScript (MCP server verification)
 npm install @signet-auth/mcp-server
+
+# TypeScript (Node local audit/operator helpers)
+npm install @signet-auth/node
 
 # TypeScript (Vercel AI SDK middleware)
 npm install @signet-auth/vercel-ai
@@ -726,6 +730,7 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet sign --hash-only` | Store only params hash (not raw params) |
 | `signet sign --output <file>` | Write receipt to file instead of stdout |
 | `signet sign --no-log` | Skip audit log append |
+| `signet sign --encrypt-params` | Encrypt `action.params` in the audit log while keeping the receipt output unchanged |
 | `signet sign --policy <path>` | Enforce policy before signing and embed `PolicyAttestation` |
 | `signet verify <receipt.json> --pubkey <name>` | Verify a receipt signature |
 | `signet verify --chain` | Verify audit log hash chain integrity |
@@ -734,8 +739,10 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --tool <substring>` | Filter by tool name |
 | `signet audit --verify` | Verify all receipt signatures |
 | `signet audit --export <file>` | Export records as JSON |
+| `signet audit --export <file> --decrypt-params` | Export original audit records plus `materialized_receipt` with decrypted params |
 | `signet explore` | Browse receipts interactively (table, detail, stats, chain check) |
 | `signet explore --show N` | Inspect receipt #N with signature, policy, and chain info |
+| `signet explore --show N --decrypt-params` | Materialize encrypted `action.params` for local inspection |
 | `signet explore --stats` | Receipt statistics by tool, signer, and version |
 | `signet delegate create ... --ttl 24h` | Create a scoped delegation token (short-lived) |
 | `signet delegate sign ... --chain <file>` | Sign with delegation proof and produce a v4 receipt |
@@ -801,6 +808,7 @@ signet/
 │   ├── signet-mcp/           @signet-auth/mcp — MCP SigningTransport middleware
 │   ├── signet-mcp-server/    @signet-auth/mcp-server — Server verification
 │   ├── signet-mcp-tools/     @signet-auth/mcp-tools — Standalone MCP signing server
+│   ├── signet-node/          @signet-auth/node — Node local audit/operator helpers
 │   └── signet-vercel-ai/     @signet-auth/vercel-ai — Vercel AI SDK middleware
 ├── examples/
 │   ├── wasm-roundtrip/       WASM validation tests
@@ -831,7 +839,10 @@ wasm-pack build bindings/signet-ts --target nodejs --out-dir ../../packages/sign
 # TypeScript packages
 cd packages/signet-core && npm run build
 cd packages/signet-mcp && npm run build
+cd packages/signet-mcp-server && npm run build
 cd packages/signet-mcp-tools && npm run build
+cd packages/signet-node && npm run build
+cd packages/signet-vercel-ai && npm run build
 ```
 
 ```bash
@@ -858,6 +869,7 @@ cd packages/signet-core && npm test
 cd packages/signet-mcp && npm test
 cd packages/signet-mcp-server && npm test
 cd packages/signet-mcp-tools && npm test
+cd packages/signet-node && npm test
 
 # Plugin tests
 cd plugins/claude-code && npm test

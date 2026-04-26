@@ -4,6 +4,7 @@ use std::process;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
+mod audit_helpers;
 mod cmd_audit;
 mod cmd_claude;
 mod cmd_dashboard;
@@ -14,11 +15,17 @@ mod cmd_policy;
 mod cmd_proxy;
 mod cmd_quickstart;
 mod cmd_sign;
+mod cmd_trust;
 mod cmd_verify;
 mod dashboard;
+mod trust_helpers;
 
 #[derive(Parser)]
-#[command(name = "signet", about = "Cryptographic action receipts for AI agents")]
+#[command(
+    name = "signet",
+    version,
+    about = "Cryptographic action receipts for AI agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -53,6 +60,11 @@ enum Commands {
     Policy {
         #[command(subcommand)]
         action: cmd_policy::PolicyAction,
+    },
+    /// Inspect and update trust bundle files
+    Trust {
+        #[command(subcommand)]
+        action: cmd_trust::TrustAction,
     },
     /// Run as MCP proxy — sign tool calls transparently
     Proxy(cmd_proxy::ProxyArgs),
@@ -113,6 +125,7 @@ fn run() -> Result<()> {
         Commands::Dashboard(args) => cmd_dashboard::dashboard(args)?,
         Commands::Delegate { action } => cmd_delegate::run(action)?,
         Commands::Policy { action } => cmd_policy::run(action)?,
+        Commands::Trust { action } => cmd_trust::run(action)?,
         Commands::Proxy(args) => cmd_proxy::run(args)?,
         Commands::Explore(args) => cmd_explore::explore(args)?,
         Commands::Quickstart => cmd_quickstart::quickstart()?,

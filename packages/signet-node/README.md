@@ -12,6 +12,20 @@ This package is intentionally separate from `@signet-auth/core`:
 - Node.js 18+
 - A local `signet` binary available on `PATH`, or pass `signetBin`
 
+### CLI compatibility
+
+This package shells out to `signet sign` and, since 0.10.0, may pass any of
+`--session`, `--call-id`, `--trace-id`, `--parent-receipt-id`. When `client.sign(...)`
+receives any of those options, the wrapper probes `signet sign --help` once per
+client instance and throws `SignetCliVersionError` if the host binary is missing
+the required flags. Build/install signet from a tree containing commit `a66e748`
+or later. The error reports the detected `signet --version` so operators can size
+the upgrade.
+
+You can also run `await client.assertSignCompatibility()` eagerly at startup
+(e.g. inside a plugin's `register(api)`) to fail fast instead of on first
+session-bound sign call.
+
 ## Install
 
 ```bash

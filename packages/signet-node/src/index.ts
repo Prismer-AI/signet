@@ -91,12 +91,33 @@ export class SignetCliError extends Error {
   }
 }
 
+export class SignetCliVersionError extends Error {
+  readonly cliVersion: string | null;
+  readonly missingFlags: readonly string[];
+
+  constructor(cliVersion: string | null, missingFlags: readonly string[]) {
+    const found = cliVersion ?? "<unknown>";
+    const flags = missingFlags.join(", ");
+    super(
+      `signet CLI is missing required flag(s) [${flags}] (found version ${found}). ` +
+        "Upgrade to a build that supports them. " +
+        "If you compiled from source, ensure your tree includes commit a66e748 or later.",
+    );
+    this.name = "SignetCliVersionError";
+    this.cliVersion = cliVersion;
+    this.missingFlags = [...missingFlags];
+  }
+}
+
+const REQUIRED_SIGN_FLAGS = ["--session", "--call-id", "--trace-id", "--parent-receipt-id"] as const;
+
 export class SignetNodeClient {
   readonly signetBin: string;
   readonly signetHome?: string;
   readonly passphrase?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly maxBuffer: number;
+  private signCompatProbe: Promise<void> | null = null;
 
   constructor(options: SignetNodeClientOptions = {}) {
     this.signetBin = options.signetBin ?? process.env.SIGNET_BIN ?? "signet";
@@ -116,6 +137,44 @@ export class SignetNodeClient {
     });
   }
 
+  async cliVersion(): Promise<string | null> {
+    try {
+      const result = await this.runRaw(["--version"]);
+      const match = result.stdout.match(/signet\s+([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.+-]+)?)/);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Verify the host `signet` binary supports the flags this wrapper relies on.
+   *
+   * Throws `SignetCliVersionError` when the local CLI is missing any required
+   * `signet sign` flag (currently --session/--call-id/--trace-id/--parent-receipt-id).
+   * The probe runs once per client instance and caches the result.
+   */
+  async assertSignCompatibility(): Promise<void> {
+    if (this.signCompatProbe) {
+      return this.signCompatProbe;
+    }
+    this.signCompatProbe = (async () => {
+      const helpResult = await this.runRaw(["sign", "--help"], true);
+      const help = `${helpResult.stdout}\n${helpResult.stderr}`;
+      const missing = REQUIRED_SIGN_FLAGS.filter((flag) => !help.includes(flag));
+      if (missing.length > 0) {
+        const cliVersion = await this.cliVersion();
+        throw new SignetCliVersionError(cliVersion, missing);
+      }
+    })();
+    try {
+      return await this.signCompatProbe;
+    } catch (err) {
+      this.signCompatProbe = null;
+      throw err;
+    }
+  }
+
   async sign(options: SignReceiptOptions): Promise<Record<string, unknown>> {
     const args = [
       "sign",
@@ -126,6 +185,15 @@ export class SignetNodeClient {
       "--target",
       options.target,
     ];
+
+    if (
+      options.session !== undefined ||
+      options.callId !== undefined ||
+      options.traceId !== undefined ||
+      options.parentReceiptId !== undefined
+    ) {
+      await this.assertSignCompatibility();
+    }
 
     let paramsTempDir: string | undefined;
     if (options.params !== undefined) {

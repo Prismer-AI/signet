@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SignetNodeClient } from "../src/index.js";
+import { SignetCliVersionError, SignetNodeClient } from "../src/index.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../");
 const signetBin = join(repoRoot, "target/debug/signet");
@@ -105,6 +105,67 @@ describe("@signet-auth/node", () => {
     assert.equal(result.valid, 2);
     assert.equal(result.failed, 0);
     assert.deepEqual(result.warnings, []);
+  });
+
+  it("signs with session/callId/traceId fields", async () => {
+    const home = await createHome();
+    const client = clientFor(home);
+
+    await client.runRaw(["identity", "generate", "--name", "node-session", "--unencrypted"]);
+    const receipt = await client.sign({
+      key: "node-session",
+      tool: "bash",
+      params: { cmd: "ls" },
+      target: "openclaw://gateway/local",
+      session: "agent:main:thread-42",
+      callId: "tool-call-99",
+      traceId: "trace-abc",
+    });
+
+    const action = receipt.action as Record<string, unknown>;
+    assert.equal(action.session, "agent:main:thread-42");
+    assert.equal(action.call_id, "tool-call-99");
+    assert.equal(action.trace_id, "trace-abc");
+  });
+
+  it("reports SignetCliVersionError when sign --help is missing required flags", async () => {
+    const home = await createHome();
+    const stubBin = join(home, "stub-signet");
+    const stubScript = `#!/usr/bin/env bash
+case "$1" in
+  --version) echo "signet 0.0.99-stub" ;;
+  sign)
+    if [ "$2" = "--help" ]; then
+      echo "Usage: signet sign --key <KEY> --tool <TOOL> --target <TARGET> [--params <PARAMS>] [--policy <POLICY>]"
+      exit 0
+    fi
+    ;;
+esac
+`;
+    await writeFile(stubBin, stubScript, { mode: 0o755 });
+
+    const client = new SignetNodeClient({ signetBin: stubBin, signetHome: home });
+    await assert.rejects(
+      () =>
+        client.sign({
+          key: "node-stub",
+          tool: "bash",
+          params: { cmd: "ls" },
+          target: "openclaw://gateway/local",
+          session: "agent:main:thread-42",
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof SignetCliVersionError, "expected SignetCliVersionError");
+        assert.equal(err.cliVersion, "0.0.99-stub");
+        assert.deepEqual(err.missingFlags, [
+          "--session",
+          "--call-id",
+          "--trace-id",
+          "--parent-receipt-id",
+        ]);
+        return true;
+      },
+    );
   });
 
   it("returns structured verification summaries when signatures fail", async () => {

@@ -328,9 +328,11 @@ pub fn wasm_verify_bilateral_with_options(
     let receipt: signet_core::BilateralReceipt = serde_json::from_str(receipt_json)
         .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
-    let key_bytes = BASE64.decode(server_pubkey_b64)
+    let key_bytes = BASE64
+        .decode(server_pubkey_b64)
         .map_err(|e| JsError::new(&format!("invalid server key: {e}")))?;
-    let arr: [u8; 32] = key_bytes.try_into()
+    let arr: [u8; 32] = key_bytes
+        .try_into()
         .map_err(|_| JsError::new("server key must be 32 bytes"))?;
     let server_vk = ed25519_dalek::VerifyingKey::from_bytes(&arr)
         .map_err(|e| JsError::new(&format!("invalid server key: {e}")))?;
@@ -338,8 +340,16 @@ pub fn wasm_verify_bilateral_with_options(
     let opts = signet_core::BilateralVerifyOptions {
         max_time_window_secs,
         trusted_agent_pubkey: None,
-        expected_session: if expected_session.is_empty() { None } else { Some(expected_session.to_string()) },
-        expected_call_id: if expected_call_id.is_empty() { None } else { Some(expected_call_id.to_string()) },
+        expected_session: if expected_session.is_empty() {
+            None
+        } else {
+            Some(expected_session.to_string())
+        },
+        expected_call_id: if expected_call_id.is_empty() {
+            None
+        } else {
+            Some(expected_call_id.to_string())
+        },
         nonce_checker: None, // WASM has no persistent state for nonce checking
     };
 
@@ -347,7 +357,10 @@ pub fn wasm_verify_bilateral_with_options(
         Ok(()) => Ok(true),
         Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
         Err(signet_core::SignetError::InvalidReceipt(ref msg))
-            if msg.contains("mismatch") || msg.contains("does not match") => Ok(false),
+            if msg.contains("mismatch") || msg.contains("does not match") =>
+        {
+            Ok(false)
+        }
         Err(e) => Err(JsError::new(&e.to_string())),
     }
 }
@@ -367,8 +380,13 @@ pub fn wasm_sign_with_expiration(
         .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
 
     let receipt = signet_core::sign_with_expiration(
-        &signing_key, &action, signer_name, signer_owner, expires_at,
-    ).map_err(|e| JsError::new(&e.to_string()))?;
+        &signing_key,
+        &action,
+        signer_name,
+        signer_owner,
+        expires_at,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
 }
@@ -381,9 +399,11 @@ pub fn wasm_verify_allow_expired(
     let receipt: signet_core::Receipt = serde_json::from_str(receipt_json)
         .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
-    let key_bytes = BASE64.decode(public_key_b64)
+    let key_bytes = BASE64
+        .decode(public_key_b64)
         .map_err(|e| JsError::new(&format!("invalid public key: {e}")))?;
-    let arr: [u8; 32] = key_bytes.try_into()
+    let arr: [u8; 32] = key_bytes
+        .try_into()
         .map_err(|_| JsError::new("public key must be 32 bytes"))?;
     let vk = ed25519_dalek::VerifyingKey::from_bytes(&arr)
         .map_err(|e| JsError::new(&format!("invalid public key: {e}")))?;
@@ -399,10 +419,8 @@ pub fn wasm_verify_allow_expired(
 
 #[wasm_bindgen]
 pub fn wasm_parse_policy_yaml(yaml: &str) -> Result<String, JsError> {
-    let policy = signet_core::parse_policy_yaml(yaml)
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    signet_core::validate_policy(&policy)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let policy = signet_core::parse_policy_yaml(yaml).map_err(|e| JsError::new(&e.to_string()))?;
+    signet_core::validate_policy(&policy).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&policy).map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -445,8 +463,14 @@ pub fn wasm_sign_with_policy(
         .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
 
     let (receipt, eval) = signet_core::sign_with_policy(
-        &signing_key, &action, signer_name, signer_owner, &policy, None,
-    ).map_err(|e| JsError::new(&e.to_string()))?;
+        &signing_key,
+        &action,
+        signer_name,
+        signer_owner,
+        &policy,
+        None,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     let result = serde_json::json!({
         "receipt": receipt,
@@ -466,6 +490,5 @@ pub fn wasm_sign_with_policy(
 pub fn wasm_compute_policy_hash(policy_json: &str) -> Result<String, JsError> {
     let policy: signet_core::Policy = serde_json::from_str(policy_json)
         .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
-    signet_core::compute_policy_hash(&policy)
-        .map_err(|e| JsError::new(&e.to_string()))
+    signet_core::compute_policy_hash(&policy).map_err(|e| JsError::new(&e.to_string()))
 }

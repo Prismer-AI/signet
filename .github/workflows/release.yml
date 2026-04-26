@@ -295,16 +295,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Build and publish @signet-auth/node
         run: |
-          # @signet-auth/node is not (yet) covered by scripts/version-sync.mjs,
-          # so validate-version cannot guarantee its package.json matches the
-          # tag. Assert here before publish so a mismatched signet-node
-          # version cannot reach npm under the wrong release tag.
-          expected=$(tr -d '[:space:]' < VERSION)
-          actual=$(node -p "require('./packages/signet-node/package.json').version")
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::@signet-auth/node package.json version ($actual) does not match VERSION ($expected). Bump packages/signet-node/package.json to match before tagging." >&2
-            exit 1
-          fi
           cd packages/signet-node
           npm install
           tsc

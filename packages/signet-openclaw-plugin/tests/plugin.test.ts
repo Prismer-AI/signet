@@ -542,6 +542,52 @@ esac
     );
   });
 
+  it("(l) throwing toJSON in tool params does NOT taint readiness", async () => {
+    const home = await createSignetHome();
+    await createIdentity(home, "openclaw-agent");
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    let findings = await plugin.collectFindings();
+    assert.equal(findings.find((f) => f.checkId === "signet:readiness")?.severity, "info");
+
+    // toJSON that throws a plain Error — would have classified as system
+    // failure under the round-6 blacklist (Error but not TypeError/etc).
+    // SignetParamsSerializationError now wraps it explicitly.
+    const badParams = {
+      whatever: "ok",
+      get problematic() {
+        throw new Error("this getter blew up while serializing");
+      },
+    } as unknown as Record<string, unknown>;
+
+    const r = await plugin.callBeforeToolCall({ toolName: "bash", params: badParams });
+    assert.deepEqual(r, {});
+
+    findings = await plugin.collectFindings();
+    const readiness = findings.find((f) => f.checkId === "signet:readiness");
+    assert.equal(
+      readiness?.severity,
+      "info",
+      `throwing-getter payload must NOT flip readiness; got ${readiness?.severity} (${readiness?.title})`,
+    );
+    assert.equal(
+      findings.find((f) => f.checkId === "signet:bypass"),
+      undefined,
+      "signet:bypass must NOT fire on payload serialization errors",
+    );
+
+    // Confirm a normal call still signs successfully
+    const r2 = await plugin.callBeforeToolCall(
+      { toolName: "bash", params: { cmd: "ls" }, toolCallId: "c-1" },
+      { sessionKey: "s" },
+    );
+    assert.deepEqual(r2, {});
+  });
+
   it("re-reads SIGNET_PASSPHRASE on every call (passphrase fix mid-session takes effect)", async () => {
     const home = await createSignetHome();
     // Encrypted identity

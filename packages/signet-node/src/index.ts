@@ -145,6 +145,24 @@ export class SignetCliTimeoutError extends Error {
   }
 }
 
+/**
+ * Thrown when JSON.stringify on the caller-supplied `params` fails before
+ * the signet CLI is invoked. Wraps the original error so callers can tell
+ * "user payload had a throwing toJSON / unsupported value" apart from
+ * "signet binary or identity is broken". Plugin code that maintains
+ * runtime readiness state must NOT treat this as a system failure.
+ */
+export class SignetParamsSerializationError extends Error {
+  readonly originalError: unknown;
+
+  constructor(cause: unknown) {
+    const msg = cause instanceof Error ? cause.message : String(cause);
+    super(`failed to serialize sign params: ${msg}`);
+    this.name = "SignetParamsSerializationError";
+    this.originalError = cause;
+  }
+}
+
 const DEFAULT_SIGNET_TIMEOUT_MS = 5000;
 
 const REQUIRED_SIGN_FLAGS = ["--session", "--call-id", "--trace-id", "--parent-receipt-id"] as const;
@@ -254,9 +272,21 @@ export class SignetNodeClient {
 
     let paramsTempDir: string | undefined;
     if (options.params !== undefined) {
+      // Serialize FIRST, before any spawn / fs work, so a payload-side
+      // error (BigInt, circular ref, throwing toJSON, throwing property
+      // getter, etc.) surfaces as SignetParamsSerializationError. This
+      // lets callers cleanly distinguish "the tool call's args are
+      // unserializable" (per-call payload bug) from "the signet binary
+      // or identity is broken" (operational failure).
+      let paramsJson: string;
+      try {
+        paramsJson = JSON.stringify(options.params);
+      } catch (err) {
+        throw new SignetParamsSerializationError(err);
+      }
       paramsTempDir = await mkdtemp(join(tmpdir(), "signet-node-params-"));
       const paramsPath = join(paramsTempDir, "params.json");
-      await writeFile(paramsPath, JSON.stringify(options.params), "utf8");
+      await writeFile(paramsPath, paramsJson, "utf8");
       args.push("--params", `@${paramsPath}`);
     }
     if (options.hashOnly) {

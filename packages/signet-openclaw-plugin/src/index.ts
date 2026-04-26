@@ -3,6 +3,7 @@ import {
   SignetCliTimeoutError,
   SignetCliVersionError,
   SignetNodeClient,
+  SignetParamsSerializationError,
 } from "@signet-auth/node";
 
 import {
@@ -437,22 +438,23 @@ async function signActiveCall(
 
 function isSignetSystemFailure(err: unknown): boolean {
   // Distinguish per-call payload bugs (which prove nothing about signet
-  // health) from operational/infra failures (which do). Use a blacklist
-  // because the operational set is much larger than the payload set:
+  // health) from operational/infra failures (which do). Two layers:
   //
-  // - SignetCliError (CLI exited non-zero), SignetCliTimeoutError (binary
-  //   hung), SignetCliVersionError (compat probe rejected) are obvious.
-  // - ENOENT (binary missing) and EACCES (binary not executable) come
-  //   through execFile as raw fs errors before any wrap class.
-  // - parseJson failures (CLI exited 0 but produced non-JSON garbage)
-  //   come through as a plain Error from @signet-auth/node.
-  // - Any spawn-time fs error: also operational.
+  // 1. SignetParamsSerializationError is the explicit "payload could not
+  //    even be serialized" signal from @signet-auth/node — covers
+  //    throwing toJSON / property getters / arbitrary user-side
+  //    serialization errors regardless of error class.
+  // 2. JS-native error types (TypeError, RangeError, SyntaxError) catch
+  //    additional payload bugs that surface from JS itself (BigInt,
+  //    circular refs, deep nesting).
   //
-  // Per-call payload errors thrown BEFORE the CLI is invoked are JS-side
-  // type-system failures: TypeError (BigInt / circular ref via
-  // JSON.stringify), RangeError (extreme nesting depth), SyntaxError
-  // (manual JSON.parse on user input). Those propagate but do not
-  // taint readiness.
+  // Anything else is treated as operational: SignetCliError (CLI exited
+  // non-zero), SignetCliTimeoutError (binary hung), SignetCliVersionError
+  // (compat probe rejected), raw ENOENT / EACCES from execFile, and
+  // plain-Error parseJson failures (CLI exited 0 with non-JSON garbage).
+  if (err instanceof SignetParamsSerializationError) {
+    return false;
+  }
   if (
     err instanceof TypeError ||
     err instanceof RangeError ||

@@ -40,6 +40,18 @@ def test_audit_append_chain(tmp_path):
     assert rec2.prev_hash == rec1.record_hash
 
 
+def test_audit_append_encrypted(tmp_path):
+    signet_auth.generate_and_save(str(tmp_path), "encaudit")
+    secret_key = signet_auth.load_signing_key(str(tmp_path), "encaudit")
+    action = signet_auth.Action("test_tool", params={"secret": "top-secret"})
+    receipt = signet_auth.sign(secret_key, action, "encaudit", "owner")
+
+    record = signet_auth.audit_append_encrypted(str(tmp_path), receipt, secret_key)
+
+    assert "params" not in record.receipt["action"]
+    assert record.receipt["action"]["params_encrypted"]["alg"] == "xchacha20poly1305"
+
+
 def test_audit_query_no_filter(tmp_path):
     for _ in range(3):
         signet_auth.audit_append(str(tmp_path), _sign_receipt())
@@ -79,6 +91,29 @@ def test_audit_query_since_naive_datetime_rejected(tmp_path):
     signet_auth.audit_append(str(tmp_path), _sign_receipt())
     with pytest.raises(ValueError, match="timezone-aware"):
         signet_auth.audit_query(str(tmp_path), since=datetime.now())
+
+
+def test_audit_query_decrypt_params(tmp_path):
+    signet_auth.generate_and_save(str(tmp_path), "decryptme")
+    secret_key = signet_auth.load_signing_key(str(tmp_path), "decryptme")
+    action = signet_auth.Action("test_tool", params={"secret": "revealed"})
+    receipt = signet_auth.sign(secret_key, action, "decryptme", "owner")
+    signet_auth.audit_append_encrypted(str(tmp_path), receipt, secret_key)
+
+    records = signet_auth.audit_query(str(tmp_path), decrypt_params=True)
+
+    assert records[0].receipt["action"]["params"]["secret"] == "revealed"
+    assert "params_encrypted" not in records[0].receipt["action"]
+
+
+def test_audit_query_decrypt_params_without_local_key_fails(tmp_path):
+    kp = signet_auth.generate_keypair()
+    action = signet_auth.Action("test_tool", params={"secret": "hidden"})
+    receipt = signet_auth.sign(kp.secret_key, action, "missing-key", "owner")
+    signet_auth.audit_append_encrypted(str(tmp_path), receipt, kp.secret_key)
+
+    with pytest.raises(signet_auth.KeyNotFoundError, match="no matching local identity"):
+        signet_auth.audit_query(str(tmp_path), decrypt_params=True)
 
 
 def test_audit_verify_chain(tmp_path):

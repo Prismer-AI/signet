@@ -49,11 +49,26 @@ def test_sign_with_audit(tmp_path):
     assert len(records) == 2
 
 
+def test_sign_with_encrypted_audit(tmp_path):
+    agent = SigningAgent.create("enc-audited", signet_dir=str(tmp_path))
+    agent.sign("tool1", params={"secret": "value"}, audit_encrypt_params=True)
+    records = agent.audit_query()
+    assert "params" not in records[0].receipt["action"]
+    decrypted = agent.audit_query(decrypt_params=True)
+    assert decrypted[0].receipt["action"]["params"]["secret"] == "value"
+
+
 def test_sign_without_audit(tmp_path):
     agent = SigningAgent.create("no-audit", signet_dir=str(tmp_path))
     agent.sign("tool1", audit=False)
     records = agent.audit_query()
     assert len(records) == 0
+
+
+def test_sign_rejects_encrypted_audit_without_audit(tmp_path):
+    agent = SigningAgent.create("enc-no-audit", signet_dir=str(tmp_path))
+    with pytest.raises(ValueError, match="audit_encrypt_params requires audit=True"):
+        agent.sign("tool1", audit=False, audit_encrypt_params=True)
 
 
 def test_sign_audit_failure_raises(tmp_path):
@@ -100,6 +115,13 @@ def test_audit_verify_signatures(tmp_path):
     result = agent.audit_verify_signatures()
     assert result.total == 1
     assert result.valid == 1
+
+
+def test_audit_query_decrypt_params_with_passphrase(tmp_path):
+    agent = SigningAgent.create("enc-pass", passphrase="secret", signet_dir=str(tmp_path))
+    agent.sign("tool1", params={"secret": "value"}, audit_encrypt_params=True)
+    records = agent.audit_query(decrypt_params=True)
+    assert records[0].receipt["action"]["params"]["secret"] == "value"
 
 
 def test_key_info_property(tmp_path):

@@ -37,6 +37,58 @@ def test_verify_untrusted_key():
     assert "untrusted" in result.error
 
 
+def test_verify_trust_bundle_active_agent():
+    params, pubkey, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(
+        trust_bundle={
+            "version": 1,
+            "bundle_id": "tb_prod",
+            "org": "signet",
+            "env": "prod",
+            "generated_at": "2026-04-25T10:30:00Z",
+            "agents": [
+                {
+                    "id": "agent-1",
+                    "name": "test-agent",
+                    "owner": "platform",
+                    "pubkey": pubkey,
+                    "status": "active",
+                    "created_at": "2026-04-25T10:00:00Z",
+                }
+            ],
+        }
+    )
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is True
+
+
+def test_verify_trust_bundle_disabled_agent_rejected():
+    params, pubkey, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(
+        trust_bundle={
+            "version": 1,
+            "bundle_id": "tb_prod",
+            "org": "signet",
+            "env": "prod",
+            "generated_at": "2026-04-25T10:30:00Z",
+            "agents": [
+                {
+                    "id": "agent-1",
+                    "name": "test-agent",
+                    "owner": "platform",
+                    "pubkey": pubkey,
+                    "status": "disabled",
+                    "created_at": "2026-04-25T10:00:00Z",
+                    "disabled_at": "2026-04-25T10:05:00Z",
+                }
+            ],
+        }
+    )
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is False
+    assert "untrusted" in result.error
+
+
 def test_verify_invalid_signature():
     params, pubkey, _ = _signed_request()
     params["_meta"]["_signet"]["sig"] = "ed25519:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

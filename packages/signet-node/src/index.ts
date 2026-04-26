@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -127,11 +127,12 @@ export class SignetNodeClient {
       options.target,
     ];
 
-    let extraEnv: NodeJS.ProcessEnv | undefined;
+    let paramsTempDir: string | undefined;
     if (options.params !== undefined) {
-      const envName = `SIGNET_NODE_PARAMS_${randomEnvSuffix()}`;
-      args.push("--params-from-env", envName);
-      extraEnv = { [envName]: JSON.stringify(options.params) };
+      paramsTempDir = await mkdtemp(join(tmpdir(), "signet-node-params-"));
+      const paramsPath = join(paramsTempDir, "params.json");
+      await writeFile(paramsPath, JSON.stringify(options.params), "utf8");
+      args.push("--params", `@${paramsPath}`);
     }
     if (options.hashOnly) {
       args.push("--hash-only");
@@ -158,14 +159,14 @@ export class SignetNodeClient {
       args.push("--parent-receipt-id", options.parentReceiptId);
     }
 
-    const result = await runSignetCommand(this.signetBin, args, {
-      signetHome: this.signetHome,
-      passphrase: this.passphrase,
-      env: extraEnv ? { ...this.env, ...extraEnv } : this.env,
-      maxBuffer: this.maxBuffer,
-      allowFailure: false,
-    });
-    return parseJson<Record<string, unknown>>(result.stdout, "sign receipt");
+    try {
+      const result = await this.runRaw(args);
+      return parseJson<Record<string, unknown>>(result.stdout, "sign receipt");
+    } finally {
+      if (paramsTempDir) {
+        await rm(paramsTempDir, { recursive: true, force: true });
+      }
+    }
   }
 
   async auditQuery(options: AuditQueryOptions = {}): Promise<AuditQueryRecord[]> {
@@ -206,10 +207,6 @@ export class SignetNodeClient {
     const result = await this.runRaw(args, true);
     return parseAuditVerifyResult(result, args);
   }
-}
-
-function randomEnvSuffix(): string {
-  return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
 function pushAuditFilters(args: string[], options: AuditFilterOptions): void {

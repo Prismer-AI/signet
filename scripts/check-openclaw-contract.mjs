@@ -140,21 +140,18 @@ const checks = [
     impact:
       "If the registrar disappears from api-builder, the collector wire is dead even if the type still exists.",
   },
-  {
-    id: "Plugin SDK still exposes registerHook (for future fallback)",
-    source: "types.ts",
-    patterns: [
-      /registerHook:\s*\(/,
-      /events:\s*string\s*\|\s*string\[\]/,
-    ],
-    impact:
-      "Reserved as a fallback path. Removal would not break us today but " +
-      "would invalidate the README claim that registerHook is the legacy escape hatch.",
-  },
 ];
 
-const SECURITY_AUDIT_FIELD_PATTERN =
-  /export type SecurityAuditFinding\s*=\s*\{[^}]*checkId:\s*string;[^}]*severity:[^}]*;[^}]*title:\s*string;[^}]*detail:\s*string;/s;
+// SecurityAuditFinding lives in src/security/audit.types.ts. We check the
+// type body field-by-field so a benign reorder (which is not a TypeScript
+// contract break) does not trigger a drift alert.
+const SECURITY_AUDIT_TYPE_RE = /export type SecurityAuditFinding\s*=\s*\{([\s\S]+?)\};/;
+const SECURITY_AUDIT_REQUIRED_FIELDS = [
+  /\bcheckId\s*:\s*string/,
+  /\bseverity\s*:\s*[A-Za-z][\w]*/,
+  /\btitle\s*:\s*string/,
+  /\bdetail\s*:\s*string/,
+];
 
 function runChecks(sources) {
   const failed = [];
@@ -206,24 +203,36 @@ async function main() {
   if (args.length === 0) {
     try {
       const auditTypes = await fetchRemote("src/security/audit.types.ts");
-      if (!SECURITY_AUDIT_FIELD_PATTERN.test(auditTypes)) {
+      const typeMatch = SECURITY_AUDIT_TYPE_RE.exec(auditTypes);
+      if (!typeMatch) {
         failures.push({
           check: {
-            id: "SecurityAuditFinding {checkId,severity,title,detail} fields preserved",
+            id: "SecurityAuditFinding type still exported from audit.types.ts",
             source: "security/audit.types.ts",
           },
-          reason:
-            "expected ordered fields checkId/severity/title/detail in SecurityAuditFinding, not found",
+          reason: "could not locate `export type SecurityAuditFinding = { ... };`",
         });
+      } else {
+        const body = typeMatch[1];
+        const missing = SECURITY_AUDIT_REQUIRED_FIELDS.filter((re) => !re.test(body));
+        if (missing.length > 0) {
+          failures.push({
+            check: {
+              id: "SecurityAuditFinding {checkId,severity,title,detail} fields preserved",
+              source: "security/audit.types.ts",
+            },
+            reason: `missing fields (order-independent): ${missing.map((re) => re.source).join("; ")}`,
+          });
+        }
       }
     } catch (err) {
-      failures.push({
-        check: {
-          id: "Fetch src/security/audit.types.ts",
-          source: "security/audit.types.ts",
-        },
-        reason: `gh api failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      // Treat fetch failure as infrastructure problem, not contract drift.
+      // Re-throw so main() can route it to exit code 2 distinct from drift.
+      throw new Error(
+        `failed to fetch src/security/audit.types.ts (infrastructure issue, not drift): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 

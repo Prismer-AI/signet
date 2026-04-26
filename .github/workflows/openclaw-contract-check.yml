@@ -23,14 +23,28 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+
       - name: Run contract check
         id: contract
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/check-openclaw-contract.mjs
+        run: |
+          set +e
+          node scripts/check-openclaw-contract.mjs
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # Pass through the exit code so the step's outcome reflects reality:
+          #   0 = clean
+          #   1 = drift (real failure, see "File issue on drift" step)
+          #   2 = infrastructure error (gh api flake, missing token, parse error)
+          exit "$code"
 
       - name: File issue on drift
-        if: failure() && github.event_name == 'schedule'
+        # Only on scheduled runs, only when the contract step itself produced
+        # exit code 1 (drift). Steps that fail before contract runs (checkout,
+        # setup-node, gh-api outage during fetch) leave outputs.exit_code empty,
+        # so this step is skipped and no false-positive issue is filed.
+        if: github.event_name == 'schedule' && steps.contract.outputs.exit_code == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -47,16 +61,13 @@ jobs:
             echo "Open drift issue already exists; skipping."
             exit 0
           fi
-          body=$(cat <<'EOF'
-The daily contract-drift check failed. Re-read packages/signet-openclaw-plugin/src/index.ts
-against the latest openclaw/openclaw main and decide:
-
-1. Update the *Like type interfaces and call sites to match the new SDK shape.
-2. Bump openclaw.compat.pluginApi to exclude the OpenClaw build that introduced the drift.
-
-Run logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-EOF
-          )
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          body=$(printf '%s\n%s\n\n%s\n%s\n\n%s\n' \
+            "The daily contract-drift check failed. Re-read packages/signet-openclaw-plugin/src/index.ts" \
+            "against the latest openclaw/openclaw main and decide:" \
+            "1. Update the *Like type interfaces and call sites to match the new SDK shape." \
+            "2. Bump openclaw.compat.pluginApi to exclude the OpenClaw build that introduced the drift." \
+            "Run logs: ${run_url}")
           gh issue create \
             --title "$title" \
             --body "$body" \

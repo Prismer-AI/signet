@@ -128,6 +128,64 @@ describe("@signet-auth/node", () => {
     assert.equal(action.trace_id, "trace-abc");
   });
 
+  it("re-probes after binary swap when sign() fails on session field", async () => {
+    const home = await createHome();
+    const goodBin = signetBin;
+    const stubPath = join(home, "swappable-signet");
+
+    // Start with a working binary by symlinking. Use copy for portability.
+    const goodScript = `#!/usr/bin/env bash\nexec "${goodBin}" "$@"\n`;
+    await writeFile(stubPath, goodScript, { mode: 0o755 });
+
+    const client = new SignetNodeClient({ signetBin: stubPath, signetHome: home });
+    await client.runRaw(["identity", "generate", "--name", "node-swap", "--unencrypted"]);
+
+    // First sign succeeds and primes the compat cache.
+    const ok = await client.sign({
+      key: "node-swap",
+      tool: "bash",
+      params: { cmd: "ls" },
+      target: "openclaw://gateway/local",
+      session: "agent:swap:thread-1",
+    });
+    assert.equal((ok.action as Record<string, unknown>).session, "agent:swap:thread-1");
+
+    // Swap to an old binary that has no session flag.
+    const oldScript = `#!/usr/bin/env bash
+case "$1" in
+  --version) echo "signet 0.0.99-stub" ;;
+  sign)
+    if [ "$2" = "--help" ]; then
+      echo "Usage: signet sign --key <KEY> --tool <TOOL> --target <TARGET>"
+      exit 0
+    fi
+    echo "error: unexpected argument '--session'" >&2
+    exit 2
+    ;;
+esac
+`;
+    await writeFile(stubPath, oldScript, { mode: 0o755 });
+
+    await assert.rejects(
+      () =>
+        client.sign({
+          key: "node-swap",
+          tool: "bash",
+          params: { cmd: "ls" },
+          target: "openclaw://gateway/local",
+          session: "agent:swap:thread-2",
+        }),
+      (err: unknown) => {
+        assert.ok(
+          err instanceof SignetCliVersionError,
+          `expected SignetCliVersionError after binary swap, got ${err}`,
+        );
+        assert.equal(err.cliVersion, "0.0.99-stub");
+        return true;
+      },
+    );
+  });
+
   it("reports SignetCliVersionError when sign --help is missing required flags", async () => {
     const home = await createHome();
     const stubBin = join(home, "stub-signet");

@@ -227,9 +227,25 @@ export class SignetNodeClient {
       args.push("--parent-receipt-id", options.parentReceiptId);
     }
 
+    const sessionFieldsRequested =
+      options.session !== undefined ||
+      options.callId !== undefined ||
+      options.traceId !== undefined ||
+      options.parentReceiptId !== undefined;
+
     try {
       const result = await this.runRaw(args);
       return parseJson<Record<string, unknown>>(result.stdout, "sign receipt");
+    } catch (err) {
+      // The cached compatibility probe can go stale if the signet binary on
+      // disk is swapped under a long-lived process. Re-probe on failure when
+      // the caller asked for session-bound fields so we surface the proper
+      // SignetCliVersionError instead of the raw clap exit code.
+      if (sessionFieldsRequested && err instanceof SignetCliError) {
+        this.signCompatProbe = null;
+        await this.assertSignCompatibility();
+      }
+      throw err;
     } finally {
       if (paramsTempDir) {
         await rm(paramsTempDir, { recursive: true, force: true });

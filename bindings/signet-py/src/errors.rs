@@ -22,6 +22,8 @@ pyo3::create_exception!(signet_auth, DelegationExpiredError, SignetError);
 pyo3::create_exception!(signet_auth, UnauthorizedError, SignetError);
 pyo3::create_exception!(signet_auth, PolicyViolationError, SignetError);
 pyo3::create_exception!(signet_auth, PolicyParseError, SignetError);
+pyo3::create_exception!(signet_auth, TrustBundleParseError, SignetError);
+pyo3::create_exception!(signet_auth, TrustBundleError, SignetError);
 pyo3::create_exception!(signet_auth, RequiresApprovalError, SignetError);
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -70,6 +72,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("PolicyParseError", m.py().get_type::<PolicyParseError>())?;
     m.add(
+        "TrustBundleParseError",
+        m.py().get_type::<TrustBundleParseError>(),
+    )?;
+    m.add("TrustBundleError", m.py().get_type::<TrustBundleError>())?;
+    m.add(
         "RequiresApprovalError",
         m.py().get_type::<RequiresApprovalError>(),
     )?;
@@ -92,6 +99,8 @@ pub fn to_py_err(err: signet_core::SignetError) -> PyErr {
         signet_core::SignetError::Unauthorized(msg) => UnauthorizedError::new_err(msg),
         signet_core::SignetError::PolicyViolation(msg) => PolicyViolationError::new_err(msg),
         signet_core::SignetError::PolicyParseError(msg) => PolicyParseError::new_err(msg),
+        signet_core::SignetError::TrustBundleParseError(msg) => TrustBundleParseError::new_err(msg),
+        signet_core::SignetError::TrustBundleError(msg) => TrustBundleError::new_err(msg),
         signet_core::SignetError::RequiresApproval(msg) => RequiresApprovalError::new_err(msg),
         #[cfg(not(target_arch = "wasm32"))]
         signet_core::SignetError::KeyNotFound(msg) => KeyNotFoundError::new_err(msg),

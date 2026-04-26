@@ -78,6 +78,7 @@ from signet_auth._signet import (
     export_public_key,
     # Audit functions
     audit_append,
+    audit_append_encrypted,
     audit_query,
     audit_verify_chain,
     audit_verify_signatures,
@@ -156,6 +157,7 @@ __all__ = [
     "export_public_key",
     # Audit functions
     "audit_append",
+    "audit_append_encrypted",
     "audit_query",
     "audit_verify_chain",
     "audit_verify_signatures",

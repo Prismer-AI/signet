@@ -14,6 +14,7 @@ from signet_auth._signet import (
     Receipt,
     VerifyResult,
     audit_append,
+    audit_append_encrypted,
     audit_query as _audit_query,
     audit_verify_chain as _audit_verify_chain,
     audit_verify_signatures as _audit_verify_signatures,
@@ -50,6 +51,7 @@ class SigningAgent:
         """
         self._signet_dir = signet_dir or default_signet_dir()
         self._name = name
+        self._passphrase = passphrase
         self._secret_key = load_signing_key(self._signet_dir, name, passphrase=passphrase)
         self._public_key = load_verifying_key(self._signet_dir, name)
         self._key_info = load_key_info(self._signet_dir, name)
@@ -76,6 +78,7 @@ class SigningAgent:
         transport: str = "stdio",
         *,
         audit: bool = True,
+        audit_encrypt_params: bool = False,
     ) -> Receipt:
         """Sign an action.
 
@@ -84,11 +87,16 @@ class SigningAgent:
         """
         if self._secret_key is None:
             raise RuntimeError("SigningAgent has been closed")
+        if audit_encrypt_params and not audit:
+            raise ValueError("audit_encrypt_params requires audit=True")
         action = Action(tool, params=params, target=target, transport=transport)
         owner = self._key_info.owner or ""
         receipt = _sign(self._secret_key, action, self._name, owner)
         if audit:
-            audit_append(self._signet_dir, receipt)
+            if audit_encrypt_params:
+                audit_append_encrypted(self._signet_dir, receipt, self._secret_key)
+            else:
+                audit_append(self._signet_dir, receipt)
         return receipt
 
     def delegate(
@@ -258,6 +266,7 @@ class SigningAgent:
         since: str | datetime | None = None,
         tool: str | None = None,
         limit: int | None = None,
+        decrypt_params: bool = False,
     ) -> list[AuditRecord]:
         """Query this agent's audit log (signer auto-filtered to self.name)."""
         return _audit_query(
@@ -266,6 +275,8 @@ class SigningAgent:
             tool=tool,
             signer=self._name,
             limit=limit,
+            decrypt_params=decrypt_params,
+            passphrase=self._passphrase,
         )
 
     def audit_verify_chain(self) -> ChainStatus:

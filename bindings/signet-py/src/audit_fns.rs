@@ -5,8 +5,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
 
-use crate::errors::to_py_err;
 use crate::core_fns::parse_verifying_key;
+use crate::errors::{to_py_err, DecryptionError, KeyNotFoundError};
 use crate::types::{
     PyAuditRecord, PyChainBreak, PyChainStatus, PyReceipt, PyVerifyFailure, PyVerifyResult,
     PyVerifyWarning,
@@ -55,6 +55,52 @@ fn build_filter(
     })
 }
 
+fn encrypted_kid(receipt: &serde_json::Value) -> PyResult<Option<String>> {
+    let Some(action) = receipt.get("action").and_then(|action| action.as_object()) else {
+        return Ok(None);
+    };
+    let Some(envelope) = action.get("params_encrypted") else {
+        return Ok(None);
+    };
+
+    envelope
+        .get("kid")
+        .and_then(|value| value.as_str())
+        .map(|kid| Some(kid.to_string()))
+        .ok_or_else(|| PyValueError::new_err("action.params_encrypted.kid missing or not a string"))
+}
+
+fn materialize_receipt_for_query(
+    path: &Path,
+    receipt: &serde_json::Value,
+    passphrase: Option<&str>,
+) -> PyResult<serde_json::Value> {
+    let Some(kid) = encrypted_kid(receipt)? else {
+        return Ok(receipt.clone());
+    };
+
+    let infos = signet_core::list_keys(path).map_err(to_py_err)?;
+    let Some(info) = infos
+        .into_iter()
+        .find(|info| format!("ed25519:{}", info.pubkey) == kid)
+    else {
+        return Err(KeyNotFoundError::new_err(format!(
+            "encrypted params present for {kid} but no matching local identity was found"
+        )));
+    };
+
+    let signing_key =
+        signet_core::load_signing_key(path, &info.name, passphrase).map_err(|err| match err {
+            signet_core::SignetError::DecryptionError => DecryptionError::new_err(format!(
+                "encrypted params present for {kid} but local identity '{}' could not be unlocked",
+                info.name
+            )),
+            other => to_py_err(other),
+        })?;
+
+    signet_core::audit::decrypt_receipt_params_for_audit(receipt, &signing_key).map_err(to_py_err)
+}
+
 // ─── audit_append ─────────────────────────────────────────────────────────────
 
 #[pyfunction]
@@ -68,10 +114,28 @@ fn audit_append(py: Python<'_>, dir: String, receipt: &PyReceipt) -> PyResult<Py
     Ok(PyAuditRecord { inner: record })
 }
 
+#[pyfunction]
+fn audit_append_encrypted(
+    py: Python<'_>,
+    dir: String,
+    receipt: &PyReceipt,
+    secret_key: &str,
+) -> PyResult<PyAuditRecord> {
+    let path = Path::new(&dir).to_path_buf();
+    let receipt_json = serde_json::to_value(&receipt.inner)
+        .map_err(|e| crate::errors::SerializeError::new_err(e.to_string()))?;
+    let signing_key = crate::core_fns::parse_signing_key(secret_key)?;
+    let record = py
+        .allow_threads(|| signet_core::audit::append_encrypted(&path, &receipt_json, &signing_key))
+        .map_err(to_py_err)?;
+    Ok(PyAuditRecord { inner: record })
+}
+
 // ─── audit_query ──────────────────────────────────────────────────────────────
 
 #[pyfunction]
-#[pyo3(signature = (dir, *, since=None, tool=None, signer=None, limit=None))]
+#[pyo3(signature = (dir, *, since=None, tool=None, signer=None, limit=None, decrypt_params=false, passphrase=None))]
+#[allow(clippy::too_many_arguments)]
 fn audit_query(
     py: Python<'_>,
     dir: String,
@@ -79,12 +143,26 @@ fn audit_query(
     tool: Option<String>,
     signer: Option<String>,
     limit: Option<usize>,
+    decrypt_params: bool,
+    passphrase: Option<String>,
 ) -> PyResult<Vec<PyAuditRecord>> {
     let filter = build_filter(py, since, tool, signer, limit)?;
     let path = Path::new(&dir).to_path_buf();
-    let records = py
+    let mut records = py
         .allow_threads(|| signet_core::audit::query(&path, &filter))
         .map_err(to_py_err)?;
+
+    if decrypt_params {
+        records = records
+            .into_iter()
+            .map(|mut record| {
+                record.receipt =
+                    materialize_receipt_for_query(&path, &record.receipt, passphrase.as_deref())?;
+                Ok(record)
+            })
+            .collect::<PyResult<_>>()?;
+    }
+
     Ok(records
         .into_iter()
         .map(|r| PyAuditRecord { inner: r })
@@ -142,7 +220,9 @@ fn audit_verify_signatures(
         trusted_server_pubkeys: parse_keys(trusted_server_keys)?,
     };
     let result = py
-        .allow_threads(|| signet_core::audit::verify_signatures_with_options(&path, &filter, &options))
+        .allow_threads(|| {
+            signet_core::audit::verify_signatures_with_options(&path, &filter, &options)
+        })
         .map_err(to_py_err)?;
 
     let failures = result
@@ -186,6 +266,7 @@ fn audit_verify_signatures(
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(audit_append, m)?)?;
+    m.add_function(wrap_pyfunction!(audit_append_encrypted, m)?)?;
     m.add_function(wrap_pyfunction!(audit_query, m)?)?;
     m.add_function(wrap_pyfunction!(audit_verify_chain, m)?)?;
     m.add_function(wrap_pyfunction!(audit_verify_signatures, m)?)?;

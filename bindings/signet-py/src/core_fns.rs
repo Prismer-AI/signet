@@ -104,7 +104,7 @@ fn verify_any(py: Python<'_>, receipt_json: &str, public_key: &str) -> PyResult<
     }
 }
 
-fn parse_signing_key(secret_key: &str) -> PyResult<SigningKey> {
+pub(crate) fn parse_signing_key(secret_key: &str) -> PyResult<SigningKey> {
     let keypair_bytes = B64
         .decode(secret_key)
         .map_err(|e| InvalidKeyError::new_err(format!("invalid base64 secret key: {e}")))?;
@@ -238,8 +238,9 @@ fn verify_bilateral_with_options(
         trusted_agent_public_key,
     )?;
 
-    let result =
-        py.allow_threads(|| signet_core::verify_bilateral_with_options(&inner, &verifying_key, &opts));
+    let result = py.allow_threads(|| {
+        signet_core::verify_bilateral_with_options(&inner, &verifying_key, &opts)
+    });
 
     match result {
         Ok(()) => Ok(true),

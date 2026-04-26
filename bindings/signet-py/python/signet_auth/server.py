@@ -20,6 +20,9 @@ class VerifyOptions:
     """List of trusted 'ed25519:<base64>' pubkeys.
     If empty, trust any signer with a valid signature (skip trust check)."""
 
+    trust_bundle: dict[str, Any] | None = None
+    """Structured trust bundle. Active agent keys are treated as trust anchors."""
+
     require_signature: bool = True
     """Reject unsigned requests. Default: True."""
 
@@ -38,6 +41,43 @@ class ServerVerifyResult:
     signer_name: str | None = None
     signer_pubkey: str | None = None
     error: str | None = None
+
+
+def _active_agent_keys_from_bundle(bundle: dict[str, Any]) -> list[str]:
+    if not isinstance(bundle, dict):
+        raise ValueError("invalid trust bundle")
+
+    agents = bundle.get("agents", [])
+    if not isinstance(agents, list):
+        raise ValueError("invalid trust bundle")
+
+    now = datetime.now(timezone.utc)
+    trusted_keys: list[str] = []
+
+    for entry in agents:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid trust bundle")
+        if entry.get("status") != "active":
+            continue
+
+        pubkey = entry.get("pubkey")
+        if not isinstance(pubkey, str):
+            raise ValueError("invalid trust bundle")
+
+        expires_at = entry.get("expires_at")
+        if expires_at is not None:
+            if not isinstance(expires_at, str):
+                raise ValueError("invalid trust bundle")
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            if expiry < now:
+                continue
+
+        trusted_keys.append(pubkey)
+
+    return trusted_keys
 
 
 def verify_request(
@@ -93,9 +133,23 @@ def verify_request(
     if not valid:
         return ServerVerifyResult(ok=False, error="invalid signature")
 
-    # 5. Check trusted keys — skip if trusted_keys is empty (trust any signer)
-    if opts.trusted_keys:
-        if prefixed_pubkey not in opts.trusted_keys:
+    # 5. Check trusted keys — empty trusted_keys and no trust_bundle means
+    # "verify signature only, don't check trust". Supplying a trust bundle
+    # enables anchored verification even if trusted_keys is empty.
+    try:
+        trust_bundle_keys = (
+            _active_agent_keys_from_bundle(opts.trust_bundle)
+            if opts.trust_bundle is not None
+            else []
+        )
+    except ValueError:
+        return ServerVerifyResult(ok=False, error="invalid trust bundle")
+
+    trusted_keys = list(dict.fromkeys([*opts.trusted_keys, *trust_bundle_keys]))
+    trust_anchors_provided = bool(opts.trusted_keys) or opts.trust_bundle is not None
+
+    if trust_anchors_provided:
+        if prefixed_pubkey not in trusted_keys:
             return ServerVerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
 
     # 6. Check freshness

@@ -36,7 +36,7 @@
   ],
   "scripts": {
     "build": "npx tsc",
-    "test": "npx tsc"
+    "test": "npx tsc && node --test dist/tests/plugin.test.js"
   },
   "publishConfig": {
     "access": "public"

@@ -1,6 +1,7 @@
 import { SignetNodeClient } from "@signet-auth/node";
 
 import {
+  assertConfigCompatible,
   extractPolicyReason,
   isPolicyDenialError,
   resolveConfig,
@@ -85,7 +86,29 @@ interface DefinedPluginEntryLike {
   name: string;
   description: string;
   configSchema: { type: "object"; additionalProperties?: boolean; properties?: Record<string, unknown> };
-  register: (api: OpenClawApiLike) => void;
+  register: (api: OpenClawApiLike) => void | Promise<void>;
+}
+
+type PluginMode = "active" | "passive";
+
+interface SelfCheckOk {
+  ok: true;
+}
+
+interface SelfCheckFail {
+  ok: false;
+  reason: string;
+  remediation: string;
+}
+
+type SelfCheckResult = SelfCheckOk | SelfCheckFail;
+
+interface PluginRuntimeState {
+  mode: PluginMode;
+  lastProbeAt: number;
+  lastProbeStatus: SelfCheckResult;
+  /** Internal: ensures only one inflight reprobe at a time. */
+  reprobeInflight: Promise<SelfCheckResult> | null;
 }
 
 const PLUGIN_ID = "signet";
@@ -112,16 +135,17 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
       signetBin: { type: "string" },
       blockOnSignFailure: { type: "boolean", default: true },
       priority: { type: "number", default: 50 },
+      allowDegraded: { type: "boolean", default: false },
+      signetTimeoutMs: { type: "number", default: 5000 },
+      reprobeIntervalMs: { type: "number", default: 30000 },
     },
   },
-  register(api) {
+  async register(api) {
     const cfg = resolveConfig(api.pluginConfig as SignetPluginConfig | undefined);
+    assertConfigCompatible(cfg);
+
     const log = api.logger;
     const client = createClient(cfg);
-
-    log.info?.(
-      `[signet] plugin armed: key=${cfg.keyName} target=${cfg.target} policy=${cfg.policy ?? "none"}`,
-    );
 
     const deprecated = api.pluginConfig as { signerOwner?: unknown } | undefined;
     if (deprecated && typeof deprecated.signerOwner === "string") {
@@ -130,10 +154,13 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
       );
     }
 
+    const initialStatus = await runSelfCheck(client, cfg);
+    const state = createInitialState(initialStatus, cfg, log);
+
     api.on(
       "before_tool_call",
       async (event, ctx) =>
-        handleBeforeToolCall(event as BeforeToolCallEvent, ctx, cfg, client, log),
+        handleBeforeToolCall(event as BeforeToolCallEvent, ctx, cfg, client, log, state),
       { priority: cfg.priority },
     );
 
@@ -150,22 +177,182 @@ export const signetOpenClawPlugin: DefinedPluginEntryLike = {
       { priority: cfg.priority },
     );
 
-    api.registerSecurityAuditCollector(() => collectSecurityFindings(cfg));
+    api.registerSecurityAuditCollector(() => collectSecurityFindings(cfg, state));
   },
 };
 
 export default signetOpenClawPlugin;
 
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
 function createClient(cfg: ResolvedSignetPluginConfig): SignetNodeClient {
-  const passphrase = process.env[cfg.passphraseEnv];
+  // Re-read passphrase env on every call (passphraseFromEnv) so a user fixing
+  // SIGNET_PASSPHRASE mid-session takes effect on the next sign without
+  // recreating the client. Bounded timeout protects the hot path against a
+  // hung signet binary.
   return new SignetNodeClient({
     signetBin: cfg.signetBin,
     signetHome: cfg.auditDir,
-    passphrase: passphrase || undefined,
+    passphraseFromEnv: cfg.passphraseEnv,
+    signetTimeoutMs: cfg.signetTimeoutMs,
   });
 }
 
+function createInitialState(
+  status: SelfCheckResult,
+  cfg: ResolvedSignetPluginConfig,
+  log: PluginLoggerLike,
+): PluginRuntimeState {
+  const now = Date.now();
+  if (status.ok) {
+    log.info?.(
+      `[signet] plugin ACTIVE: key=${cfg.keyName} target=${cfg.target} policy=${cfg.policy ?? "none"}`,
+    );
+    return { mode: "active", lastProbeAt: now, lastProbeStatus: status, reprobeInflight: null };
+  }
+
+  if (cfg.allowDegraded) {
+    log.warn?.(
+      `[signet] plugin loaded in PASSIVE mode (NOT signing, NOT enforcing): ${status.reason}`,
+    );
+    log.warn?.(`[signet] remediation: ${status.remediation}`);
+    return { mode: "passive", lastProbeAt: now, lastProbeStatus: status, reprobeInflight: null };
+  }
+
+  // Fail-closed default: plugin loads in active mode but the first tool call
+  // will block. Surface the actionable error eagerly so the operator sees
+  // it in startup logs instead of waiting for the first failure.
+  log.error?.(`[signet] startup self-check FAILED: ${status.reason}`);
+  log.error?.(`[signet] tool calls will be BLOCKED until you fix this.`);
+  log.error?.(`[signet] remediation: ${status.remediation}`);
+  return { mode: "active", lastProbeAt: now, lastProbeStatus: status, reprobeInflight: null };
+}
+
+/**
+ * Run a real `signet sign --no-log` against the configured identity. This is
+ * the only probe that actually validates: (1) the binary is present, (2) the
+ * configured identity exists, and (3) the identity is unlockable in the
+ * current passphrase env. `--no-log` keeps the audit log untouched (we are
+ * just probing), and we use a tiny dummy payload to keep the probe cheap.
+ */
+async function runSelfCheck(
+  client: SignetNodeClient,
+  cfg: ResolvedSignetPluginConfig,
+): Promise<SelfCheckResult> {
+  try {
+    await client.sign({
+      key: cfg.keyName,
+      tool: "signet:self-check",
+      target: cfg.target,
+      params: {},
+      noLog: true,
+    });
+    return { ok: true };
+  } catch (err) {
+    return classifySelfCheckError(err, cfg);
+  }
+}
+
+function classifySelfCheckError(
+  err: unknown,
+  cfg: ResolvedSignetPluginConfig,
+): SelfCheckFail {
+  const message = err instanceof Error ? err.message : String(err);
+  const stderr = (err as { stderr?: string } | null)?.stderr ?? "";
+  const haystack = `${message}\n${stderr}`;
+
+  if (haystack.includes("ENOENT") || /command not found/i.test(haystack)) {
+    return {
+      ok: false,
+      reason: "signet binary not found on PATH",
+      remediation:
+        "Install with `cargo install signet-cli` or download the latest GitHub release from https://github.com/Prismer-AI/signet/releases.",
+    };
+  }
+  if (/SignetCliTimeoutError|aborted after/.test(haystack)) {
+    return {
+      ok: false,
+      reason: `signet binary did not respond within ${cfg.signetTimeoutMs}ms`,
+      remediation: "Check the binary at SIGNET_BIN / signetBin or raise signetTimeoutMs.",
+    };
+  }
+  if (/identity .* not found|key .* not found|no such file/i.test(haystack)) {
+    return {
+      ok: false,
+      reason: `signet identity '${cfg.keyName}' not found`,
+      remediation: `Run \`signet identity create ${cfg.keyName}\` to create the signing identity.`,
+    };
+  }
+  if (/decryption|passphrase/i.test(haystack)) {
+    return {
+      ok: false,
+      reason: `failed to unlock signet identity '${cfg.keyName}'`,
+      remediation: `Export ${cfg.passphraseEnv} with the correct passphrase before starting OpenClaw.`,
+    };
+  }
+  return {
+    ok: false,
+    reason: `signet self-check failed: ${message.split("\n")[0]}`,
+    remediation: `Run \`signet sign --key ${cfg.keyName} --tool ping --params '{}' --target ${cfg.target} --no-log\` from the gateway shell to triage.`,
+  };
+}
+
 async function handleBeforeToolCall(
+  event: BeforeToolCallEvent,
+  ctx: ToolHookContext,
+  cfg: ResolvedSignetPluginConfig,
+  client: SignetNodeClient,
+  log: PluginLoggerLike,
+  state: PluginRuntimeState,
+): Promise<BeforeToolCallResult> {
+  if (state.mode === "passive") {
+    // Try to recover. Sync reprobe on the transition, bounded by
+    // signet timeout (5s default). If still failing, allow tool call through
+    // with passive bypass. Reprobe coalesces across concurrent calls so a
+    // burst does not multiply.
+    const result = await maybeReprobePassive(state, client, cfg, log);
+    if (!result.ok) {
+      // Still passive: skip sign, allow the tool call.
+      return {};
+    }
+    // Recovered: fall through to active path.
+  }
+
+  return signActiveCall(event, ctx, cfg, client, log);
+}
+
+async function maybeReprobePassive(
+  state: PluginRuntimeState,
+  client: SignetNodeClient,
+  cfg: ResolvedSignetPluginConfig,
+  log: PluginLoggerLike,
+): Promise<SelfCheckResult> {
+  const age = Date.now() - state.lastProbeAt;
+  if (age < cfg.reprobeIntervalMs) {
+    return state.lastProbeStatus;
+  }
+
+  if (!state.reprobeInflight) {
+    state.reprobeInflight = (async () => {
+      const r = await runSelfCheck(client, cfg);
+      state.lastProbeAt = Date.now();
+      state.lastProbeStatus = r;
+      if (r.ok && state.mode === "passive") {
+        state.mode = "active";
+        log.info?.(`[signet] recovered to ACTIVE mode after self-check passed.`);
+      }
+      return r;
+    })().finally(() => {
+      state.reprobeInflight = null;
+    });
+  }
+
+  return state.reprobeInflight;
+}
+
+async function signActiveCall(
   event: BeforeToolCallEvent,
   ctx: ToolHookContext,
   cfg: ResolvedSignetPluginConfig,
@@ -208,25 +395,58 @@ async function handleBeforeToolCall(
 
 function collectSecurityFindings(
   cfg: ResolvedSignetPluginConfig,
+  state: PluginRuntimeState,
 ): SecurityAuditFinding[] {
   const findings: SecurityAuditFinding[] = [];
 
+  // Runtime readiness drives the headline check. Config-only "plugin
+  // enabled" was misleading when the plugin loaded but signing was broken.
+  const status = state.lastProbeStatus;
   findings.push({
-    checkId: "signet:configured",
-    severity: "info",
-    title: "Signet plugin enabled",
-    detail: `Tool calls are signed with identity '${cfg.keyName}' and emitted under target ${cfg.target}.`,
+    checkId: "signet:readiness",
+    severity: status.ok ? "info" : state.mode === "passive" ? "critical" : "critical",
+    title: status.ok
+      ? "Signet plugin operational"
+      : state.mode === "passive"
+        ? "Signet plugin in PASSIVE mode (not signing, not enforcing)"
+        : "Signet plugin armed but startup self-check failed (tool calls will block)",
+    detail: status.ok
+      ? `Tool calls are signed with identity '${cfg.keyName}' and emitted under target ${cfg.target}.`
+      : `Reason: ${status.reason}.`,
+    remediation: status.ok ? undefined : status.remediation,
   });
+
+  if (!status.ok && state.mode === "passive") {
+    findings.push({
+      checkId: "signet:bypass",
+      severity: "critical",
+      title: "Signet bypass active — tool calls run UNSIGNED and UNAUDITED",
+      detail:
+        `allowDegraded=true and the startup self-check failed (${status.reason}). ` +
+        `Every OpenClaw tool call runs without a Signet receipt, without policy ` +
+        `enforcement, and without an audit log entry. This deployment is currently ` +
+        `unprotected.`,
+      remediation: status.remediation,
+    });
+  }
 
   findings.push({
     checkId: "signet:policy",
-    severity: cfg.policy ? "info" : "warn",
-    title: cfg.policy ? "Signet policy enforced" : "No Signet policy configured",
+    severity: cfg.policy ? (status.ok ? "info" : "critical") : "warn",
+    title: cfg.policy
+      ? status.ok
+        ? "Signet policy enforced"
+        : "Signet policy CONFIGURED but plugin not operational"
+      : "No Signet policy configured",
     detail: cfg.policy
-      ? `Policy file: ${cfg.policy}. Denied tool calls are blocked before execution.`
+      ? status.ok
+        ? `Policy file: ${cfg.policy}. Denied tool calls are blocked before execution.`
+        : `Policy file: ${cfg.policy}. Plugin is not operational, so policy is NOT being enforced.`
       : "Every signed call is allowed. Tool execution is observable but not gated.",
     remediation: cfg.policy
-      ? undefined
+      ? status.ok
+        ? undefined
+        : status.remediation
       : "Set plugins.entries.signet.config.policy to a Signet policy YAML to enforce deny rules.",
   });
 
@@ -244,27 +464,36 @@ function collectSecurityFindings(
 
   findings.push({
     checkId: "signet:fail-mode",
-    severity: cfg.blockOnSignFailure ? "info" : "warn",
-    title: cfg.blockOnSignFailure
-      ? "Sign failures fail-closed"
-      : "Sign failures fail-open",
-    detail: cfg.blockOnSignFailure
-      ? "If signing or policy evaluation errors, the tool call is blocked. Safe default."
-      : "If signing or policy evaluation errors, the tool call still runs. Audit log may have gaps.",
-    remediation: cfg.blockOnSignFailure
-      ? undefined
-      : "Set plugins.entries.signet.config.blockOnSignFailure=true unless you accept silent audit gaps.",
+    severity: cfg.allowDegraded ? "warn" : cfg.blockOnSignFailure ? "info" : "warn",
+    title: cfg.allowDegraded
+      ? "Sign failures fail-open (allowDegraded=true)"
+      : cfg.blockOnSignFailure
+        ? "Sign failures fail-closed"
+        : "Sign failures fail-open",
+    detail: cfg.allowDegraded
+      ? "When the startup self-check fails, tool calls run unsigned. Audit log will have gaps."
+      : cfg.blockOnSignFailure
+        ? "If signing or policy evaluation errors, the tool call is blocked. Safe default."
+        : "If signing or policy evaluation errors, the tool call still runs. Audit log may have gaps.",
+    remediation: cfg.allowDegraded
+      ? "Set allowDegraded=false unless you accept silent audit gaps. Combine with blockOnSignFailure=true to refuse to load on broken setup."
+      : cfg.blockOnSignFailure
+        ? undefined
+        : "Set plugins.entries.signet.config.blockOnSignFailure=true unless you accept silent audit gaps.",
   });
 
   findings.push({
     checkId: "signet:params-encryption",
-    severity: cfg.encryptParams ? "info" : "info",
+    severity: cfg.encryptParams ? "info" : "warn",
     title: cfg.encryptParams
       ? "Tool params encrypted at rest"
       : "Tool params stored in clear in audit log",
     detail: cfg.encryptParams
       ? "action.params is wrapped in an XChaCha20-Poly1305 envelope keyed off the signing key."
       : "Receipts include tool parameters in clear text. External auditors can read them without unlocking the signing key.",
+    remediation: cfg.encryptParams
+      ? undefined
+      : "Set plugins.entries.signet.config.encryptParams=true if tool parameters may include secrets.",
   });
 
   return findings;

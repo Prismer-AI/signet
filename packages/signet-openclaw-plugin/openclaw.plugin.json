@@ -54,6 +54,21 @@
         "type": "number",
         "description": "Hook priority. Higher values run earlier. OpenClaw runs before_tool_call hooks in descending priority order.",
         "default": 50
+      },
+      "allowDegraded": {
+        "type": "boolean",
+        "description": "When true, a failed startup self-check puts the plugin into PASSIVE mode (tool calls run unsigned and unaudited until the operator fixes setup). The security audit collector reports signet:bypass=critical so the operator can see the plugin is not protecting anything. INCOMPATIBLE with `policy`: passive mode bypasses the signet sign call where policy evaluation runs, so that combination is rejected at register() time. Default false (fail-closed).",
+        "default": false
+      },
+      "signetTimeoutMs": {
+        "type": "number",
+        "description": "Hard timeout (ms) for any single signet CLI invocation. Default 5000. A hung signet binary aborts via AbortController and surfaces as SignetCliTimeoutError so the OpenClaw before_tool_call hook cannot stall.",
+        "default": 5000
+      },
+      "reprobeIntervalMs": {
+        "type": "number",
+        "description": "Min ms between background self-check probes when in PASSIVE mode. Default 30000. Recovery from passive -> active runs synchronously on the next before_tool_call after this interval (bounded by signetTimeoutMs).",
+        "default": 30000
       }
     }
   }

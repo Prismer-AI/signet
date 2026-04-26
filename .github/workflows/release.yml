@@ -293,20 +293,6 @@ jobs:
           }
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Build and publish @signet-auth/node
-        run: |
-          cd packages/signet-node
-          npm install
-          tsc
-          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
-            if grep -q "previously published" /tmp/npm-pub.log; then
-              echo "Version already published, skipping."
-            else
-              exit 1
-            fi
-          }
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Post-publish smoke test (npm)
         run: |
           echo "Waiting 30s for npm registry propagation..."
@@ -343,3 +329,35 @@ jobs:
           echo "cargo smoke test PASSED: identity + sign + verify OK"
         env:
           SIGNET_HOME: /tmp/signet-smoke
+
+  npm-node:
+    # @signet-auth/node shells out to the local `signet` CLI and is API-coupled
+    # to the matching CLI flags. Publishing it before signet-cli@<VERSION> is
+    # available on crates.io would let early adopters npm-install the wrapper,
+    # `cargo install` an older signet binary from crates, and trip the runtime
+    # SignetCliVersionError probe. Wait for crates so that order is impossible.
+    name: Publish to npm (@signet-auth/node, after CLI release)
+    needs: [validate-version, crates]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install TypeScript globally
+        run: npm install -g typescript
+      - name: Build and publish @signet-auth/node
+        run: |
+          cd packages/signet-node
+          npm install
+          tsc
+          npm publish --access public 2>&1 | tee /tmp/npm-pub.log || {
+            if grep -q "previously published" /tmp/npm-pub.log; then
+              echo "Version already published, skipping."
+            else
+              exit 1
+            fi
+          }
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

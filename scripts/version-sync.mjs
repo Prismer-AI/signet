@@ -45,6 +45,27 @@ const jsonTargets = [
     },
   },
   {
+    relPath: 'packages/signet-node/package.json',
+    apply(data, version) {
+      // Tier A lockstep: the @signet-auth/node CLI bridge tracks the main
+      // Signet release because its API contract is "I know how to drive
+      // signet <X> CLI flags". signet-node has no runtime dependency on
+      // @signet-auth/core, so no dependency rewrite needed here.
+      data.version = version;
+    },
+  },
+  {
+    relPath: 'packages/signet-openclaw-plugin/package.json',
+    apply(data, version) {
+      // Tier C: the OpenClaw plugin keeps its OWN version (governed by
+      // OpenClaw plugin SDK cadence). version-sync only re-pins its
+      // @signet-auth/node dep to track the main Signet version.
+      if (data.dependencies?.['@signet-auth/node']) {
+        data.dependencies['@signet-auth/node'] = `^${version}`;
+      }
+    },
+  },
+  {
     relPath: 'packages/signet-mcp-tools/server.json',
     apply(data, version) {
       data.version = version;
@@ -76,6 +97,7 @@ const jsonTargets = [
         'packages/signet-mcp-server',
         'packages/signet-mcp-tools',
         'packages/signet-vercel-ai',
+        'packages/signet-node',
       ];
 
       for (const packagePath of packageEntries) {
@@ -87,13 +109,29 @@ const jsonTargets = [
         entry.version = version;
       }
 
-      for (const packagePath of packageEntries.slice(1)) {
+      // Re-pin @signet-auth/core dep on every npm wrapper that uses it.
+      // signet-core itself and signet-node have no @signet-auth/core dep
+      // and are excluded from this loop.
+      const packagesUsingCore = [
+        'packages/signet-mcp',
+        'packages/signet-mcp-server',
+        'packages/signet-mcp-tools',
+        'packages/signet-vercel-ai',
+      ];
+      for (const packagePath of packagesUsingCore) {
         const entry = data.packages?.[packagePath];
         if (!entry.dependencies?.['@signet-auth/core']) {
           throw new Error(`Expected @signet-auth/core dependency in ${packagePath}.`);
         }
 
         entry.dependencies['@signet-auth/core'] = `^${version}`;
+      }
+
+      // Tier C: signet-openclaw-plugin's own version is NOT lockstep-managed,
+      // but its @signet-auth/node dep should track the main Signet version.
+      const openclawLock = data.packages?.['packages/signet-openclaw-plugin'];
+      if (openclawLock?.dependencies?.['@signet-auth/node']) {
+        openclawLock.dependencies['@signet-auth/node'] = `^${version}`;
       }
     },
   },

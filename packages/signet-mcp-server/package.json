@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp-server",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Execution-boundary verification and response signing for MCP servers",
   "keywords": [
     "mcp",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@signet-auth/core": "^0.9.1"
+    "@signet-auth/core": "^0.10.0"
   },
   "devDependencies": {
     "@types/node": "^22",

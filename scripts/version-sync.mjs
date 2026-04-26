@@ -76,18 +76,15 @@ const jsonTargets = [
       data.packages[0].version = version;
     },
   },
-  {
-    relPath: 'plugins/codex/package.json',
-    apply(data, version) {
-      data.version = version;
-    },
-  },
-  {
-    relPath: 'plugins/claude-code/package.json',
-    apply(data, version) {
-      data.version = version;
-    },
-  },
+  // Tier C — plugins are NOT lockstep with the main Signet release.
+  // Their cadence is governed by the host they integrate with (Codex CLI,
+  // Claude Code IDE, OpenClaw gateway). They keep their own version field
+  // and are tagged separately. They have no @signet-auth/* npm deps to
+  // re-pin, so no version-sync entry is needed.
+  //   - plugins/codex/package.json
+  //   - plugins/claude-code/package.json
+  //   - packages/signet-openclaw-plugin/package.json (only its
+  //     @signet-auth/node dep is tracked above; its own version is not)
   {
     relPath: 'package-lock.json',
     apply(data, version) {

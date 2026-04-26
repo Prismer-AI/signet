@@ -1,0 +1,63 @@
+name: OpenClaw contract drift
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # daily 09:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/signet-openclaw-plugin/**"
+      - "scripts/check-openclaw-contract.mjs"
+      - ".github/workflows/openclaw-contract-check.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: Check OpenClaw plugin SDK contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Run contract check
+        id: contract
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-openclaw-contract.mjs
+
+      - name: File issue on drift
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%F)
+          title="OpenClaw plugin SDK contract drift ($today)"
+          existing=$(gh issue list \
+            --label openclaw-contract-drift \
+            --state open \
+            --search "in:title \"OpenClaw plugin SDK contract drift\"" \
+            --json number \
+            --jq 'length')
+          if [ "$existing" != "0" ]; then
+            echo "Open drift issue already exists; skipping."
+            exit 0
+          fi
+          body=$(cat <<'EOF'
+The daily contract-drift check failed. Re-read packages/signet-openclaw-plugin/src/index.ts
+against the latest openclaw/openclaw main and decide:
+
+1. Update the *Like type interfaces and call sites to match the new SDK shape.
+2. Bump openclaw.compat.pluginApi to exclude the OpenClaw build that introduced the drift.
+
+Run logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+EOF
+          )
+          gh issue create \
+            --title "$title" \
+            --body "$body" \
+            --label openclaw-contract-drift

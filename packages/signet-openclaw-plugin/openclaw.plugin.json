@@ -1,5 +1,6 @@
 {
   "id": "signet",
+  "description": "Cryptographic Ed25519 audit receipts for every OpenClaw tool call. Compat floor is intentionally older than OpenClaw latest; see packages/signet-openclaw-plugin/README.md 'Compat range policy'.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

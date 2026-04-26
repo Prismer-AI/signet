@@ -92,6 +92,24 @@ signet audit --verify --trust-bundle ./trust.yaml
 | `blockOnSignFailure` | `true` | Fail-closed (`true`) aborts the tool call on signing errors; fail-open (`false`) logs and lets the call run. |
 | `priority` | `50` | Hook priority. Higher values run earlier in OpenClaw's `before_tool_call` chain. |
 
+## Compat range policy
+
+OpenClaw uses calendar versioning (`v2026.4.24` style) and ships multiple
+releases per day. The `openclaw.compat.pluginApi` range in this plugin is a
+**floor**, not a tracking target — it declares the oldest OpenClaw build we
+have verified the plugin against. We deliberately do **not** bump it on every
+OpenClaw release for two reasons:
+
+1. Every floor bump excludes operators still on older OpenClaw builds. There is
+   no upside unless we start using a newer plugin SDK API.
+2. ClawHub treats the range as `>=`. The current floor is satisfied by every
+   OpenClaw release that has shipped after it, so publishing is not blocked.
+
+The floor only moves when we adopt a plugin SDK API that does not exist on the
+old floor, or when OpenClaw removes an API we depend on. Drift is caught by the
+daily `openclaw-contract-check` workflow ([.github/workflows/openclaw-contract-check.yml](../../.github/workflows/openclaw-contract-check.yml)),
+not by mechanical floor bumps.
+
 ## License
 
 Apache-2.0 OR MIT

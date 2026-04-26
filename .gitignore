@@ -44,6 +44,7 @@ output/
 tmp/
 scripts/*
 !scripts/version-sync.mjs
+!scripts/check-openclaw-contract.mjs
 .codex
 
 # Recordings (large binaries)

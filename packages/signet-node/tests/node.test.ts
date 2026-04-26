@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SignetCliError, SignetCliVersionError, SignetNodeClient } from "../src/index.js";
+import {
+  SignetCliError,
+  SignetCliTimeoutError,
+  SignetCliVersionError,
+  SignetNodeClient,
+} from "../src/index.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../");
 const signetBin = join(repoRoot, "target/debug/signet");
@@ -344,6 +349,64 @@ esac
         return true;
       },
     );
+  });
+
+  it("aborts a hung signet binary at signetTimeoutMs", async () => {
+    const home = await createHome();
+    const stubBin = join(home, "hung-signet");
+    // Sleeps forever — simulates a wedged signet binary
+    await writeFile(stubBin, "#!/usr/bin/env bash\nsleep 60\n", { mode: 0o755 });
+
+    const client = new SignetNodeClient({
+      signetBin: stubBin,
+      signetHome: home,
+      signetTimeoutMs: 250,
+    });
+    const start = Date.now();
+    await assert.rejects(
+      () => client.runRaw(["--version"]),
+      (err: unknown) => {
+        assert.ok(err instanceof SignetCliTimeoutError, `expected SignetCliTimeoutError, got ${err}`);
+        assert.equal(err.timeoutMs, 250);
+        return true;
+      },
+    );
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 2000, `timeout abort should fire fast, took ${elapsed}ms`);
+  });
+
+  it("re-reads passphrase env on every call when passphraseFromEnv is set", async () => {
+    const home = await createHome();
+    const stubBin = join(home, "echo-passphrase");
+    // Echoes whatever SIGNET_PASSPHRASE is to stdout so the test can verify
+    await writeFile(
+      stubBin,
+      `#!/usr/bin/env bash
+echo "PASSPHRASE=\${SIGNET_PASSPHRASE:-<none>}"
+`,
+      { mode: 0o755 },
+    );
+
+    const envName = "SIGNET_TEST_PASSPHRASE";
+    const client = new SignetNodeClient({
+      signetBin: stubBin,
+      signetHome: home,
+      passphraseFromEnv: envName,
+    });
+
+    delete process.env[envName];
+    const r1 = await client.runRaw(["dummy"]);
+    assert.match(r1.stdout, /PASSPHRASE=<none>/);
+
+    process.env[envName] = "abc123";
+    const r2 = await client.runRaw(["dummy"]);
+    assert.match(r2.stdout, /PASSPHRASE=abc123/);
+
+    process.env[envName] = "xyz789";
+    const r3 = await client.runRaw(["dummy"]);
+    assert.match(r3.stdout, /PASSPHRASE=xyz789/);
+
+    delete process.env[envName];
   });
 
   it("returns structured verification summaries when signatures fail", async () => {

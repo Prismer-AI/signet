@@ -9,9 +9,30 @@ const execFileAsync = promisify(execFile);
 export interface SignetNodeClientOptions {
   signetBin?: string;
   signetHome?: string;
+  /**
+   * Static passphrase value passed to every signet invocation as
+   * SIGNET_PASSPHRASE. Captured at construction time. Use
+   * {@link passphraseFromEnv} instead if the user may set/change the
+   * passphrase env var after the client is constructed.
+   */
   passphrase?: string;
+  /**
+   * Name of an environment variable that holds the keystore passphrase.
+   * Re-read on EVERY signet invocation, so a user fixing a missing
+   * SIGNET_PASSPHRASE mid-session takes effect immediately on the next
+   * call without recreating the client. Takes precedence over
+   * {@link passphrase} when set.
+   */
+  passphraseFromEnv?: string;
   env?: NodeJS.ProcessEnv;
   maxBuffer?: number;
+  /**
+   * Hard timeout (ms) for any single signet invocation. Defaults to
+   * 5000ms. A hung or wedged signet binary aborts via AbortController
+   * and surfaces as a SignetCliTimeoutError so callers (e.g. plugin
+   * hot paths) cannot stall indefinitely.
+   */
+  signetTimeoutMs?: number;
 }
 
 export interface SignReceiptOptions {
@@ -109,6 +130,23 @@ export class SignetCliVersionError extends Error {
   }
 }
 
+export class SignetCliTimeoutError extends Error {
+  readonly args: readonly string[];
+  readonly timeoutMs: number;
+
+  constructor(args: readonly string[], timeoutMs: number) {
+    super(
+      `signet ${args.join(" ")} aborted after ${timeoutMs}ms. ` +
+        "Increase signetTimeoutMs or investigate why the signet binary is hanging.",
+    );
+    this.name = "SignetCliTimeoutError";
+    this.args = args;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+const DEFAULT_SIGNET_TIMEOUT_MS = 5000;
+
 const REQUIRED_SIGN_FLAGS = ["--session", "--call-id", "--trace-id", "--parent-receipt-id"] as const;
 
 const UNKNOWN_FLAG_STDERR_RE = /(?:unexpected|unrecognized|unknown) argument/i;
@@ -123,24 +161,35 @@ export class SignetNodeClient {
   readonly signetBin: string;
   readonly signetHome?: string;
   readonly passphrase?: string;
+  readonly passphraseFromEnv?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly maxBuffer: number;
+  readonly signetTimeoutMs: number;
   private signCompatProbe: Promise<void> | null = null;
 
   constructor(options: SignetNodeClientOptions = {}) {
     this.signetBin = options.signetBin ?? process.env.SIGNET_BIN ?? "signet";
     this.signetHome = options.signetHome;
     this.passphrase = options.passphrase;
+    this.passphraseFromEnv = options.passphraseFromEnv;
     this.env = options.env;
     this.maxBuffer = options.maxBuffer ?? 10 * 1024 * 1024;
+    this.signetTimeoutMs = options.signetTimeoutMs ?? DEFAULT_SIGNET_TIMEOUT_MS;
   }
 
   async runRaw(args: readonly string[], allowFailure: boolean = false): Promise<SignetCommandResult> {
+    // Re-read passphrase env on EVERY call so a user fixing
+    // SIGNET_PASSPHRASE mid-session takes effect immediately, without
+    // recreating the client.
+    const resolvedPassphrase = this.passphraseFromEnv
+      ? process.env[this.passphraseFromEnv] || undefined
+      : this.passphrase;
     return runSignetCommand(this.signetBin, args, {
       signetHome: this.signetHome,
-      passphrase: this.passphrase,
+      passphrase: resolvedPassphrase,
       env: this.env,
       maxBuffer: this.maxBuffer,
+      timeoutMs: this.signetTimeoutMs,
       allowFailure,
     });
   }
@@ -328,6 +377,7 @@ async function runSignetCommand(
     passphrase?: string;
     env?: NodeJS.ProcessEnv;
     maxBuffer: number;
+    timeoutMs: number;
     allowFailure: boolean;
   },
 ): Promise<SignetCommandResult> {
@@ -339,10 +389,14 @@ async function runSignetCommand(
     env.SIGNET_PASSPHRASE = options.passphrase;
   }
 
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), options.timeoutMs);
+
   try {
     const { stdout, stderr } = await execFileAsync(signetBin, [...args], {
       env,
       maxBuffer: options.maxBuffer,
+      signal: controller.signal,
     });
     return {
       stdout: stdout.toString(),
@@ -350,6 +404,9 @@ async function runSignetCommand(
       exitCode: 0,
     };
   } catch (error) {
+    if (controller.signal.aborted) {
+      throw new SignetCliTimeoutError(args, options.timeoutMs);
+    }
     const parsed = parseExecFailure(error);
     if (parsed && options.allowFailure) {
       return parsed;
@@ -361,6 +418,8 @@ async function runSignetCommand(
       );
     }
     throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
   }
 }
 

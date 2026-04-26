@@ -29,12 +29,17 @@ Thumbs.db
 # Internal docs (private)
 .strategy.md
 docs/plans/
-docs/marketing/
+docs/marketing/*
+!docs/marketing/
+!docs/marketing/sales-one-pager-2026-04.md
+!docs/marketing/account-outreach-playbook-2026-04.md
+!docs/marketing/demo-deck-20min-2026-04.md
 docs/blog/
 docs/specs/
 docs/superpowers/
 /blog/
 /.gstack/
+/data/
 
 # Local files (not project code)
 Thought.md

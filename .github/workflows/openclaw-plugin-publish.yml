@@ -24,10 +24,7 @@ jobs:
           node-version: "22"
       - name: Install workspace deps
         run: npm install --no-audit --no-fund
-      - name: Build dependent packages
-        working-directory: packages/signet-core
-        run: npm run build
-      - name: Build signet-node
+      - name: Build signet-node (transitive dep of openclaw plugin)
         working-directory: packages/signet-node
         run: npm run build
       - name: Build openclaw plugin
@@ -52,7 +49,6 @@ jobs:
       - name: Build openclaw plugin
         working-directory: packages/signet-openclaw-plugin
         run: |
-          (cd ../signet-core && npm run build)
           (cd ../signet-node && npm run build)
           npm run build
       - name: ClawHub package publish (dry run)
@@ -79,7 +75,6 @@ jobs:
       - name: Build openclaw plugin
         working-directory: packages/signet-openclaw-plugin
         run: |
-          (cd ../signet-core && npm run build)
           (cd ../signet-node && npm run build)
           npm run build
       - name: ClawHub login

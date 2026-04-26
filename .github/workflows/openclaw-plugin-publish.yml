@@ -10,49 +10,16 @@ on:
     tags:
       - "openclaw-plugin-v*"
 
-permissions:
-  contents: read
-
 jobs:
-  build:
-    name: Build plugin
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-      - name: Install workspace deps
-        run: npm install --no-audit --no-fund
-      - name: Build dependent packages
-        working-directory: packages/signet-core
-        run: npm run build
-      - name: Build signet-node
-        working-directory: packages/signet-node
-        run: npm run build
-      - name: Build openclaw plugin
-        working-directory: packages/signet-openclaw-plugin
-        run: npm run build
-      - name: Upload dist artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: signet-openclaw-plugin-dist
-          path: packages/signet-openclaw-plugin/dist
-          if-no-files-found: error
-
-  clawhub-dry-run:
-    name: ClawHub dry-run
+  dry-run:
     if: github.event_name == 'pull_request'
-    needs: build
     uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
     with:
       dry_run: true
       source: packages/signet-openclaw-plugin
 
-  clawhub-publish:
-    name: ClawHub publish
+  publish:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/openclaw-plugin-v')
-    needs: build
     permissions:
       contents: read
       id-token: write

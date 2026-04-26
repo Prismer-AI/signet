@@ -1,0 +1,10 @@
+name: ClawHub reusable workflow test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@main
+    with:
+      dry_run: true

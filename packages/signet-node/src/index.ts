@@ -111,6 +111,12 @@ export class SignetCliVersionError extends Error {
 
 const REQUIRED_SIGN_FLAGS = ["--session", "--call-id", "--trace-id", "--parent-receipt-id"] as const;
 
+const UNKNOWN_FLAG_STDERR_RE = /(?:unexpected|unrecognized|unknown) argument/i;
+
+function looksLikeUnknownFlagFailure(stderr: string): boolean {
+  return UNKNOWN_FLAG_STDERR_RE.test(stderr);
+}
+
 export class SignetNodeClient {
   readonly signetBin: string;
   readonly signetHome?: string;
@@ -237,11 +243,15 @@ export class SignetNodeClient {
       const result = await this.runRaw(args);
       return parseJson<Record<string, unknown>>(result.stdout, "sign receipt");
     } catch (err) {
-      // The cached compatibility probe can go stale if the signet binary on
-      // disk is swapped under a long-lived process. Re-probe on failure when
-      // the caller asked for session-bound fields so we surface the proper
-      // SignetCliVersionError instead of the raw clap exit code.
-      if (sessionFieldsRequested && err instanceof SignetCliError) {
+      // Re-probe only when the failure looks like an unknown-flag clap error
+      // and the caller asked for session-bound fields. This handles the
+      // long-lived-process binary swap case without misclassifying real
+      // sign() failures (missing key, policy deny, etc.) as version errors.
+      if (
+        sessionFieldsRequested &&
+        err instanceof SignetCliError &&
+        looksLikeUnknownFlagFailure(err.stderr)
+      ) {
         this.signCompatProbe = null;
         await this.assertSignCompatibility();
       }

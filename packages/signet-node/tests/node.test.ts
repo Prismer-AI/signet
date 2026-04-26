@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SignetCliVersionError, SignetNodeClient } from "../src/index.js";
+import { SignetCliError, SignetCliVersionError, SignetNodeClient } from "../src/index.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../");
 const signetBin = join(repoRoot, "target/debug/signet");
@@ -181,6 +181,70 @@ esac
           `expected SignetCliVersionError after binary swap, got ${err}`,
         );
         assert.equal(err.cliVersion, "0.0.99-stub");
+        return true;
+      },
+    );
+  });
+
+  it("preserves real sign() error when binary swap is unrelated", async () => {
+    const home = await createHome();
+    const stubPath = join(home, "swappable-signet-2");
+
+    // Working binary first.
+    const goodScript = `#!/usr/bin/env bash\nexec "${signetBin}" "$@"\n`;
+    await writeFile(stubPath, goodScript, { mode: 0o755 });
+
+    const client = new SignetNodeClient({ signetBin: stubPath, signetHome: home });
+    await client.runRaw(["identity", "generate", "--name", "node-real-fail", "--unencrypted"]);
+
+    // Prime the cache with a successful session-bound sign.
+    await client.sign({
+      key: "node-real-fail",
+      tool: "bash",
+      params: { cmd: "ls" },
+      target: "openclaw://gateway/local",
+      session: "agent:rf:thread-1",
+    });
+
+    // Swap to a binary that fails sign for an unrelated reason (key not found),
+    // but DOES support all required flags in --help.
+    const realFailScript = `#!/usr/bin/env bash
+case "$1" in
+  --version) echo "signet 0.10.1-stub" ;;
+  sign)
+    if [ "$2" = "--help" ]; then
+      echo "Usage: signet sign --key <KEY> --tool <TOOL> --target <TARGET> --session <SESSION> --call-id <CALL_ID> --trace-id <TRACE_ID> --parent-receipt-id <PARENT_RECEIPT_ID>"
+      exit 0
+    fi
+    echo "error: identity 'node-real-fail' not found" >&2
+    exit 1
+    ;;
+esac
+`;
+    await writeFile(stubPath, realFailScript, { mode: 0o755 });
+
+    await assert.rejects(
+      () =>
+        client.sign({
+          key: "node-real-fail",
+          tool: "bash",
+          params: { cmd: "ls" },
+          target: "openclaw://gateway/local",
+          session: "agent:rf:thread-2",
+        }),
+      (err: unknown) => {
+        // Should NOT be a version error — it's a real sign() failure that
+        // happens to coincide with a binary swap. The flag gate keeps us from
+        // misreporting.
+        assert.ok(
+          err instanceof SignetCliError,
+          `expected SignetCliError, got ${err?.constructor?.name}`,
+        );
+        assert.ok(
+          !(err instanceof SignetCliVersionError),
+          "must not promote real failure to SignetCliVersionError",
+        );
+        assert.match((err as SignetCliError).stderr, /identity 'node-real-fail' not found/);
         return true;
       },
     );

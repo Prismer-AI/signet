@@ -1,11 +1,12 @@
 use std::fs;
 
 use anyhow::{bail, Result};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use clap::Args;
-use ed25519_dalek::VerifyingKey;
+use serde::Serialize;
 use signet_core::audit::{self, AuditFilter};
+
+use crate::audit_helpers::materialize_receipt_for_output;
+use crate::trust_helpers::{load_cli_trust_bundle, resolve_pubkeys};
 
 #[derive(Args)]
 pub struct AuditArgs {
@@ -39,14 +40,28 @@ pub struct AuditArgs {
     #[arg(long = "trusted-server-key", value_delimiter = ',', value_name = "KEY")]
     pub trusted_server_keys: Vec<String>,
 
+    /// Trust bundle file (YAML or JSON) containing active trusted roots/agents/servers.
+    #[arg(long)]
+    pub trust_bundle: Option<String>,
+
     /// Export records to JSON file
     #[arg(long)]
     pub export: Option<String>,
+
+    /// Materialize encrypted action.params during export using local identities.
+    #[arg(long)]
+    pub decrypt_params: bool,
 }
 
 pub fn audit(args: AuditArgs) -> Result<()> {
     if args.verify && args.export.is_some() {
         bail!("--verify and --export are mutually exclusive");
+    }
+    if args.decrypt_params && args.verify {
+        bail!("--decrypt-params cannot be used with --verify");
+    }
+    if args.decrypt_params && args.export.is_none() {
+        bail!("--decrypt-params requires --export");
     }
 
     let dir = signet_core::default_signet_dir();
@@ -67,11 +82,12 @@ pub fn audit(args: AuditArgs) -> Result<()> {
             &filter,
             &args.trusted_agent_keys,
             &args.trusted_server_keys,
+            args.trust_bundle.as_deref(),
         );
     }
 
     if let Some(ref path) = args.export {
-        return export_records(&dir, &filter, path);
+        return export_records(&dir, &filter, path, args.decrypt_params);
     }
 
     // Default: list records as table
@@ -116,49 +132,37 @@ fn list_records(dir: &std::path::Path, filter: &AuditFilter) -> Result<()> {
     Ok(())
 }
 
-fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<VerifyingKey> {
-    let key_path = std::path::Path::new(key_ref);
-    if key_ref.ends_with(".pub") || key_path.exists() {
-        let content = fs::read_to_string(key_ref)?;
-        let pub_file: signet_core::keystore::PubKeyFile = serde_json::from_str(&content)?;
-        let b64 = pub_file
-            .pubkey
-            .strip_prefix("ed25519:")
-            .unwrap_or(&pub_file.pubkey);
-        let bytes = BASE64.decode(b64)?;
-        let arr: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("pubkey is not 32 bytes"))?;
-        return Ok(VerifyingKey::from_bytes(&arr)?);
-    }
-
-    if let Ok(vk) = signet_core::load_verifying_key(dir, key_ref) {
-        return Ok(vk);
-    }
-
-    let b64 = key_ref.strip_prefix("ed25519:").unwrap_or(key_ref);
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|e| anyhow::anyhow!("'{}' is not a key name or valid base64: {}", key_ref, e))?;
-    let arr: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("pubkey is not 32 bytes"))?;
-    Ok(VerifyingKey::from_bytes(&arr)?)
-}
-
-fn resolve_pubkeys(dir: &std::path::Path, key_refs: &[String]) -> Result<Vec<VerifyingKey>> {
-    key_refs.iter().map(|key| resolve_pubkey(dir, key)).collect()
-}
-
 fn verify_signatures(
     dir: &std::path::Path,
     filter: &AuditFilter,
     trusted_agent_keys: &[String],
     trusted_server_keys: &[String],
+    trust_bundle_path: Option<&str>,
 ) -> Result<()> {
+    let trust_bundle = match trust_bundle_path {
+        Some(path) => {
+            let bundle = load_cli_trust_bundle(path)?;
+            eprintln!("Using trust bundle {}", bundle.describe());
+            Some(bundle)
+        }
+        None => None,
+    };
+
+    let mut trusted_agent_pubkeys = match &trust_bundle {
+        Some(bundle) => bundle.active_agent_pubkeys.clone(),
+        None => Vec::new(),
+    };
+    trusted_agent_pubkeys.extend(resolve_pubkeys(dir, trusted_agent_keys)?);
+
+    let mut trusted_server_pubkeys = match &trust_bundle {
+        Some(bundle) => bundle.active_server_pubkeys.clone(),
+        None => Vec::new(),
+    };
+    trusted_server_pubkeys.extend(resolve_pubkeys(dir, trusted_server_keys)?);
+
     let options = audit::AuditVerifyOptions {
-        trusted_agent_pubkeys: resolve_pubkeys(dir, trusted_agent_keys)?,
-        trusted_server_pubkeys: resolve_pubkeys(dir, trusted_server_keys)?,
+        trusted_agent_pubkeys,
+        trusted_server_pubkeys,
     };
     let result = audit::verify_signatures_with_options(dir, filter, &options)?;
 
@@ -192,9 +196,37 @@ fn verify_signatures(
     Ok(())
 }
 
-fn export_records(dir: &std::path::Path, filter: &AuditFilter, path: &str) -> Result<()> {
+#[derive(Serialize)]
+struct MaterializedAuditExportRecord {
+    receipt: serde_json::Value,
+    materialized_receipt: serde_json::Value,
+    prev_hash: String,
+    record_hash: String,
+}
+
+fn export_records(
+    dir: &std::path::Path,
+    filter: &AuditFilter,
+    path: &str,
+    decrypt_params: bool,
+) -> Result<()> {
     let records = audit::query(dir, filter)?;
-    let json = serde_json::to_string_pretty(&records)?;
+    let json = if decrypt_params {
+        let exported: Vec<MaterializedAuditExportRecord> = records
+            .iter()
+            .map(|record| {
+                Ok(MaterializedAuditExportRecord {
+                    receipt: record.receipt.clone(),
+                    materialized_receipt: materialize_receipt_for_output(dir, &record.receipt)?,
+                    prev_hash: record.prev_hash.clone(),
+                    record_hash: record.record_hash.clone(),
+                })
+            })
+            .collect::<Result<_>>()?;
+        serde_json::to_string_pretty(&exported)?
+    } else {
+        serde_json::to_string_pretty(&records)?
+    };
     fs::write(path, json)?;
     eprintln!("Exported {} records to {path}", records.len());
     Ok(())

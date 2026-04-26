@@ -4,10 +4,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use chacha20poly1305::{
+    aead::{Aead, AeadCore, KeyInit, OsRng, Payload},
+    Key, XChaCha20Poly1305, XNonce,
+};
 use fs2::FileExt;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use ed25519_dalek::VerifyingKey;
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -16,6 +21,10 @@ use crate::error::SignetError;
 
 const GENESIS_HASH: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+const AUDIT_ENVELOPE_VERSION: u8 = 1;
+const AUDIT_ENVELOPE_ALG: &str = "xchacha20poly1305";
+const AUDIT_KDF_INFO: &[u8] = b"signet:audit:params:v1";
+const SHA256_BLOCK_SIZE: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditRecord {
@@ -82,11 +91,25 @@ pub struct AuditVerifyOptions {
     pub trusted_agent_pubkeys: Vec<VerifyingKey>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EncryptedParamsEnvelope {
+    pub v: u8,
+    pub alg: String,
+    pub kid: String,
+    pub nonce: String,
+    pub ciphertext: String,
+}
+
 #[derive(Debug)]
 struct LocatedAuditRecord {
     record: AuditRecord,
     file: String,
     line: usize,
+}
+
+enum MaterializedAuditReceipt {
+    Ready(serde_json::Value),
+    IntegrityOnly(String),
 }
 
 fn audit_dir(base: &Path) -> PathBuf {
@@ -146,6 +169,305 @@ fn compute_record_hash(
     let canonical = canonical::canonicalize(&hashable)?;
     let hash = Sha256::digest(canonical.as_bytes());
     Ok(format!("sha256:{}", hex::encode(hash)))
+}
+
+fn format_prefixed_pubkey(pubkey: &[u8; 32]) -> String {
+    format!("ed25519:{}", B64.encode(pubkey))
+}
+
+fn top_level_action(
+    receipt: &serde_json::Value,
+) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    receipt.get("action").and_then(|action| action.as_object())
+}
+
+fn top_level_action_mut(
+    receipt: &mut serde_json::Value,
+) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+    receipt
+        .get_mut("action")
+        .and_then(|action| action.as_object_mut())
+}
+
+fn parse_top_level_encrypted_envelope(
+    receipt: &serde_json::Value,
+) -> Result<Option<EncryptedParamsEnvelope>, String> {
+    let Some(action) = top_level_action(receipt) else {
+        return Ok(None);
+    };
+
+    let has_params = action.contains_key("params");
+    let has_params_encrypted = action.contains_key("params_encrypted");
+
+    if has_params && has_params_encrypted {
+        return Err("action contains both params and params_encrypted".to_string());
+    }
+
+    match action.get("params_encrypted") {
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|e| format!("invalid params_encrypted envelope: {e}")),
+        None => Ok(None),
+    }
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let mut key_block = [0u8; SHA256_BLOCK_SIZE];
+    if key.len() > SHA256_BLOCK_SIZE {
+        key_block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+
+    let mut inner_pad = [0x36u8; SHA256_BLOCK_SIZE];
+    let mut outer_pad = [0x5cu8; SHA256_BLOCK_SIZE];
+    for (idx, byte) in key_block.iter().enumerate() {
+        inner_pad[idx] ^= byte;
+        outer_pad[idx] ^= byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(inner_pad);
+    inner.update(data);
+    let inner_hash = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(outer_pad);
+    outer.update(inner_hash);
+
+    let mut output = [0u8; 32];
+    output.copy_from_slice(&outer.finalize());
+    output
+}
+
+fn derive_audit_cipher_key(signing_key: &SigningKey) -> [u8; 32] {
+    let salt = [0u8; 32];
+    let prk = hmac_sha256(&salt, &signing_key.to_bytes());
+
+    let mut expand_input = Vec::with_capacity(AUDIT_KDF_INFO.len() + 1);
+    expand_input.extend_from_slice(AUDIT_KDF_INFO);
+    expand_input.push(1);
+
+    hmac_sha256(&prk, &expand_input)
+}
+
+fn build_aad(receipt_id: &str, signer_pubkey: &str, ts: &str) -> Result<String, SignetError> {
+    canonical::canonicalize(&serde_json::json!({
+        "receipt_id": receipt_id,
+        "signer_pubkey": signer_pubkey,
+        "ts": ts,
+    }))
+}
+
+fn top_level_receipt_metadata(
+    receipt: &serde_json::Value,
+) -> Result<(String, String, String), SignetError> {
+    let receipt_id = receipt
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| SignetError::CorruptedRecord("missing receipt id".to_string()))?
+        .to_string();
+    let signer_pubkey = receipt
+        .get("signer")
+        .and_then(|signer| signer.get("pubkey"))
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| SignetError::CorruptedRecord("missing signer.pubkey".to_string()))?
+        .to_string();
+    let ts = extract_timestamp(receipt)
+        .ok_or_else(|| SignetError::CorruptedRecord("missing timestamp field".to_string()))?
+        .to_string();
+
+    Ok((receipt_id, signer_pubkey, ts))
+}
+
+pub fn encrypt_receipt_params_for_audit(
+    receipt: &serde_json::Value,
+    signing_key: &SigningKey,
+) -> Result<serde_json::Value, SignetError> {
+    let (receipt_id, signer_pubkey, ts) = top_level_receipt_metadata(receipt)?;
+    let verifying_key = signing_key.verifying_key();
+    let expected_pubkey = format_prefixed_pubkey(&verifying_key.to_bytes());
+    if signer_pubkey != expected_pubkey {
+        return Err(SignetError::InvalidReceipt(
+            "receipt signer.pubkey does not match the provided signing key".to_string(),
+        ));
+    }
+
+    let action = top_level_action(receipt).ok_or_else(|| {
+        SignetError::InvalidReceipt(
+            "encrypted audit params currently support receipts with top-level action".to_string(),
+        )
+    })?;
+    if action.contains_key("params_encrypted") {
+        return Err(SignetError::InvalidReceipt(
+            "receipt action already contains params_encrypted".to_string(),
+        ));
+    }
+    let params = action
+        .get("params")
+        .cloned()
+        .ok_or_else(|| SignetError::InvalidReceipt("receipt action.params missing".to_string()))?;
+
+    let aad = build_aad(&receipt_id, &signer_pubkey, &ts)?;
+    let plaintext = canonical::canonicalize(&params)?;
+    let derived_key = derive_audit_cipher_key(signing_key);
+    let key = Key::from_slice(&derived_key);
+    let cipher = XChaCha20Poly1305::new(key);
+    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: plaintext.as_bytes(),
+                aad: aad.as_bytes(),
+            },
+        )
+        .map_err(|_| SignetError::CorruptedRecord("failed to encrypt params for audit".into()))?;
+
+    let envelope = EncryptedParamsEnvelope {
+        v: AUDIT_ENVELOPE_VERSION,
+        alg: AUDIT_ENVELOPE_ALG.to_string(),
+        kid: signer_pubkey,
+        nonce: B64.encode(nonce),
+        ciphertext: B64.encode(ciphertext),
+    };
+
+    let mut stored = receipt.clone();
+    let action = top_level_action_mut(&mut stored).ok_or_else(|| {
+        SignetError::InvalidReceipt(
+            "encrypted audit params currently support receipts with top-level action".to_string(),
+        )
+    })?;
+    action.remove("params");
+    action.insert(
+        "params_encrypted".to_string(),
+        serde_json::to_value(&envelope)?,
+    );
+
+    Ok(stored)
+}
+
+pub fn decrypt_receipt_params_for_audit(
+    receipt: &serde_json::Value,
+    signing_key: &SigningKey,
+) -> Result<serde_json::Value, SignetError> {
+    let envelope = parse_top_level_encrypted_envelope(receipt)
+        .map_err(SignetError::CorruptedRecord)?
+        .ok_or_else(|| SignetError::CorruptedRecord("params_encrypted missing".to_string()))?;
+
+    if envelope.v != AUDIT_ENVELOPE_VERSION {
+        return Err(SignetError::CorruptedRecord(format!(
+            "unsupported params_encrypted version: {}",
+            envelope.v
+        )));
+    }
+    if envelope.alg != AUDIT_ENVELOPE_ALG {
+        return Err(SignetError::CorruptedRecord(format!(
+            "unsupported params_encrypted algorithm: {}",
+            envelope.alg
+        )));
+    }
+
+    let (receipt_id, signer_pubkey, ts) = top_level_receipt_metadata(receipt)?;
+    let verifying_key = signing_key.verifying_key();
+    let expected_pubkey = format_prefixed_pubkey(&verifying_key.to_bytes());
+    if envelope.kid != expected_pubkey || signer_pubkey != expected_pubkey {
+        return Err(SignetError::CorruptedRecord(
+            "params_encrypted.kid does not match the provided signing key".to_string(),
+        ));
+    }
+
+    let nonce_bytes = B64.decode(&envelope.nonce).map_err(|e| {
+        SignetError::CorruptedRecord(format!("invalid params_encrypted nonce: {e}"))
+    })?;
+    let nonce: [u8; 24] = nonce_bytes.try_into().map_err(|_| {
+        SignetError::CorruptedRecord("params_encrypted nonce must decode to 24 bytes".to_string())
+    })?;
+    let ciphertext = B64.decode(&envelope.ciphertext).map_err(|e| {
+        SignetError::CorruptedRecord(format!("invalid params_encrypted ciphertext: {e}"))
+    })?;
+
+    let aad = build_aad(&receipt_id, &signer_pubkey, &ts)?;
+    let derived_key = derive_audit_cipher_key(signing_key);
+    let key = Key::from_slice(&derived_key);
+    let cipher = XChaCha20Poly1305::new(key);
+    let plaintext = cipher
+        .decrypt(
+            XNonce::from_slice(&nonce),
+            Payload {
+                msg: &ciphertext,
+                aad: aad.as_bytes(),
+            },
+        )
+        .map_err(|_| {
+            SignetError::CorruptedRecord(
+                "failed to decrypt params_encrypted with the available identity".to_string(),
+            )
+        })?;
+    let params: serde_json::Value = serde_json::from_slice(&plaintext).map_err(|e| {
+        SignetError::CorruptedRecord(format!("decrypted params are not valid JSON: {e}"))
+    })?;
+
+    let mut restored = receipt.clone();
+    let action = top_level_action_mut(&mut restored)
+        .ok_or_else(|| SignetError::CorruptedRecord("missing top-level action".to_string()))?;
+    action.remove("params_encrypted");
+    action.insert("params".to_string(), params);
+    Ok(restored)
+}
+
+fn resolve_local_audit_signing_key(dir: &Path, kid: &str) -> Result<Option<SigningKey>, String> {
+    let infos = crate::identity::fs_ops::list_keys(dir)
+        .map_err(|e| format!("could not inspect local identities: {e}"))?;
+    let Some(info) = infos
+        .into_iter()
+        .find(|info| format!("ed25519:{}", info.pubkey) == kid)
+    else {
+        return Ok(None);
+    };
+
+    let passphrase = std::env::var("SIGNET_PASSPHRASE")
+        .ok()
+        .filter(|value| !value.is_empty());
+
+    crate::identity::fs_ops::load_signing_key(dir, &info.name, passphrase.as_deref())
+        .map(Some)
+        .map_err(|err| match err {
+            SignetError::DecryptionError => format!(
+                "local identity '{}' exists but could not be unlocked; set SIGNET_PASSPHRASE to verify encrypted params",
+                info.name
+            ),
+            other => format!("failed to load local identity '{}': {other}", info.name),
+        })
+}
+
+fn materialize_receipt_for_verification(
+    dir: &Path,
+    receipt: &serde_json::Value,
+) -> Result<MaterializedAuditReceipt, String> {
+    let Some(envelope) = parse_top_level_encrypted_envelope(receipt)? else {
+        return Ok(MaterializedAuditReceipt::Ready(receipt.clone()));
+    };
+
+    let signing_key = match resolve_local_audit_signing_key(dir, &envelope.kid) {
+        Ok(Some(signing_key)) => signing_key,
+        Ok(None) => {
+            return Ok(MaterializedAuditReceipt::IntegrityOnly(format!(
+                "encrypted params present for {} but no matching local identity was found; signature verification is integrity-only",
+                envelope.kid
+            )))
+        }
+        Err(reason) => {
+            return Ok(MaterializedAuditReceipt::IntegrityOnly(format!(
+                "encrypted params present for {} but {}; signature verification is integrity-only",
+                envelope.kid, reason
+            )))
+        }
+    };
+
+    decrypt_receipt_params_for_audit(receipt, &signing_key)
+        .map(MaterializedAuditReceipt::Ready)
+        .map_err(|e| format!("encrypted params decrypt failed: {e}"))
 }
 
 fn date_from_receipt(receipt: &serde_json::Value) -> Result<NaiveDate, SignetError> {
@@ -240,6 +562,15 @@ pub fn append(dir: &Path, receipt: &serde_json::Value) -> Result<AuditRecord, Si
     let _ = lock_file.unlock();
 
     result
+}
+
+pub fn append_encrypted(
+    dir: &Path,
+    receipt: &serde_json::Value,
+    signing_key: &SigningKey,
+) -> Result<AuditRecord, SignetError> {
+    let encrypted = encrypt_receipt_params_for_audit(receipt, signing_key)?;
+    append(dir, &encrypted)
 }
 
 /// Append a policy violation record to the audit log. Violations are logged
@@ -484,14 +815,14 @@ pub fn verify_signatures_with_options(
                     continue;
                 }
             };
-            let server_vk = match parse_prefixed_verifying_key("server pubkey", &bilateral.server.pubkey)
-            {
-                Ok(vk) => vk,
-                Err(reason) => {
-                    push_failure(reason, &mut failures);
-                    continue;
-                }
-            };
+            let server_vk =
+                match parse_prefixed_verifying_key("server pubkey", &bilateral.server.pubkey) {
+                    Ok(vk) => vk,
+                    Err(reason) => {
+                        push_failure(reason, &mut failures);
+                        continue;
+                    }
+                };
             let agent_vk = match parse_prefixed_verifying_key(
                 "agent pubkey",
                 &bilateral.agent_receipt.signer.pubkey,
@@ -550,10 +881,9 @@ pub fn verify_signatures_with_options(
                         },
                     });
                 }
-                Err(e) => push_failure(
-                    format!("bilateral verification failed: {e}"),
-                    &mut failures,
-                ),
+                Err(e) => {
+                    push_failure(format!("bilateral verification failed: {e}"), &mut failures)
+                }
             }
             continue; // skip the v1/v2 path below
         }
@@ -576,7 +906,23 @@ pub fn verify_signatures_with_options(
                     push_failure("untrusted signer pubkey".to_string(), &mut failures);
                     continue;
                 }
-                let receipt_str = serde_json::to_string(receipt)
+                let materialized = match materialize_receipt_for_verification(dir, receipt) {
+                    Ok(MaterializedAuditReceipt::Ready(receipt)) => receipt,
+                    Ok(MaterializedAuditReceipt::IntegrityOnly(reason)) => {
+                        warnings.push(VerifyWarning {
+                            file: located.file.clone(),
+                            line: located.line,
+                            receipt_id: receipt_id.clone(),
+                            reason,
+                        });
+                        continue;
+                    }
+                    Err(reason) => {
+                        push_failure(reason, &mut failures);
+                        continue;
+                    }
+                };
+                let receipt_str = serde_json::to_string(&materialized)
                     .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
                 match crate::verify_any(&receipt_str, &vk) {
                     Ok(()) => valid += 1,
@@ -632,6 +978,14 @@ mod tests {
         let action = test_action();
         let receipt = sign::sign(&sk, &action, "test-agent", "").unwrap();
         serde_json::to_value(&receipt).unwrap()
+    }
+
+    fn create_saved_signing_key(dir: &Path, name: &str) -> (SigningKey, serde_json::Value) {
+        crate::generate_and_save(dir, name, None, None, None).unwrap();
+        let signing_key = crate::load_signing_key(dir, name, None).unwrap();
+        let action = test_action();
+        let receipt = sign::sign(&signing_key, &action, name, "").unwrap();
+        (signing_key, serde_json::to_value(&receipt).unwrap())
     }
 
     #[test]
@@ -693,6 +1047,62 @@ mod tests {
         let receipt = sign_receipt_simple();
         let record = append(dir.path(), &receipt).unwrap();
         assert_eq!(record.prev_hash, yesterday_hash);
+    }
+
+    #[test]
+    fn test_append_encrypted_replaces_plaintext_params() {
+        let dir = tempfile::tempdir().unwrap();
+        let (signing_key, receipt) = create_saved_signing_key(dir.path(), "audit-encrypted");
+
+        append_encrypted(dir.path(), &receipt, &signing_key).unwrap();
+        let records = query(dir.path(), &AuditFilter::default()).unwrap();
+        let action = records[0]
+            .receipt
+            .get("action")
+            .and_then(|value| value.as_object())
+            .unwrap();
+
+        assert!(!action.contains_key("params"));
+        let envelope = serde_json::from_value::<EncryptedParamsEnvelope>(
+            action.get("params_encrypted").cloned().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(envelope.v, AUDIT_ENVELOPE_VERSION);
+        assert_eq!(envelope.alg, AUDIT_ENVELOPE_ALG);
+    }
+
+    #[test]
+    fn test_verify_signatures_decrypts_encrypted_records_with_local_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (signing_key, receipt) = create_saved_signing_key(dir.path(), "audit-verify");
+
+        append_encrypted(dir.path(), &receipt, &signing_key).unwrap();
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.valid, 1);
+        assert!(result.warnings.is_empty());
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_verify_signatures_warns_when_encrypted_record_has_no_local_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (signing_key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign::sign(&signing_key, &action, "audit-missing-key", "").unwrap();
+        let receipt_json = serde_json::to_value(&receipt).unwrap();
+
+        append_encrypted(dir.path(), &receipt_json, &signing_key).unwrap();
+        let result = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.valid, 0);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.failures.is_empty());
+        assert!(result.warnings[0]
+            .reason
+            .contains("signature verification is integrity-only"));
     }
 
     #[test]
@@ -1070,10 +1480,7 @@ mod tests {
         let records = query(dir.path(), &AuditFilter::default()).unwrap();
         assert_eq!(records.len(), 1);
         let stored = &records[0].receipt;
-        assert_eq!(
-            stored["action"]["trace_id"].as_str(),
-            Some("tr_audit_test"),
-        );
+        assert_eq!(stored["action"]["trace_id"].as_str(), Some("tr_audit_test"),);
         assert_eq!(
             stored["action"]["parent_receipt_id"].as_str(),
             Some("rec_parent"),

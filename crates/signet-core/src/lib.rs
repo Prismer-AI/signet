@@ -8,6 +8,7 @@ pub mod policy_load;
 pub mod receipt;
 pub mod sign;
 pub mod sign_delegation;
+pub mod trust;
 pub mod verify;
 pub mod verify_delegation;
 
@@ -33,6 +34,10 @@ pub use receipt::{
 };
 pub use sign::{sign, sign_bilateral, sign_compound, sign_with_expiration, sign_with_policy};
 pub use sign_delegation::{sign_authorized, sign_delegation};
+pub use trust::{
+    parse_trust_bundle_json, parse_trust_bundle_yaml, validate_trust_bundle, TrustBundle,
+    TrustKeyEntry, TrustKeyStatus,
+};
 pub use verify::{
     verify, verify_allow_expired, verify_any, verify_bilateral, verify_bilateral_detailed,
     verify_bilateral_with_options, verify_bilateral_with_options_detailed, verify_compound,
@@ -48,6 +53,8 @@ pub use identity::fs_ops::{
     default_signet_dir, export_public_key, generate_and_save, list_keys, load_key_info,
     load_signing_key, load_verifying_key, validate_key_name, KeyInfo,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use trust::{load_trust_bundle, save_trust_bundle};
 
 #[cfg(test)]
 pub(crate) mod test_helpers {

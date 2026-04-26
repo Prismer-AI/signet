@@ -66,10 +66,7 @@ pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetErro
 }
 
 /// Verify a receipt allowing expired receipts (for audit/forensic contexts).
-pub fn verify_allow_expired(
-    receipt: &Receipt,
-    pubkey: &VerifyingKey,
-) -> Result<(), SignetError> {
+pub fn verify_allow_expired(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     verify_receipt_signature(receipt, pubkey)
 }
 
@@ -181,11 +178,7 @@ impl NonceChecker for InMemoryNonceChecker {
         let mut map = self.seen.lock().unwrap_or_else(|p| p.into_inner());
         if map.len() >= self.max_entries {
             // Evict oldest
-            if let Some(oldest_key) = map
-                .iter()
-                .min_by_key(|(_, ts)| *ts)
-                .map(|(k, _)| k.clone())
-            {
+            if let Some(oldest_key) = map.iter().min_by_key(|(_, ts)| *ts).map(|(k, _)| k.clone()) {
                 map.remove(&oldest_key);
             }
         }
@@ -382,7 +375,12 @@ pub fn verify_bilateral_with_options_detailed(
 
     // 5. Check session binding (Issue #4)
     if let Some(ref expected) = options.expected_session {
-        let actual = receipt.agent_receipt.action.session.as_deref().unwrap_or("");
+        let actual = receipt
+            .agent_receipt
+            .action
+            .session
+            .as_deref()
+            .unwrap_or("");
         if actual != expected.as_str() {
             return Err(SignetError::InvalidReceipt(format!(
                 "session mismatch: expected '{}', got '{}'",
@@ -393,7 +391,12 @@ pub fn verify_bilateral_with_options_detailed(
 
     // 6. Check call_id binding (Issue #4)
     if let Some(ref expected) = options.expected_call_id {
-        let actual = receipt.agent_receipt.action.call_id.as_deref().unwrap_or("");
+        let actual = receipt
+            .agent_receipt
+            .action
+            .call_id
+            .as_deref()
+            .unwrap_or("");
         if actual != expected.as_str() {
             return Err(SignetError::InvalidReceipt(format!(
                 "call_id mismatch: expected '{}', got '{}'",
@@ -877,9 +880,9 @@ mod tests {
         let response = serde_json::json!({"text": "ok"});
         let ts = (chrono::Utc::now() + chrono::Duration::seconds(1))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let bilateral = crate::sign::sign_bilateral(
-            &server_key, &agent_receipt, &response, "server", &ts,
-        ).unwrap();
+        let bilateral =
+            crate::sign::sign_bilateral(&server_key, &agent_receipt, &response, "server", &ts)
+                .unwrap();
         (bilateral, server_vk)
     }
 
@@ -982,7 +985,7 @@ mod tests {
     fn test_bilateral_nonce_no_checker_skips() {
         let (bilateral, server_vk) = make_bilateral_with_ids(None, None);
         let opts = BilateralVerifyOptions::default(); // no nonce_checker
-        // Can verify same receipt twice with no checker
+                                                      // Can verify same receipt twice with no checker
         assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
         assert!(verify_bilateral_with_options(&bilateral, &server_vk, &opts).is_ok());
     }

@@ -536,7 +536,10 @@ mod tests {
         // v4 receipt preserves trace fields
         assert_eq!(receipt.v, 4);
         assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_delegated_wf"));
-        assert_eq!(receipt.action.parent_receipt_id.as_deref(), Some("rec_prev_step"));
+        assert_eq!(
+            receipt.action.parent_receipt_id.as_deref(),
+            Some("rec_prev_step")
+        );
 
         // Verify signature
         assert!(crate::verify_delegation::verify_v4_signature_only(&receipt).is_ok());
@@ -633,7 +636,10 @@ mod tests {
 
         // Trace fields preserved through full verification
         assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_deploy_wf"));
-        assert_eq!(receipt.action.parent_receipt_id.as_deref(), Some("rec_approval"));
+        assert_eq!(
+            receipt.action.parent_receipt_id.as_deref(),
+            Some("rec_approval")
+        );
         assert_eq!(scope_result.tools, vec!["*"]);
     }
 }

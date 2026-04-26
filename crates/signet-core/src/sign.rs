@@ -126,10 +126,16 @@ pub fn sign(
     signer_name: &str,
     signer_owner: &str,
 ) -> Result<Receipt, SignetError> {
-    sign_inner(key, action, signer_name, signer_owner, SignOptions {
-        exp: None,
-        policy: None,
-    })
+    sign_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        SignOptions {
+            exp: None,
+            policy: None,
+        },
+    )
 }
 
 /// Sign an action with an expiration time. Same as `sign()` but the receipt
@@ -141,10 +147,16 @@ pub fn sign_with_expiration(
     signer_owner: &str,
     expires_at: &str,
 ) -> Result<Receipt, SignetError> {
-    sign_inner(key, action, signer_name, signer_owner, SignOptions {
-        exp: Some(expires_at.to_string()),
-        policy: None,
-    })
+    sign_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        SignOptions {
+            exp: Some(expires_at.to_string()),
+            policy: None,
+        },
+    )
 }
 
 /// Sign an action with policy enforcement. Evaluates the policy first:
@@ -179,10 +191,16 @@ pub fn sign_with_policy(
         reason: eval.reason.clone(),
     };
 
-    let receipt = sign_inner(key, action, signer_name, signer_owner, SignOptions {
-        exp: None,
-        policy: Some(attestation),
-    })?;
+    let receipt = sign_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        SignOptions {
+            exp: None,
+            policy: Some(attestation),
+        },
+    )?;
 
     Ok((receipt, eval))
 }
@@ -429,7 +447,8 @@ rules:
 "#,
         )
         .unwrap();
-        let (receipt, eval) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        let (receipt, eval) =
+            sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
         assert_eq!(receipt.v, 1);
         assert!(receipt.policy.is_some());
         let att = receipt.policy.unwrap();
@@ -489,7 +508,8 @@ rules: []
 "#,
         )
         .unwrap();
-        let (receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        let (receipt, _) =
+            sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
         // Verify the receipt — policy is inside the signed payload
         assert!(crate::verify::verify(&receipt, &vk).is_ok());
         assert!(receipt.policy.is_some());
@@ -507,7 +527,8 @@ rules: []
 "#,
         )
         .unwrap();
-        let (mut receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        let (mut receipt, _) =
+            sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
         // Tamper with policy attestation
         if let Some(ref mut att) = receipt.policy {
             att.policy_name = "forged-policy".to_string();
@@ -544,7 +565,10 @@ rules: []
         let mut action = test_action();
         action.parent_receipt_id = Some("rec_parent_123".to_string());
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
-        assert_eq!(receipt.action.parent_receipt_id, Some("rec_parent_123".to_string()));
+        assert_eq!(
+            receipt.action.parent_receipt_id,
+            Some("rec_parent_123".to_string())
+        );
         assert!(crate::verify::verify(&receipt, &vk).is_ok());
     }
 
@@ -556,7 +580,10 @@ rules: []
         action.parent_receipt_id = Some("rec_prev".to_string());
         let receipt = sign(&key, &action, "agent", "owner").unwrap();
         assert_eq!(receipt.action.trace_id, Some("tr_wf".to_string()));
-        assert_eq!(receipt.action.parent_receipt_id, Some("rec_prev".to_string()));
+        assert_eq!(
+            receipt.action.parent_receipt_id,
+            Some("rec_prev".to_string())
+        );
         assert!(crate::verify::verify(&receipt, &vk).is_ok());
     }
 
@@ -641,8 +668,14 @@ rules: []
         assert!(crate::verify::verify(&child2, &vk).is_ok());
 
         // Chain intact
-        assert_eq!(child1.action.parent_receipt_id.as_deref(), Some(start.id.as_str()));
-        assert_eq!(child2.action.parent_receipt_id.as_deref(), Some(child1.id.as_str()));
+        assert_eq!(
+            child1.action.parent_receipt_id.as_deref(),
+            Some(start.id.as_str())
+        );
+        assert_eq!(
+            child2.action.parent_receipt_id.as_deref(),
+            Some(child1.id.as_str())
+        );
         assert_eq!(child1.action.trace_id.as_deref(), Some("tr_wf001"));
         assert_eq!(child2.action.trace_id.as_deref(), Some("tr_wf001"));
     }
@@ -659,12 +692,17 @@ rules: []
         // Use a timestamp after the agent's ts to satisfy ordering check
         let server_ts = (chrono::Utc::now() + chrono::Duration::seconds(1))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let bilateral = sign_bilateral(
-            &server_key, &agent_receipt, &response, "server", &server_ts,
-        ).unwrap();
+        let bilateral =
+            sign_bilateral(&server_key, &agent_receipt, &response, "server", &server_ts).unwrap();
         // Trace fields survive in embedded agent receipt
-        assert_eq!(bilateral.agent_receipt.action.trace_id.as_deref(), Some("tr_bilateral"));
-        assert_eq!(bilateral.agent_receipt.action.parent_receipt_id.as_deref(), Some("rec_prev"));
+        assert_eq!(
+            bilateral.agent_receipt.action.trace_id.as_deref(),
+            Some("tr_bilateral")
+        );
+        assert_eq!(
+            bilateral.agent_receipt.action.parent_receipt_id.as_deref(),
+            Some("rec_prev")
+        );
         assert!(crate::verify::verify_bilateral(&bilateral, &server_vk).is_ok());
     }
 
@@ -673,10 +711,11 @@ rules: []
         let (key, vk) = generate_keypair();
         let mut action = test_action();
         action.trace_id = Some("tr_policy".to_string());
-        let policy = crate::policy_load::parse_policy_yaml(
-            "version: 1\nname: trace-test\nrules: []\n",
-        ).unwrap();
-        let (receipt, _) = sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
+        let policy =
+            crate::policy_load::parse_policy_yaml("version: 1\nname: trace-test\nrules: []\n")
+                .unwrap();
+        let (receipt, _) =
+            sign_with_policy(&key, &action, "agent", "owner", &policy, None).unwrap();
         assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_policy"));
         assert!(receipt.policy.is_some());
         assert!(crate::verify::verify(&receipt, &vk).is_ok());
@@ -689,9 +728,15 @@ rules: []
         action.trace_id = Some("tr_compound".to_string());
         let response = json!({"text": "ok"});
         let receipt = sign_compound(
-            &key, &action, &response, "agent", "owner",
-            "2026-04-11T10:00:00.000Z", "2026-04-11T10:00:00.150Z",
-        ).unwrap();
+            &key,
+            &action,
+            &response,
+            "agent",
+            "owner",
+            "2026-04-11T10:00:00.000Z",
+            "2026-04-11T10:00:00.150Z",
+        )
+        .unwrap();
         assert_eq!(receipt.action.trace_id.as_deref(), Some("tr_compound"));
     }
 

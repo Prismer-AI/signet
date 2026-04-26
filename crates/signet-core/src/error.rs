@@ -33,6 +33,12 @@ pub enum SignetError {
     #[error("policy parse error: {0}")]
     PolicyParseError(String),
 
+    #[error("trust bundle parse error: {0}")]
+    TrustBundleParseError(String),
+
+    #[error("invalid trust bundle: {0}")]
+    TrustBundleError(String),
+
     #[error("action requires human approval: {0}")]
     RequiresApproval(String),
 

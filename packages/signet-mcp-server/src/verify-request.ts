@@ -1,10 +1,38 @@
 import { verify, contentHash, type SignetReceipt } from '@signet-auth/core';
 import type { NonceCache } from './nonce-cache.js';
 
+export interface TrustKeyEntry {
+  id: string;
+  name: string;
+  owner: string;
+  pubkey: string;
+  status: 'active' | 'disabled' | 'revoked';
+  created_at: string;
+  expires_at?: string;
+  disabled_at?: string;
+  revoked_at?: string;
+  comment?: string;
+}
+
+export interface TrustBundle {
+  version: number;
+  bundle_id: string;
+  org: string;
+  env: string;
+  generated_at: string;
+  description?: string;
+  source?: string;
+  roots?: TrustKeyEntry[];
+  agents?: TrustKeyEntry[];
+  servers?: TrustKeyEntry[];
+}
+
 export interface VerifyOptions {
   /** List of trusted "ed25519:<base64>" pubkeys.
    *  If empty, trust any signer with a valid signature (skip trust check). */
   trustedKeys?: string[];
+  /** Structured trust bundle. Active agent keys are treated as trust anchors. */
+  trustBundle?: TrustBundle;
   /** Reject unsigned requests. Default: true. */
   requireSignature?: boolean;
   /** Max age of receipt in seconds. Default: 300 (5 min). */
@@ -118,9 +146,19 @@ export function verifyRequest(
   }
 
   // 5. Check trusted keys (using prefixed format to match receipt.signer.pubkey)
-  // Empty trustedKeys = "verify signature only, don't check trust". Non-empty = "must be in list".
-  const trustedKeys = options.trustedKeys ?? [];
-  if (trustedKeys.length > 0 && !trustedKeys.includes(prefixedPubkey)) {
+  // Empty trustedKeys and no trustBundle = "verify signature only, don't check trust".
+  // Supplying a trustBundle enables anchored verification even if trustedKeys is empty.
+  let trustedKeysFromBundle: string[] = [];
+  try {
+    trustedKeysFromBundle = options.trustBundle ? activeAgentKeysFromBundle(options.trustBundle) : [];
+  } catch {
+    return { ok: false, error: 'invalid trust bundle', hasReceipt: true, trusted: false };
+  }
+
+  const explicitTrustedKeys = options.trustedKeys ?? [];
+  const trustedKeys = [...new Set([...explicitTrustedKeys, ...trustedKeysFromBundle])];
+  const trustAnchorsProvided = explicitTrustedKeys.length > 0 || options.trustBundle !== undefined;
+  if (trustAnchorsProvided && !trustedKeys.includes(prefixedPubkey)) {
     return { ok: false, error: `untrusted signer: ${prefixedPubkey}`, hasReceipt: true, trusted: false };
   }
 
@@ -171,7 +209,7 @@ export function verifyRequest(
     };
   }
 
-  const trusted = trustedKeys.length > 0;
+  const trusted = trustAnchorsProvided;
   setVerifiedRequestContext(request, {
     receiptId: receipt.id,
     signerName: receipt.signer.name,
@@ -189,4 +227,31 @@ export function verifyRequest(
     hasReceipt: true,
     trusted,
   };
+}
+
+function activeAgentKeysFromBundle(bundle: TrustBundle): string[] {
+  if (!Array.isArray(bundle.agents)) {
+    throw new Error('invalid trust bundle');
+  }
+
+  const nowMs = Date.now();
+  return bundle.agents
+    .filter((entry) => isActiveEntry(entry, nowMs))
+    .map((entry) => entry.pubkey);
+}
+
+function isActiveEntry(entry: TrustKeyEntry, nowMs: number): boolean {
+  if (!entry || typeof entry !== 'object' || typeof entry.pubkey !== 'string' || entry.status !== 'active') {
+    return false;
+  }
+
+  if (entry.expires_at) {
+    const expiresMs = new Date(entry.expires_at).getTime();
+    if (Number.isNaN(expiresMs)) {
+      return false;
+    }
+    return expiresMs >= nowMs;
+  }
+
+  return true;
 }

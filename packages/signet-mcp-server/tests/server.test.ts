@@ -60,6 +60,59 @@ describe('@signet-auth/mcp-server verifyRequest', () => {
     assert(result.error?.includes('untrusted'), `Expected 'untrusted' in error, got: ${result.error}`);
   });
 
+  it('test_verify_trust_bundle_active_agent — active agent in trust bundle → ok: true, trusted: true', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const receipt = req.params._meta._signet as SignetReceipt;
+    const result = verifyRequest(req, {
+      trustBundle: {
+        version: 1,
+        bundle_id: 'tb_prod',
+        org: 'signet',
+        env: 'prod',
+        generated_at: '2026-04-25T10:30:00Z',
+        agents: [
+          {
+            id: 'agent-1',
+            name: 'test-agent',
+            owner: 'platform',
+            pubkey: receipt.signer.pubkey,
+            status: 'active',
+            created_at: '2026-04-25T10:00:00Z',
+          },
+        ],
+      },
+    });
+    assert.strictEqual(result.ok, true, `Expected ok: true, got error: ${result.error}`);
+    assert.strictEqual(result.trusted, true);
+  });
+
+  it('test_verify_trust_bundle_disabled_agent_rejected — trust bundle provided but signer not active → ok: false', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const receipt = req.params._meta._signet as SignetReceipt;
+    const result = verifyRequest(req, {
+      trustBundle: {
+        version: 1,
+        bundle_id: 'tb_prod',
+        org: 'signet',
+        env: 'prod',
+        generated_at: '2026-04-25T10:30:00Z',
+        agents: [
+          {
+            id: 'agent-1',
+            name: 'test-agent',
+            owner: 'platform',
+            pubkey: receipt.signer.pubkey,
+            status: 'disabled',
+            created_at: '2026-04-25T10:00:00Z',
+            disabled_at: '2026-04-25T10:05:00Z',
+          },
+        ],
+      },
+    });
+    assert.strictEqual(result.ok, false);
+    assert(result.error?.includes('untrusted'), `Expected 'untrusted', got: ${result.error}`);
+  });
+
   it('test_verify_invalid_signature — tampered _signet.sig → ok: false', () => {
     const req = signedRequest('echo', { message: 'hello' });
     const receipt = req.params._meta._signet as SignetReceipt;

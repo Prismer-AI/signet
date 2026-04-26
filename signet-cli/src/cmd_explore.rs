@@ -4,6 +4,8 @@ use anyhow::{bail, Result};
 use clap::Args;
 use signet_core::audit::{self, AuditFilter, AuditRecord};
 
+use crate::audit_helpers::{has_encrypted_params, materialize_receipt_for_output};
+
 #[derive(Args)]
 pub struct ExploreArgs {
     /// Filter by time (e.g. 1h, 24h, 7d)
@@ -30,6 +32,10 @@ pub struct ExploreArgs {
     #[arg(long)]
     pub full: bool,
 
+    /// Materialize encrypted action.params using local identities (with --show).
+    #[arg(long)]
+    pub decrypt_params: bool,
+
     /// Show chain status summary
     #[arg(long)]
     pub chain: bool,
@@ -48,6 +54,9 @@ pub fn explore(args: ExploreArgs) -> Result<()> {
 
     if args.chain {
         return show_chain_status(&dir);
+    }
+    if args.decrypt_params && args.show.is_none() {
+        bail!("--decrypt-params requires --show");
     }
 
     let filter = AuditFilter {
@@ -94,7 +103,7 @@ pub fn explore(args: ExploreArgs) -> Result<()> {
         if idx == 0 || idx > records.len() {
             bail!("--show index out of range (1-{})", records.len());
         }
-        return show_receipt(records[idx - 1], args.full);
+        return show_receipt(&dir, records[idx - 1], args.full, args.decrypt_params);
     }
 
     // Default: show last N as table
@@ -167,8 +176,13 @@ fn print_table(records: &[&AuditRecord], start_idx: usize) {
     }
 }
 
-fn show_receipt(record: &AuditRecord, full: bool) -> Result<()> {
-    let r = &record.receipt;
+fn show_receipt(dir: &Path, record: &AuditRecord, full: bool, decrypt_params: bool) -> Result<()> {
+    let materialized = if decrypt_params {
+        Some(materialize_receipt_for_output(dir, &record.receipt)?)
+    } else {
+        None
+    };
+    let r = materialized.as_ref().unwrap_or(&record.receipt);
 
     if full {
         println!("{}", serde_json::to_string_pretty(r)?);
@@ -253,6 +267,18 @@ fn show_receipt(record: &AuditRecord, full: bool) -> Result<()> {
     println!("│ Prev hash:   {}", truncate(&record.prev_hash, 40));
     println!("│ Record hash: {}", truncate(&record.record_hash, 40));
     println!("└─────────────────────────────────────────────────────┘");
+
+    if has_encrypted_params(&record.receipt) && !decrypt_params {
+        println!("\nEncrypted params present. Re-run with --decrypt-params to materialize action.params.");
+    }
+
+    if decrypt_params {
+        if let Some(params) = r.get("action").and_then(|action| action.get("params")) {
+            println!("\nDecrypted params");
+            println!("────────────────");
+            println!("{}", serde_json::to_string_pretty(params)?);
+        }
+    }
 
     println!("\nUse --full for raw JSON.");
     Ok(())

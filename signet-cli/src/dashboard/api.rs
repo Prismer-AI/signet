@@ -68,8 +68,7 @@ fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<VerifyingKey, 
         let arr: [u8; 32] = bytes
             .try_into()
             .map_err(|_| AppError::bad_request("pubkey is not 32 bytes".to_string()))?;
-        return VerifyingKey::from_bytes(&arr)
-            .map_err(|e| AppError::bad_request(format!("{e}")));
+        return VerifyingKey::from_bytes(&arr).map_err(|e| AppError::bad_request(format!("{e}")));
     }
 
     if let Ok(vk) = signet_core::load_verifying_key(dir, key_ref) {
@@ -77,9 +76,12 @@ fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<VerifyingKey, 
     }
 
     let b64 = key_ref.strip_prefix("ed25519:").unwrap_or(key_ref);
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|e| AppError::bad_request(format!("'{}' is not a key name or valid base64: {}", key_ref, e)))?;
+    let bytes = BASE64.decode(b64).map_err(|e| {
+        AppError::bad_request(format!(
+            "'{}' is not a key name or valid base64: {}",
+            key_ref, e
+        ))
+    })?;
     let arr: [u8; 32] = bytes
         .try_into()
         .map_err(|_| AppError::bad_request("pubkey is not 32 bytes".to_string()))?;
@@ -95,8 +97,14 @@ fn split_key_refs(raw: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-fn resolve_pubkeys(dir: &std::path::Path, key_refs: &[String]) -> Result<Vec<VerifyingKey>, AppError> {
-    key_refs.iter().map(|key| resolve_pubkey(dir, key)).collect()
+fn resolve_pubkeys(
+    dir: &std::path::Path,
+    key_refs: &[String],
+) -> Result<Vec<VerifyingKey>, AppError> {
+    key_refs
+        .iter()
+        .map(|key| resolve_pubkey(dir, key))
+        .collect()
 }
 
 fn build_verify_options(
@@ -149,9 +157,9 @@ async fn get_verify_signatures(
     let result = tokio::task::spawn_blocking(move || {
         audit::verify_signatures_with_options(&dir, &filter, &options)
     })
-        .await
-        .map_err(|e| AppError::internal(format!("task join: {e}")))?
-        .map_err(|e| AppError::internal(format!("{e}")))?;
+    .await
+    .map_err(|e| AppError::internal(format!("task join: {e}")))?
+    .map_err(|e| AppError::internal(format!("{e}")))?;
     Ok(Json(
         serde_json::to_value(result).map_err(|e| AppError::internal(format!("{e}")))?,
     ))
@@ -292,14 +300,8 @@ mod tests {
         .unwrap();
         signet_core::audit::append(dir, &serde_json::to_value(&bilateral).unwrap()).unwrap();
         (
-            format!(
-                "ed25519:{}",
-                BASE64.encode(agent_vk.as_bytes())
-            ),
-            format!(
-                "ed25519:{}",
-                BASE64.encode(server_vk.as_bytes())
-            ),
+            format!("ed25519:{}", BASE64.encode(agent_vk.as_bytes())),
+            format!("ed25519:{}", BASE64.encode(server_vk.as_bytes())),
         )
     }
 
@@ -343,8 +345,14 @@ mod tests {
                 Request::builder()
                     .uri(format!(
                         "/verify-signatures?trusted_agent_key={}&trusted_server_key={}",
-                        agent_pubkey.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D"),
-                        server_pubkey.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D")
+                        agent_pubkey
+                            .replace('+', "%2B")
+                            .replace('/', "%2F")
+                            .replace('=', "%3D"),
+                        server_pubkey
+                            .replace('+', "%2B")
+                            .replace('/', "%2F")
+                            .replace('=', "%3D")
                     ))
                     .body(Body::empty())
                     .unwrap(),

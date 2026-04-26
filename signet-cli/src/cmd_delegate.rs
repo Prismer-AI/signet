@@ -1,10 +1,10 @@
 use std::fs;
 
 use anyhow::{bail, Result};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use clap::{Args, Subcommand};
 use signet_core::receipt::Action;
+
+use crate::trust_helpers::{load_cli_trust_bundle, resolve_pubkey};
 
 #[derive(Subcommand)]
 pub enum DelegateAction {
@@ -59,6 +59,9 @@ pub struct DelegateVerifyArgs {
     /// Trusted root public keys (comma-separated base64 or key names)
     #[arg(long)]
     pub trusted_roots: Option<String>,
+    /// Trust bundle file (YAML or JSON) containing active trusted roots.
+    #[arg(long)]
+    pub trust_bundle: Option<String>,
 }
 
 #[derive(Args)]
@@ -92,25 +95,13 @@ pub struct VerifyAuthArgs {
     pub input: String,
     /// Trusted root public keys (comma-separated base64 or key names)
     #[arg(long)]
-    pub trusted_roots: String,
+    pub trusted_roots: Option<String>,
+    /// Trust bundle file (YAML or JSON) containing active trusted roots.
+    #[arg(long)]
+    pub trust_bundle: Option<String>,
     /// Clock skew tolerance in seconds
     #[arg(long, default_value_t = 60)]
     pub clock_skew: u64,
-}
-
-fn resolve_pubkey(dir: &std::path::Path, key_ref: &str) -> Result<ed25519_dalek::VerifyingKey> {
-    // Try as key name first
-    if let Ok(vk) = signet_core::load_verifying_key(dir, key_ref) {
-        return Ok(vk);
-    }
-    // Try as raw base64
-    let bytes = BASE64
-        .decode(key_ref)
-        .map_err(|e| anyhow::anyhow!("'{}' is not a key name or valid base64: {}", key_ref, e))?;
-    let arr: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("key must be 32 bytes"))?;
-    Ok(ed25519_dalek::VerifyingKey::from_bytes(&arr)?)
 }
 
 fn parse_ttl(s: &str) -> Result<String> {
@@ -224,18 +215,33 @@ fn create(args: CreateArgs) -> Result<()> {
 
 fn verify(args: DelegateVerifyArgs) -> Result<()> {
     let json = fs::read_to_string(&args.input)?;
+    let trust_bundle = match args.trust_bundle.as_deref() {
+        Some(path) => {
+            let bundle = load_cli_trust_bundle(path)?;
+            eprintln!("Using trust bundle {}", bundle.describe());
+            Some(bundle)
+        }
+        None => None,
+    };
 
     // Try parsing as array (chain) first, then single token
     if let Ok(chain) = serde_json::from_str::<Vec<signet_core::DelegationToken>>(&json) {
         // Verify chain
         let dir = signet_core::default_signet_dir();
-        let trusted_roots = match &args.trusted_roots {
-            Some(keys) => keys
-                .split(',')
-                .map(|k| resolve_pubkey(&dir, k.trim()))
-                .collect::<Result<Vec<_>>>()?,
-            None => bail!("--trusted-roots required for chain verification"),
+        let mut trusted_roots = match &trust_bundle {
+            Some(bundle) => bundle.active_root_pubkeys.clone(),
+            None => Vec::new(),
         };
+        if let Some(keys) = &args.trusted_roots {
+            trusted_roots.extend(
+                keys.split(',')
+                    .map(|k| resolve_pubkey(&dir, k.trim()))
+                    .collect::<Result<Vec<_>>>()?,
+            );
+        }
+        if trusted_roots.is_empty() {
+            bail!("--trusted-roots or --trust-bundle required for chain verification");
+        }
 
         let scope = signet_core::verify_delegation_chain(&chain, &trusted_roots, None, None)?;
         eprintln!("Chain valid. {} tokens verified.", chain.len());
@@ -310,12 +316,29 @@ fn verify_auth(args: VerifyAuthArgs) -> Result<()> {
     let dir = signet_core::default_signet_dir();
     let json = fs::read_to_string(&args.input)?;
     let receipt: signet_core::Receipt = serde_json::from_str(&json)?;
+    let trust_bundle = match args.trust_bundle.as_deref() {
+        Some(path) => {
+            let bundle = load_cli_trust_bundle(path)?;
+            eprintln!("Using trust bundle {}", bundle.describe());
+            Some(bundle)
+        }
+        None => None,
+    };
 
-    let trusted_roots = args
-        .trusted_roots
-        .split(',')
-        .map(|k| resolve_pubkey(&dir, k.trim()))
-        .collect::<Result<Vec<_>>>()?;
+    let mut trusted_roots = match &trust_bundle {
+        Some(bundle) => bundle.active_root_pubkeys.clone(),
+        None => Vec::new(),
+    };
+    if let Some(keys) = &args.trusted_roots {
+        trusted_roots.extend(
+            keys.split(',')
+                .map(|k| resolve_pubkey(&dir, k.trim()))
+                .collect::<Result<Vec<_>>>()?,
+        );
+    }
+    if trusted_roots.is_empty() {
+        bail!("--trusted-roots or --trust-bundle required for authorization verification");
+    }
 
     let opts = signet_core::AuthorizedVerifyOptions {
         trusted_roots,

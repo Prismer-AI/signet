@@ -12,7 +12,10 @@ pub fn quickstart() -> Result<()> {
 
     if key_exists {
         let info = signet_core::load_key_info(&dir, key_name)?;
-        eprintln!("1. Identity '{}' already exists ({})", key_name, info.pubkey);
+        eprintln!(
+            "1. Identity '{}' already exists ({})",
+            key_name, info.pubkey
+        );
     } else {
         signet_core::generate_and_save(&dir, key_name, Some("quickstart"), None, None)?;
         let info = signet_core::load_key_info(&dir, key_name)?;
@@ -43,7 +46,10 @@ pub fn quickstart() -> Result<()> {
     let info = signet_core::load_key_info(&dir, key_name)?;
     let vk = signet_core::load_verifying_key(&dir, key_name)?;
     let valid = signet_core::verify(&receipt, &vk).is_ok();
-    eprintln!("3. Verified: {}", if valid { "✓ valid" } else { "✗ invalid" });
+    eprintln!(
+        "3. Verified: {}",
+        if valid { "✓ valid" } else { "✗ invalid" }
+    );
 
     // 4. Show summary
     eprintln!("\n=== Ready! ===\n");
@@ -52,7 +58,10 @@ pub fn quickstart() -> Result<()> {
     eprintln!("Audit log: {}/audit/", dir.display());
     eprintln!();
     eprintln!("Next steps:");
-    eprintln!("  signet sign --key {} --tool <name> --params '{{}}' --target mcp://server", key_name);
+    eprintln!(
+        "  signet sign --key {} --tool <name> --params '{{}}' --target mcp://server",
+        key_name
+    );
     eprintln!("  signet audit --since 1h");
     eprintln!("  signet verify --chain");
     eprintln!("  signet dashboard");

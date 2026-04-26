@@ -42,7 +42,9 @@ fn is_sensitive_env(name: &str) -> bool {
 
 fn is_default_filtered_env(name: &str) -> bool {
     let upper = name.to_uppercase();
-    DEFAULT_FILTER_EXACT.iter().any(|candidate| upper == *candidate)
+    DEFAULT_FILTER_EXACT
+        .iter()
+        .any(|candidate| upper == *candidate)
         || DEFAULT_FILTER_SUFFIXES
             .iter()
             .any(|suffix| upper.ends_with(suffix))
@@ -55,7 +57,10 @@ fn is_env_allowed(name: &str, allow_env: &[String]) -> bool {
 }
 
 fn should_forward_env(name: &str, allow_env: &[String], aggressive_filter: bool) -> bool {
-    if ALWAYS_FILTER.iter().any(|candidate| candidate.eq_ignore_ascii_case(name)) {
+    if ALWAYS_FILTER
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    {
         return false;
     }
     if is_env_allowed(name, allow_env) {
@@ -140,8 +145,10 @@ fn split_command_line(input: &str) -> Result<Vec<String>> {
 }
 
 fn token_requires_shell(token: &str) -> bool {
-    matches!(token, "|" | "||" | "&&" | ";" | "&" | ">" | ">>" | "<" | "<<" | "2>" | "2>>")
-        || token.contains("$(")
+    matches!(
+        token,
+        "|" | "||" | "&&" | ";" | "&" | ">" | ">>" | "<" | "<<" | "2>" | "2>>"
+    ) || token.contains("$(")
         || token.contains('`')
 }
 
@@ -311,8 +318,14 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
 
     eprintln!("[signet proxy] target: {}", display_target);
     eprintln!("[signet proxy] target_uri: {}", target_uri);
-    eprintln!("[signet proxy] agent key: {} ({})", signer_name, info.pubkey);
-    eprintln!("[signet proxy] server key: {} (ephemeral)", server_pubkey_b64);
+    eprintln!(
+        "[signet proxy] agent key: {} ({})",
+        signer_name, info.pubkey
+    );
+    eprintln!(
+        "[signet proxy] server key: {} (ephemeral)",
+        server_pubkey_b64
+    );
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 
     let mut command = if args.shell {
@@ -349,7 +362,10 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         eprintln!("[signet proxy] env: aggressive filtering enabled");
     }
     if !args.allow_env.is_empty() {
-        eprintln!("[signet proxy] env: allowlisted {}", args.allow_env.join(", "));
+        eprintln!(
+            "[signet proxy] env: allowlisted {}",
+            args.allow_env.join(", ")
+        );
     }
 
     let mut child = command
@@ -416,15 +432,22 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                     Ok(mut msg) => {
                         if is_tools_call(&msg) {
                             match sign_tools_call(
-                                &mut msg, &sk, &signer_name, &owner,
-                                policy.as_ref(), &dir, no_log, &target_uri,
+                                &mut msg,
+                                &sk,
+                                &signer_name,
+                                &owner,
+                                policy.as_ref(),
+                                &dir,
+                                no_log,
+                                &target_uri,
                                 &pending,
                             ) {
                                 Ok(_) => {
                                     call_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 }
                                 Err(e) => {
-                                    let rpc_id = msg.get("id").cloned().unwrap_or(serde_json::json!(null));
+                                    let rpc_id =
+                                        msg.get("id").cloned().unwrap_or(serde_json::json!(null));
                                     let error_response = serde_json::json!({
                                         "jsonrpc": "2.0",
                                         "id": rpc_id,
@@ -493,14 +516,19 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                     let ts = chrono::Utc::now()
                                         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
                                     match signet_core::sign_bilateral(
-                                        &server_sk, &req.receipt, &response_content,
-                                        "signet-proxy", &ts,
+                                        &server_sk,
+                                        &req.receipt,
+                                        &response_content,
+                                        "signet-proxy",
+                                        &ts,
                                     ) {
                                         Ok(bilateral) => {
                                             if !no_log {
                                                 match serde_json::to_value(&bilateral) {
                                                     Ok(val) => {
-                                                        if let Err(e) = signet_core::audit::append(&dir, &val) {
+                                                        if let Err(e) =
+                                                            signet_core::audit::append(&dir, &val)
+                                                        {
                                                             eprintln!("[signet proxy] warning: bilateral audit failed: {e}");
                                                         }
                                                     }
@@ -509,7 +537,8 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                                     }
                                                 }
                                             }
-                                            bilateral_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                            bilateral_counter
+                                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                             eprintln!(
                                                 "[signet proxy] bilateral: {} ({}) ← response co-signed",
                                                 req.tool_name, bilateral.id,
@@ -648,16 +677,23 @@ fn sign_tools_call(
             signet_core::RuleAction::Deny => {
                 eprintln!("[signet proxy] DENIED: {} ({})", tool_name, eval.reason);
                 if !no_log {
-                    if let Err(e) = signet_core::audit::append_violation(dir, &action, signer_name, &eval) {
+                    if let Err(e) =
+                        signet_core::audit::append_violation(dir, &action, signer_name, &eval)
+                    {
                         eprintln!("[signet proxy] warning: audit log failed: {e}");
                     }
                 }
                 bail!("policy violation: {}", eval.reason);
             }
             signet_core::RuleAction::RequireApproval => {
-                eprintln!("[signet proxy] NEEDS APPROVAL: {} ({})", tool_name, eval.reason);
+                eprintln!(
+                    "[signet proxy] NEEDS APPROVAL: {} ({})",
+                    tool_name, eval.reason
+                );
                 if !no_log {
-                    if let Err(e) = signet_core::audit::append_violation(dir, &action, signer_name, &eval) {
+                    if let Err(e) =
+                        signet_core::audit::append_violation(dir, &action, signer_name, &eval)
+                    {
                         eprintln!("[signet proxy] warning: audit log failed: {e}");
                     }
                 }
@@ -665,7 +701,12 @@ fn sign_tools_call(
             }
             signet_core::RuleAction::Allow => {
                 let (receipt, _) = signet_core::sign_with_policy(
-                    sk, &action, signer_name, signer_owner, pol, None,
+                    sk,
+                    &action,
+                    signer_name,
+                    signer_owner,
+                    pol,
+                    None,
                 )?;
                 receipt
             }
@@ -688,17 +729,14 @@ fn sign_tools_call(
     // Store pending for bilateral co-signing (only if we have a valid RPC id)
     if let Some(ref id) = call_id {
         if !id.is_empty() {
-            pending
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(
-                    id.clone(),
-                    PendingRequest {
-                        receipt: receipt.clone(),
-                        tool_name: tool_name.clone(),
-                        created_at: Instant::now(),
-                    },
-                );
+            pending.lock().unwrap_or_else(|p| p.into_inner()).insert(
+                id.clone(),
+                PendingRequest {
+                    receipt: receipt.clone(),
+                    tool_name: tool_name.clone(),
+                    created_at: Instant::now(),
+                },
+            );
         }
     }
 

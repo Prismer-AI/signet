@@ -127,8 +127,11 @@ export class SignetNodeClient {
       options.target,
     ];
 
+    let extraEnv: NodeJS.ProcessEnv | undefined;
     if (options.params !== undefined) {
-      args.push("--params", JSON.stringify(options.params));
+      const envName = `SIGNET_NODE_PARAMS_${randomEnvSuffix()}`;
+      args.push("--params-from-env", envName);
+      extraEnv = { [envName]: JSON.stringify(options.params) };
     }
     if (options.hashOnly) {
       args.push("--hash-only");
@@ -155,7 +158,13 @@ export class SignetNodeClient {
       args.push("--parent-receipt-id", options.parentReceiptId);
     }
 
-    const result = await this.runRaw(args);
+    const result = await runSignetCommand(this.signetBin, args, {
+      signetHome: this.signetHome,
+      passphrase: this.passphrase,
+      env: extraEnv ? { ...this.env, ...extraEnv } : this.env,
+      maxBuffer: this.maxBuffer,
+      allowFailure: false,
+    });
     return parseJson<Record<string, unknown>>(result.stdout, "sign receipt");
   }
 
@@ -197,6 +206,10 @@ export class SignetNodeClient {
     const result = await this.runRaw(args, true);
     return parseAuditVerifyResult(result, args);
   }
+}
+
+function randomEnvSuffix(): string {
+  return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
 function pushAuditFilters(args: string[], options: AuditFilterOptions): void {

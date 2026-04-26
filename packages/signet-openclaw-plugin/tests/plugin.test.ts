@@ -452,6 +452,96 @@ rules: []
     assert.deepEqual(r2, {});
   });
 
+  it("(j) non-executable signetBin (EACCES) flips readiness in fail-open mode", async () => {
+    const home = await createSignetHome();
+    await createIdentity(home, "openclaw-agent");
+    // We need a healthy startup so initial readiness is info, then break it.
+    const plugin = await loadPlugin({
+      signetBin: realSignetBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+    let findings = await plugin.collectFindings();
+    assert.equal(findings.find((f) => f.checkId === "signet:readiness")?.severity, "info");
+
+    // Replace signetBin with a non-executable file by writing a stub then
+    // making it 0o644. We can't just chmod realSignetBin (shared path), so
+    // create a wrapper that exists but is not executable, and reinitialize
+    // the client by manipulating the api... actually simpler: load a NEW
+    // plugin instance pointing at the unexecutable wrapper. Tests this
+    // path through isSignetSystemFailure for raw EACCES.
+    const stubBin = join(home, "noexec-signet");
+    await writeFile(stubBin, "#!/usr/bin/env bash\n", { mode: 0o644 });
+    const plugin2 = await loadPlugin({
+      signetBin: stubBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    const r = await plugin2.callBeforeToolCall({ toolName: "bash", params: { cmd: "ls" } });
+    assert.deepEqual(r, {});
+    const findings2 = await plugin2.collectFindings();
+    const readiness = findings2.find((f) => f.checkId === "signet:readiness");
+    assert.equal(
+      readiness?.severity,
+      "critical",
+      `EACCES must flip readiness; got ${readiness?.severity} (${readiness?.title})`,
+    );
+    assert.ok(
+      findings2.find((f) => f.checkId === "signet:bypass"),
+      "signet:bypass must fire when binary is not executable AND blockOnSignFailure=false",
+    );
+  });
+
+  it("(k) CLI returns non-JSON garbage flips readiness in fail-open mode", async () => {
+    const home = await createSignetHome();
+    // Stub binary that always exits 0 with non-JSON stdout. Mimics a
+    // wrapper script that swallows the real CLI output.
+    const stubBin = join(home, "garbage-signet");
+    await writeFile(
+      stubBin,
+      `#!/usr/bin/env bash
+case "$1" in
+  --version) echo "signet 0.10.0-test" ;;
+  sign)
+    if [ "$2" = "--help" ]; then
+      echo "Usage: signet sign --key <KEY> --tool <TOOL> --target <TARGET> --session <SESSION> --call-id <CALL_ID> --trace-id <TRACE_ID> --parent-receipt-id <PARENT_RECEIPT_ID>"
+      exit 0
+    fi
+    # Exit 0 but emit garbage instead of receipt JSON.
+    echo "GARBAGE NOT JSON"
+    exit 0
+    ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+
+    const plugin = await loadPlugin({
+      signetBin: stubBin,
+      auditDir: home,
+      blockOnSignFailure: false,
+    });
+
+    // Startup self-check tries to sign — gets garbage stdout, parseJson
+    // throws plain Error. With the new blacklist this is treated as
+    // operational, readiness should already be critical.
+    const findings1 = await plugin.collectFindings();
+    assert.equal(
+      findings1.find((f) => f.checkId === "signet:readiness")?.severity,
+      "critical",
+      "non-JSON CLI output must mark startup readiness critical",
+    );
+
+    const r = await plugin.callBeforeToolCall({ toolName: "bash", params: { cmd: "ls" } });
+    assert.deepEqual(r, {});
+    const findings2 = await plugin.collectFindings();
+    assert.ok(
+      findings2.find((f) => f.checkId === "signet:bypass"),
+      "signet:bypass must fire on parseJson failures (non-JSON CLI output)",
+    );
+  });
+
   it("re-reads SIGNET_PASSPHRASE on every call (passphrase fix mid-session takes effect)", async () => {
     const home = await createSignetHome();
     // Encrypted identity

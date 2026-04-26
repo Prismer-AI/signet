@@ -436,20 +436,31 @@ async function signActiveCall(
 }
 
 function isSignetSystemFailure(err: unknown): boolean {
+  // Distinguish per-call payload bugs (which prove nothing about signet
+  // health) from operational/infra failures (which do). Use a blacklist
+  // because the operational set is much larger than the payload set:
+  //
+  // - SignetCliError (CLI exited non-zero), SignetCliTimeoutError (binary
+  //   hung), SignetCliVersionError (compat probe rejected) are obvious.
+  // - ENOENT (binary missing) and EACCES (binary not executable) come
+  //   through execFile as raw fs errors before any wrap class.
+  // - parseJson failures (CLI exited 0 but produced non-JSON garbage)
+  //   come through as a plain Error from @signet-auth/node.
+  // - Any spawn-time fs error: also operational.
+  //
+  // Per-call payload errors thrown BEFORE the CLI is invoked are JS-side
+  // type-system failures: TypeError (BigInt / circular ref via
+  // JSON.stringify), RangeError (extreme nesting depth), SyntaxError
+  // (manual JSON.parse on user input). Those propagate but do not
+  // taint readiness.
   if (
-    err instanceof SignetCliError ||
-    err instanceof SignetCliTimeoutError ||
-    err instanceof SignetCliVersionError
+    err instanceof TypeError ||
+    err instanceof RangeError ||
+    err instanceof SyntaxError
   ) {
-    return true;
+    return false;
   }
-  // Raw ENOENT from execFile (binary missing) shows up as { code: "ENOENT" }
-  // before any SignetCli* class can wrap it.
-  const code = (err as { code?: unknown } | null)?.code;
-  if (code === "ENOENT") {
-    return true;
-  }
-  return false;
+  return err instanceof Error;
 }
 
 function collectSecurityFindings(

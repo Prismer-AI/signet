@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **signet-auth (Python)**: `verify_bilateral_with_options()` with session/call_id/nonce params
 - **@signet-auth/core**: `verifyBilateralWithOptions()` TypeScript function
 
+#### Pilot Readiness (2026-04-28 doc tracking #1, #2, #3, #4, #5)
+
+- **signet-cli**: `signet proxy --server-key <name>` — persistent server signing identity for stable bilateral pubkey across restarts. Trust bundles can now anchor a stable server identity. Refuses identical agent/server keys.
+- **signet-core**: `FileNonceChecker` — JSON file-backed nonce store, survives process restarts. Single-host pilot grade. Native-only (gated off WASM).
+- **signet-cli**: `signet verify --nonce-store <path>` — durable v3 bilateral replay protection across `signet verify` invocations.
+- **signet-cli**: `signet audit --bundle <dir>` — portable signed evidence bundle (records.jsonl + manifest.json + hash-summary.txt + optional trust-bundle.json) for off-host audit handoff.
+- **signet-cli**: `signet audit --restore <dir>` — re-verify a previously produced evidence bundle on any machine, no signet keystore required.
+- **signet-cli**: `signet audit --include-trust-bundle <path>` — embed a trust bundle snapshot in the evidence package.
+- **signet-core**: `Outcome` + `OutcomeStatus` (`verified`/`rejected`/`executed`/`failed`) attached to v2/v3 `Response`. Inside the signature scope; tampering is detectable.
+- **signet-core**: `sign_bilateral_with_outcome()` — produce a v3 receipt that records both intent and final result.
+- **signet-auth (Python)**: `sign_bilateral_with_outcome()` binding accepting `outcome={"status": ..., "reason"?, "error"?}` dict.
+- **@signet-auth/core**: `SignetOutcome` type + `SignetResponse.outcome?` field.
+- **docs/guides/team-deployment.md**: end-to-end pilot deployment runbook.
+
 #### Documentation
 - **SECURITY.md**: Signed vs unsigned field tables for v1/v3/v4 receipts, extensions attack scenario warning (Issue #2)
 - **COMPLIANCE.md**: Compliance mapping for SOC 2, ISO 27001, EU AI Act, DORA, NIST AI RMF
@@ -38,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify_receipt_signature()` extracted — `verify()` and `verify_allow_expired()` share signature logic
 - CLI exit codes unified: 1=verification/policy fail, 2=approval needed, 3=general error
 - `cmd_policy.rs` uses `bail!()` instead of `process::exit()` — flows through main.rs error handler
+- **`verify_any()` now auto-dispatches v3 bilateral receipts** to `verify_bilateral()` instead of returning an error. Previous behavior required calling `verify_bilateral()` explicitly.
+- **`BilateralVerifyOptions::default()` now enables in-memory nonce replay protection by default** (10k entries, 1 hour TTL). Previous default had `nonce_checker: None`. Use `BilateralVerifyOptions::insecure_no_replay_check()` for audit/forensic replay where nonce reuse is expected. **This is a behavioral break for code that calls `verify_bilateral()` repeatedly on the same receipt.**
+- **Python `SigningAgent.sign_authorized()` now accepts `chain=` (typed `list[dict] | str`)** as the preferred parameter. `chain_json=` is kept for backward compatibility.
+- **TypeScript `BilateralReceipt.extensions`** is now typed as `UnsignedExtensions` (alias for `Record<string, unknown>`) with prominent JSDoc warning that the field is outside the signature scope. Previously typed as `unknown` with no warning.
 
 ### Tests
 - 537 total tests (269 Rust core + 40 CLI + 195 Python + 33 TypeScript)

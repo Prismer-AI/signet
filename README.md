@@ -97,7 +97,7 @@ Signet adds a lightweight trust layer for agent actions:
 
 - **Sign** every tool call with the agent's cryptographic key
 - **Verify** requests offline or at the execution boundary before they are trusted
-- **Proxy** any MCP server transparently — sign and co-sign without touching agent or server code
+- **Proxy** any MCP server transparently — sign requests without touching agent or server code, with local bilateral audit co-signing in the proxy path
 - **Co-sign** server responses with bilateral receipts when you control both sides
 - **Trace** multi-step workflows by linking receipts with `trace_id` and `parent_receipt_id`
 - **Authorize** agents with scoped delegation chains that prove who allowed the action
@@ -106,7 +106,7 @@ Signet adds a lightweight trust layer for agent actions:
 
 ## What's New In 0.9
 
-- **MCP proxy**: `signet proxy --target <cmd> --key <name>` — drop Signet in front of any MCP server as a transparent stdio proxy. No changes to the agent or server required. Signs every `tools/call` and co-signs server responses with bilateral receipts.
+- **MCP proxy**: `signet proxy --target <cmd> --key <name>` — drop Signet in front of any MCP server as a transparent stdio proxy. No changes to the agent or server required. Signs every `tools/call` and appends bilateral co-signatures to the local audit path; client-visible bilateral response handling is stronger through integrated transport/server helpers.
 - **Trace correlation**: `trace_id` and `parent_receipt_id` fields on `Action` link receipts across multi-step workflows into a causal chain. Both fields are part of the signed payload — tampering invalidates the signature.
 - **Policy engine**: `signet sign --policy policy.yaml` enforces policy before signing and binds the decision into the receipt. The proxy also respects `--policy`, blocking denied calls before they reach the server.
 - **Delegation chains**: `signet delegate ...` produces v4 receipts that prove who authorized the agent and what scope it had.
@@ -739,6 +739,9 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet audit --tool <substring>` | Filter by tool name |
 | `signet audit --verify` | Verify all receipt signatures |
 | `signet audit --export <file>` | Export records as JSON |
+| `signet audit --bundle <dir>` | Build a portable signed evidence bundle (records.jsonl + manifest.json + hash-summary.txt) for off-host audit handoff |
+| `signet audit --bundle <dir> --include-trust-bundle <path>` | Embed a trust bundle snapshot in the evidence package |
+| `signet audit --restore <dir>` | Re-verify a previously produced evidence bundle (works on any machine, no signet keystore required) |
 | `signet audit --export <file> --decrypt-params` | Export original audit records plus `materialized_receipt` with decrypted params |
 | `signet explore` | Browse receipts interactively (table, detail, stats, chain check) |
 | `signet explore --show N` | Inspect receipt #N with signature, policy, and chain info |
@@ -749,8 +752,10 @@ The signature covers the entire receipt body (action + signer + timestamp + nonc
 | `signet delegate verify-auth <receipt> --trusted-roots <name>` | Verify authorization chain, scope, and trusted root |
 | `signet policy validate <path>` | Validate policy syntax and print its hash |
 | `signet policy check <path> --tool <t> --params <json>` | Dry-run whether an action would be allowed |
-| `signet proxy --target <cmd> --key <name>` | Run as MCP stdio proxy — sign all tool calls transparently |
-| `signet proxy --target <cmd> --key <n> --policy <path>` | Proxy with policy enforcement before signing |
+| `signet proxy --target <cmd> --key <name>` | Run as MCP stdio proxy — sign all tool calls transparently (ephemeral server key) |
+| `signet proxy ... --server-key <name>` | Use a persistent server signing identity (required for trust bundles to anchor a stable server pubkey across restarts) |
+| `signet proxy ... --policy <path>` | Proxy with policy enforcement before signing |
+| `signet verify <bilateral.json> --trust-bundle <bundle> --nonce-store <path>` | Verify v3 bilateral receipts with replay protection that survives process restarts |
 | `signet claude install` | Install Claude Code plugin (PostToolUse signing hook) |
 | `signet claude uninstall` | Remove Claude Code plugin |
 | `signet dashboard` | Open local audit dashboard in browser |
@@ -785,6 +790,7 @@ The **Chain Integrity** tab verifies the SHA-256 hash chain across your entire a
 |-----|-------------|
 | [Architecture](docs/ARCHITECTURE.md) | System design, component overview, data flow |
 | [Security](docs/SECURITY.md) | Crypto primitives, threat model, key storage |
+| [Pilot Deployment Runbook](docs/guides/team-deployment.md) | End-to-end runbook for a founder-assisted pilot: identities, trust bundle, proxy `--server-key`, durable replay, evidence bundles, outcome capture, on-compromise procedures |
 | [MCP Integration Guide](docs/guides/mcp-integration.md) | Step-by-step MCP setup with SigningTransport |
 | [CI/CD Integration](docs/guides/ci-integration.md) | GitHub Actions example, key management for CI |
 | [Audit Log Guide](docs/guides/audit-log.md) | Querying, filtering, hash chain verification |

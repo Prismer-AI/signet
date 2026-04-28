@@ -15,7 +15,7 @@ Signet provides the technical controls that auditors look for when assessing AI 
 | **CC7.2** — System monitoring | Actions are logged for review | Hash-chained audit log with `signet audit` queries |
 | **CC7.3** — Anomaly detection | Unauthorized changes are detectable | Tamper-evident chain (`signet verify --chain`) + signature verification |
 | **CC8.1** — Change management | Changes are authorized and tracked | v4 receipts embed delegation proof showing who authorized what |
-| **A1.2** — Recovery objectives | Audit evidence survives incidents | Append-only JSONL files, bilateral co-signing provides independent attestation |
+| **A1.2** — Recovery objectives | Audit evidence supports incident review and operator-managed preservation | Append-only JSONL files, exportable audit records, bilateral co-signing where configured |
 
 ### What an auditor sees
 
@@ -61,10 +61,10 @@ Article 12 requires high-risk AI systems to have logging capabilities that recor
 | Monitoring | Enable post-market monitoring | `signet audit --since` queries + dashboard |
 | Integrity | Logs cannot be modified undetected | SHA-256 hash chain + Ed25519 signatures |
 
-### Generating an Article 12 evidence bundle
+### Exporting Article 12-supporting audit evidence
 
 ```bash
-# Export signed audit trail for a specific period
+# Export audit records for a specific period
 signet audit --since 90d --export article12-evidence.json
 
 # Verify chain integrity before submission
@@ -74,7 +74,11 @@ signet verify --chain
 signet audit --verify
 ```
 
-The exported JSON contains receipts with full signature data, verifiable offline by any party.
+The exported JSON contains receipts with full signature data for later review.
+
+Current limitation:
+
+- this export is a raw JSON record dump, not yet a signed evidence bundle with its own manifest, restore flow, or off-host verification packaging
 
 ---
 

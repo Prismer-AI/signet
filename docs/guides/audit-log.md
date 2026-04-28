@@ -73,6 +73,10 @@ signet audit --since 24h --export today.json
 signet audit --since 24h --export today-readable.json --decrypt-params
 ```
 
+Current limitation:
+
+- `signet audit --export` writes a JSON record dump for review; it is not yet a signed evidence bundle with a manifest or restore flow
+
 When `--decrypt-params` is used, the export preserves the original hash-chained `receipt` and adds a `materialized_receipt` field with locally decrypted `action.params`.
 
 ### Inspect decrypted params locally

@@ -21,6 +21,14 @@ pub struct VerifyArgs {
     /// Verify audit log hash chain integrity
     #[arg(long)]
     pub chain: bool,
+
+    /// Path to a JSON file storing seen-nonce state for bilateral (v3)
+    /// receipt replay protection. When set, replay detection persists
+    /// across `signet verify` invocations and survives process restarts.
+    /// When omitted, only the in-memory default checker is used (process
+    /// lifetime only).
+    #[arg(long, value_name = "PATH")]
+    pub nonce_store: Option<String>,
 }
 
 pub fn verify(args: VerifyArgs) -> Result<()> {
@@ -52,7 +60,13 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
     if let Some(bundle_path) = args.trust_bundle.as_deref() {
         let trust_bundle = load_cli_trust_bundle(bundle_path)?;
         eprintln!("Using trust bundle {}", trust_bundle.describe());
-        return verify_with_trust_bundle(&receipt_str, &raw, version, &trust_bundle);
+        return verify_with_trust_bundle(
+            &receipt_str,
+            &raw,
+            version,
+            &trust_bundle,
+            args.nonce_store.as_deref(),
+        );
     }
 
     let pubkey = args.pubkey.as_ref().ok_or_else(|| {
@@ -100,6 +114,7 @@ fn verify_with_trust_bundle(
     raw: &serde_json::Value,
     version: u64,
     trust_bundle: &LoadedTrustBundle,
+    nonce_store: Option<&str>,
 ) -> Result<()> {
     match version {
         1 | 2 => {
@@ -137,10 +152,17 @@ fn verify_with_trust_bundle(
                     anyhow::anyhow!("untrusted server pubkey: {}", bilateral.server.pubkey)
                 })?;
 
-            let opts = signet_core::BilateralVerifyOptions {
+            let mut opts = signet_core::BilateralVerifyOptions {
                 trusted_agent_pubkey: Some(agent_vk),
                 ..Default::default()
             };
+            if let Some(path) = nonce_store {
+                // FileNonceChecker survives process restarts. Replaces the
+                // default in-memory checker.
+                opts.nonce_checker = Some(Box::new(signet_core::FileNonceChecker::new(
+                    path, 100_000, 3600,
+                )));
+            }
 
             match signet_core::verify_bilateral_with_options_detailed(&bilateral, &server_vk, &opts)
             {

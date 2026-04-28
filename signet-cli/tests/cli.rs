@@ -493,6 +493,97 @@ fn test_verify_bilateral_with_trust_bundle_v3() {
 }
 
 #[test]
+fn test_verify_v3_nonce_store_persists_across_invocations() {
+    // First `signet verify --nonce-store path` verifies a v3 receipt OK.
+    // Second invocation on the same receipt must detect replay because
+    // the nonce was recorded in the file and survives the process exit.
+    let dir = tempdir().unwrap();
+    let (agent_key, agent_vk) = signet_core::generate_keypair();
+    let (server_key, server_vk) = signet_core::generate_keypair();
+    let action = signet_core::Action {
+        tool: "bash".to_string(),
+        params: serde_json::json!({"cmd": "echo hi"}),
+        params_hash: String::new(),
+        target: "mcp://local".to_string(),
+        transport: "stdio".to_string(),
+        session: None,
+        call_id: None,
+        response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
+    };
+    let receipt = signet_core::sign(&agent_key, &action, "agent", "").unwrap();
+    let bilateral = signet_core::sign_bilateral(
+        &server_key,
+        &receipt,
+        &serde_json::json!({"ok": true}),
+        "server",
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )
+    .unwrap();
+    let receipt_path = dir.path().join("bilateral.json");
+    fs::write(
+        &receipt_path,
+        serde_json::to_string_pretty(&bilateral).unwrap(),
+    )
+    .unwrap();
+
+    let trust_path = dir.path().join("trust.json");
+    let agent_pk = format!(
+        "ed25519:{}",
+        base64::engine::general_purpose::STANDARD.encode(agent_vk.as_bytes())
+    );
+    let server_pk = format!(
+        "ed25519:{}",
+        base64::engine::general_purpose::STANDARD.encode(server_vk.as_bytes())
+    );
+    write_trust_bundle(
+        &trust_path,
+        "prod",
+        &[],
+        &[("agent", agent_pk.as_str())],
+        &[("server", server_pk.as_str())],
+    );
+
+    let nonce_store = dir.path().join("nonces.json");
+
+    // First verification — should succeed and record nonce to file.
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--trust-bundle",
+            trust_path.to_str().unwrap(),
+            "--nonce-store",
+            nonce_store.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        nonce_store.exists(),
+        "nonce store file should be created on first verify"
+    );
+
+    // Second verification (separate process) — replay must be detected
+    // because the nonce file persists.
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--trust-bundle",
+            trust_path.to_str().unwrap(),
+            "--nonce-store",
+            nonce_store.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("replay").or(predicate::str::contains("nonce")));
+}
+
+#[test]
 fn test_verify_pubkey_file() {
     let dir = tempdir().unwrap();
     signet()
@@ -3526,5 +3617,428 @@ fn test_trust_disable_yaml_updates_bundle() {
     assert_eq!(
         bundle.agents[0].disabled_at.as_deref(),
         Some("2026-04-25T14:00:00Z")
+    );
+}
+
+// ─── proxy --server-key (persistent server identity) ─────────────────────────
+
+// ─── audit --bundle / --restore ───────────────────────────────────────────────
+
+#[test]
+fn test_audit_bundle_roundtrip() {
+    // Create identity, sign 3 actions, build bundle, restore bundle on the
+    // same dir. Restoration must succeed and report the correct chain tip.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "bundle-key", "--unencrypted"])
+        .assert()
+        .success();
+
+    for i in 0..3 {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "sign",
+                "--key",
+                "bundle-key",
+                "--tool",
+                "bash",
+                "--params",
+                &format!(r#"{{"i":{i}}}"#),
+                "--target",
+                "mcp://local",
+            ])
+            .assert()
+            .success();
+    }
+
+    let bundle_dir = dir.path().join("bundle1");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--bundle", bundle_dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Bundle written"));
+
+    assert!(bundle_dir.join("records.jsonl").exists());
+    assert!(bundle_dir.join("manifest.json").exists());
+    assert!(bundle_dir.join("hash-summary.txt").exists());
+
+    // Parse manifest and check shape.
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["format_version"], 1);
+    assert_eq!(manifest["record_count"], 3);
+    assert!(manifest["records_sha256"].as_str().unwrap().len() == 64);
+    assert!(manifest["chain_tip_record_hash"]
+        .as_str()
+        .unwrap()
+        .starts_with("sha256:"));
+
+    // Restore the bundle — must succeed.
+    signet()
+        .args(["audit", "--restore", bundle_dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Bundle valid"))
+        .stdout(predicate::str::contains("records:           3"));
+}
+
+#[test]
+fn test_audit_bundle_restore_detects_jsonl_tamper() {
+    // Build a bundle, tamper records.jsonl content (single byte flip),
+    // restore must fail with sha mismatch.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "tamper-key", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign", "--key", "tamper-key", "--tool", "bash",
+            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    let bundle_dir = dir.path().join("b2");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--bundle", bundle_dir.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Tamper records.jsonl (replace the first character).
+    let path = bundle_dir.join("records.jsonl");
+    let mut content = std::fs::read_to_string(&path).unwrap();
+    content.insert(0, ' '); // prepend a space
+    std::fs::write(&path, content).unwrap();
+
+    signet()
+        .args(["audit", "--restore", bundle_dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("sha256 mismatch"));
+}
+
+#[test]
+fn test_audit_bundle_with_trust_bundle_snapshot() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "tb-key", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign", "--key", "tb-key", "--tool", "bash",
+            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    // Create a minimal trust bundle file.
+    let trust_path = dir.path().join("trust.json");
+    write_trust_bundle(&trust_path, "dev", &[], &[], &[]);
+
+    let bundle_dir = dir.path().join("b3");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "audit", "--bundle", bundle_dir.to_str().unwrap(),
+            "--include-trust-bundle", trust_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert!(bundle_dir.join("trust-bundle.json").exists());
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["has_trust_bundle"], true);
+}
+
+#[test]
+fn test_audit_bundle_restore_recomputes_record_hash() {
+    // Detect tampering of receipt content even when chain hashes are consistent.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "rh-key", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign", "--key", "rh-key", "--tool", "bash",
+            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    let bundle_dir = dir.path().join("bn-rh");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--bundle", bundle_dir.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Tamper a receipt field WITHOUT updating record_hash. SHA-256 of
+    // records.jsonl will differ; if we keep the manifest's hash too,
+    // the file-level check fails. We need to also update the manifest's
+    // SHA so only the record_hash check catches it.
+    let records_path = bundle_dir.join("records.jsonl");
+    let records = std::fs::read_to_string(&records_path).unwrap();
+    let tampered = records.replace(r#""tool":"bash""#, r#""tool":"evil""#);
+    std::fs::write(&records_path, &tampered).unwrap();
+
+    // Recompute and update the manifest's records_sha256 to bypass the
+    // file-level check, isolating the record_hash mismatch path.
+    use sha2::{Digest, Sha256};
+    let new_sha = format!("{:x}", Sha256::digest(tampered.as_bytes()));
+    let manifest_path = bundle_dir.join("manifest.json");
+    let mut m: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    m["records_sha256"] = serde_json::Value::String(new_sha);
+    std::fs::write(&manifest_path, serde_json::to_string(&m).unwrap()).unwrap();
+
+    signet()
+        .args(["audit", "--restore", bundle_dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("record_hash mismatch"));
+}
+
+#[test]
+fn test_audit_bundle_restore_with_trust_bundle_verifies_signatures() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "tbv-key", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign", "--key", "tbv-key", "--tool", "bash",
+            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    // Read the identity's pubkey from the keystore .pub JSON.
+    let pub_json = std::fs::read_to_string(dir.path().join("keys/tbv-key.pub")).unwrap();
+    let pub_obj: serde_json::Value = serde_json::from_str(&pub_json).unwrap();
+    let pubkey = format!("ed25519:{}", pub_obj["pubkey"].as_str().unwrap());
+    let trust_path = dir.path().join("trust.json");
+    write_trust_bundle(
+        &trust_path, "pilot",
+        &[],
+        &[("tbv-key", pubkey.as_str())],
+        &[],
+    );
+
+    let bundle_dir = dir.path().join("bn-tbv");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "audit", "--bundle", bundle_dir.to_str().unwrap(),
+            "--include-trust-bundle", trust_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Restore must verify signatures (trust-bundle.json is included).
+    signet()
+        .args(["audit", "--restore", bundle_dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verified against trust bundle"));
+}
+
+#[test]
+fn test_audit_bundle_refuses_clobber_foreign_dir() {
+    // --bundle should refuse to write into a directory that contains
+    // unrelated files (e.g. an attacker-controlled drop point).
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "rk", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign", "--key", "rk", "--tool", "bash",
+            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+        ])
+        .assert()
+        .success();
+
+    let bundle_dir = dir.path().join("dirty");
+    std::fs::create_dir_all(&bundle_dir).unwrap();
+    std::fs::write(bundle_dir.join("foreign.txt"), b"do not touch").unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--bundle", bundle_dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("foreign file"));
+
+    // The foreign file is preserved.
+    assert_eq!(
+        std::fs::read(bundle_dir.join("foreign.txt")).unwrap(),
+        b"do not touch"
+    );
+}
+
+#[test]
+fn test_audit_bundle_empty_filter_errors() {
+    // No records → bundle should refuse rather than produce empty evidence.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "k", "--unencrypted"])
+        .assert()
+        .success();
+
+    let bundle_dir = dir.path().join("b4");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["audit", "--bundle", bundle_dir.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("nothing to bundle"));
+}
+
+#[test]
+fn test_proxy_server_key_persistent_pubkey_stable() {
+    // With --server-key, the bilateral server pubkey must be the same across
+    // restarts (it's the named keystore identity). This is the core property
+    // pilot trust bundles depend on.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "agent-pk", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "server-pk", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"x"}}}"#,
+        "\n",
+    );
+
+    // Run twice; the persistent server key should produce the same pubkey both runs.
+    let extract_server_pubkey = |stderr: &str| -> String {
+        // Line format: "[signet proxy] server key: <base64> (persistent: <name>)"
+        for line in stderr.lines() {
+            if let Some(rest) = line.strip_prefix("[signet proxy] server key: ") {
+                if let Some((pubkey, _)) = rest.split_once(' ') {
+                    return pubkey.to_string();
+                }
+            }
+        }
+        panic!("could not parse server pubkey from stderr:\n{stderr}");
+    };
+
+    let (status1, _, stderr1) = run_proxy(
+        dir.path(), &mock_server_cmd(), "agent-pk", input,
+        &["--server-key", "server-pk"],
+    );
+    assert!(status1.success(), "first run should succeed: {stderr1}");
+    let pubkey1 = extract_server_pubkey(&stderr1);
+    assert!(
+        stderr1.contains("server key:") && stderr1.contains("(persistent: server-pk)"),
+        "should report persistent origin: {stderr1}",
+    );
+
+    let (status2, _, stderr2) = run_proxy(
+        dir.path(), &mock_server_cmd(), "agent-pk", input,
+        &["--server-key", "server-pk"],
+    );
+    assert!(status2.success(), "second run should succeed: {stderr2}");
+    let pubkey2 = extract_server_pubkey(&stderr2);
+
+    assert_eq!(
+        pubkey1, pubkey2,
+        "persistent --server-key must produce a stable pubkey across runs"
+    );
+}
+
+#[test]
+fn test_proxy_ephemeral_pubkey_changes_each_run() {
+    // Without --server-key, the proxy generates a fresh ephemeral key each
+    // run. This is the documented "demo mode" — fine for trying things out,
+    // but trust bundles can't anchor to it.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "agent-eph", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"x"}}}"#,
+        "\n",
+    );
+
+    let extract_server_pubkey = |stderr: &str| -> String {
+        for line in stderr.lines() {
+            if let Some(rest) = line.strip_prefix("[signet proxy] server key: ") {
+                if let Some((pubkey, _)) = rest.split_once(' ') {
+                    return pubkey.to_string();
+                }
+            }
+        }
+        panic!("could not parse server pubkey from stderr:\n{stderr}");
+    };
+
+    let (s1, _, e1) = run_proxy(dir.path(), &mock_server_cmd(), "agent-eph", input, &[]);
+    let (s2, _, e2) = run_proxy(dir.path(), &mock_server_cmd(), "agent-eph", input, &[]);
+    assert!(s1.success() && s2.success(), "both runs should succeed");
+    assert!(e1.contains("(ephemeral)"), "first run should report ephemeral: {e1}");
+    assert!(e2.contains("(ephemeral)"), "second run should report ephemeral: {e2}");
+    assert_ne!(
+        extract_server_pubkey(&e1),
+        extract_server_pubkey(&e2),
+        "ephemeral keys must differ across runs",
+    );
+}
+
+#[test]
+fn test_proxy_server_key_rejects_same_as_agent_key() {
+    // Bilateral is meaningless if --key and --server-key are the same identity.
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "shared-id", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"msg":"x"}}}"#,
+        "\n",
+    );
+    let (status, _, stderr) = run_proxy(
+        dir.path(), &mock_server_cmd(), "shared-id", input,
+        &["--server-key", "shared-id"],
+    );
+    assert!(!status.success(), "proxy should reject identical key/server-key");
+    assert!(
+        stderr.contains("must differ from --key") || stderr.contains("same pubkey"),
+        "stderr should explain rejection: {stderr}",
     );
 }

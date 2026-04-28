@@ -237,6 +237,17 @@ pub struct ProxyArgs {
     #[arg(long)]
     pub key: String,
 
+    /// Persistent server signing key name (from keystore) for bilateral
+    /// co-signing. When set, the proxy uses this key for the server-side
+    /// signature so trust bundles can pin a stable server identity across
+    /// restarts. When omitted, an ephemeral key is generated each run
+    /// (suitable for demos but not for enterprise pilots).
+    ///
+    /// MUST differ from --key (the agent key); the proxy refuses to start
+    /// if both resolve to the same identity.
+    #[arg(long)]
+    pub server_key: Option<String>,
+
     /// Target URI for audit trail (e.g. "mcp://github.local")
     #[arg(long, default_value = "")]
     pub target_uri: String,
@@ -279,13 +290,53 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
     let owner = info.owner.as_deref().unwrap_or("").to_string();
     let signer_name = info.name.clone();
 
-    // Generate an ephemeral server key for bilateral co-signing.
-    // This MUST be different from the agent signing key — if they're the same,
+    // Server key for bilateral co-signing.
+    // MUST be different from the agent signing key — if they're the same,
     // bilateral receipts are meaningless (one key compromise forges both sides).
-    let (server_sk, _server_vk) = signet_core::generate_keypair();
+    //
+    // --server-key (persistent, named keystore identity): required for
+    // enterprise pilots where trust bundles pin a stable server pubkey.
+    // No --server-key (ephemeral): convenient for demos; the server pubkey
+    // changes on every restart, so trust bundles cannot anchor it.
+    let (server_sk, server_vk, server_key_origin) = match &args.server_key {
+        Some(name) => {
+            if name == &args.key {
+                bail!(
+                    "--server-key must differ from --key (got both = '{}'). \
+                     Bilateral co-signing requires independent identities.",
+                    name
+                );
+            }
+            let server_info = signet_core::load_key_info(&dir, name)?;
+            if server_info.pubkey == info.pubkey {
+                bail!(
+                    "--server-key '{}' resolves to the same pubkey as --key '{}'. \
+                     Bilateral co-signing requires independent identities.",
+                    name,
+                    args.key
+                );
+            }
+            let sk = match signet_core::load_signing_key(&dir, name, None) {
+                Ok(sk) => sk,
+                Err(_) => {
+                    let pass = super::get_passphrase(&format!(
+                        "Enter passphrase for server key '{}': ",
+                        name
+                    ))?;
+                    signet_core::load_signing_key(&dir, name, Some(&pass))?
+                }
+            };
+            let vk = sk.verifying_key();
+            (sk, vk, format!("persistent: {}", name))
+        }
+        None => {
+            let (sk, vk) = signet_core::generate_keypair();
+            (sk, vk, "ephemeral".to_string())
+        }
+    };
     let server_pubkey_b64 = {
         use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(_server_vk.to_bytes())
+        base64::engine::general_purpose::STANDARD.encode(server_vk.to_bytes())
     };
 
     let policy = if let Some(ref path) = args.policy {
@@ -323,8 +374,8 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         signer_name, info.pubkey
     );
     eprintln!(
-        "[signet proxy] server key: {} (ephemeral)",
-        server_pubkey_b64
+        "[signet proxy] server key: {} ({})",
+        server_pubkey_b64, server_key_origin
     );
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
 

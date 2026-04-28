@@ -396,6 +396,21 @@ impl PyResponse {
     fn content_hash(&self) -> &str {
         &self.inner.content_hash
     }
+
+    /// Final outcome attached to this response, if any. Returns a dict
+    /// `{"status": ..., "reason": ..., "error": ...}` or None.
+    #[getter]
+    fn outcome<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<Option<pyo3::Bound<'py, pyo3::PyAny>>> {
+        match &self.inner.outcome {
+            None => Ok(None),
+            Some(o) => {
+                let v = serde_json::to_value(o).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!("outcome serialize: {e}"))
+                })?;
+                Ok(Some(pythonize::pythonize(py, &v)?))
+            }
+        }
+    }
 }
 
 // ─── CompoundReceipt ──────────────────────────────────────────────────────────

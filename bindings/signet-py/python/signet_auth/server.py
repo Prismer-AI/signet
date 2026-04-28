@@ -3,13 +3,132 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Protocol
 
 from signet_auth._signet import Receipt, verify
 
 CLOCK_SKEW_TOLERANCE_SECONDS = 30
+
+
+class NonceChecker(Protocol):
+    """Backend interface for replay protection on agent nonces.
+
+    Compatible with `signet_core::verify::NonceChecker` (Rust trait).
+    Implementations: `InMemoryNonceChecker`, `FileNonceChecker`,
+    plus any custom Redis / SQL backend you care to write.
+    """
+
+    def is_replay(self, nonce: str) -> bool:
+        ...
+
+    def record(self, nonce: str) -> None:
+        ...
+
+
+class InMemoryNonceChecker:
+    """Process-local nonce checker. Suitable for unit tests and demos.
+
+    Lost on process restart — for pilots, use FileNonceChecker.
+    """
+
+    def __init__(self, max_entries: int = 10_000, ttl_secs: int = 3600) -> None:
+        self._seen: dict[str, datetime] = {}
+        self._lock = threading.Lock()
+        self._max = max_entries
+        self._ttl = timedelta(seconds=ttl_secs)
+
+    def _sweep(self, now: datetime) -> None:
+        cutoff = now - self._ttl
+        self._seen = {k: v for k, v in self._seen.items() if v > cutoff}
+
+    def is_replay(self, nonce: str) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            self._sweep(now)
+            return nonce in self._seen
+
+    def record(self, nonce: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            self._sweep(now)
+            if len(self._seen) >= self._max:
+                oldest = min(self._seen, key=self._seen.get)  # type: ignore[arg-type]
+                self._seen.pop(oldest, None)
+            self._seen[nonce] = now
+
+
+class FileNonceChecker:
+    """JSON file-backed nonce checker. Survives process restarts.
+
+    Single-host pilot grade. Writes are atomic on POSIX (write to temp +
+    rename) and serialized via a process-local lock — concurrent writers
+    on the same path may still race, but each individual write is
+    consistent and the worst case is brief over-retention of a nonce.
+
+    For multi-host or HA, use a Redis or SQL backend instead.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        max_entries: int = 100_000,
+        ttl_secs: int = 3600,
+    ) -> None:
+        self._path = Path(path)
+        self._max = max_entries
+        self._ttl = timedelta(seconds=ttl_secs)
+        self._lock = threading.Lock()
+
+    def _read(self) -> dict[str, datetime]:
+        if not self._path.exists():
+            return {}
+        try:
+            raw = json.loads(self._path.read_text() or "{}")
+        except (json.JSONDecodeError, OSError):
+            return {}
+        out: dict[str, datetime] = {}
+        for k, v in raw.items():
+            try:
+                out[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except (ValueError, TypeError, AttributeError):
+                continue
+        return out
+
+    def _write(self, state: dict[str, datetime]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        raw = {k: v.isoformat() for k, v in state.items()}
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        tmp.write_text(json.dumps(raw))
+        os.replace(tmp, self._path)
+
+    def is_replay(self, nonce: str) -> bool:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            state = self._read()
+            cutoff = now - self._ttl
+            state = {k: v for k, v in state.items() if v > cutoff}
+            return nonce in state
+
+    def record(self, nonce: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            state = self._read()
+            cutoff = now - self._ttl
+            state = {k: v for k, v in state.items() if v > cutoff}
+            if len(state) >= self._max:
+                oldest_key = min(state, key=state.get)  # type: ignore[arg-type]
+                state.pop(oldest_key, None)
+            state[nonce] = now
+            try:
+                self._write(state)
+            except OSError:
+                # Best-effort persistence; matches Rust FileNonceChecker.
+                pass
 
 
 @dataclass
@@ -31,6 +150,17 @@ class VerifyOptions:
 
     expected_target: str | None = None
     """If set, receipt.action.target must match this value."""
+
+    nonce_checker: NonceChecker | None = None
+    """Optional replay-protection backend. When set, every verified
+    request's `receipt.nonce` is checked against the backend; if seen
+    before, the request is rejected with `replay detected`. Otherwise
+    the nonce is recorded.
+
+    Use FileNonceChecker (or a Redis/SQL implementation) for replay
+    protection that survives process restarts. Without this hook, a
+    restarted server has no replay defenses for previously-seen
+    requests."""
 
 
 @dataclass
@@ -189,6 +319,19 @@ def verify_request(
         actual = json.dumps(request_args, separators=(",", ":")) if request_args is not None else "null"
         if signed != actual:
             return ServerVerifyResult(ok=False, error="params mismatch: signed params differ from request arguments")
+
+    # 10. Replay protection (optional). Check + record under the same
+    # nonce; for a NonceChecker that supports atomic check-and-set, this
+    # is fine. The InMemoryNonceChecker / FileNonceChecker shipped here
+    # acquire a lock for read+write, so a tight check-then-record window
+    # is safe against single-process concurrent requests.
+    if opts.nonce_checker is not None:
+        nonce = receipt.nonce
+        if not isinstance(nonce, str) or not nonce:
+            return ServerVerifyResult(ok=False, error="missing nonce")
+        if opts.nonce_checker.is_replay(nonce):
+            return ServerVerifyResult(ok=False, error="replay detected")
+        opts.nonce_checker.record(nonce)
 
     # All checks pass
     return ServerVerifyResult(

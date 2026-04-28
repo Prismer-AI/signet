@@ -2,7 +2,14 @@
 
 from signet_auth.agent import SigningAgent
 from signet_auth.decorator import signet_sign, sign, init as init_signer
-from signet_auth.server import VerifyOptions, ServerVerifyResult, verify_request
+from signet_auth.server import (
+    FileNonceChecker,
+    InMemoryNonceChecker,
+    NonceChecker,
+    ServerVerifyResult,
+    VerifyOptions,
+    verify_request,
+)
 from signet_auth._signet import (
     __version__,
     # Exceptions
@@ -50,6 +57,7 @@ from signet_auth._signet import (
     verify,
     verify_any,
     sign_bilateral,
+    sign_bilateral_with_outcome,
     verify_bilateral,
     verify_bilateral_detailed,
     verify_bilateral_with_options,
@@ -129,6 +137,7 @@ __all__ = [
     "verify",
     "verify_any",
     "sign_bilateral",
+    "sign_bilateral_with_outcome",
     "verify_bilateral",
     "verify_bilateral_detailed",
     "verify_bilateral_with_options",
@@ -165,4 +174,7 @@ __all__ = [
     "VerifyOptions",
     "ServerVerifyResult",
     "verify_request",
+    "NonceChecker",
+    "InMemoryNonceChecker",
+    "FileNonceChecker",
 ]

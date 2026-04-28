@@ -191,6 +191,60 @@ fn sign_bilateral(
     Ok(PyBilateralReceipt { inner: bilateral })
 }
 
+/// Sign a bilateral (v3) receipt with an explicit outcome status.
+///
+/// `outcome` is a dict shaped like `{"status": "executed" | "failed" | "rejected" | "verified",
+/// "reason": Optional[str], "error": Optional[str]}` or None to omit. The
+/// outcome is included in the signature scope — tampering invalidates the
+/// receipt.
+#[pyfunction]
+#[pyo3(signature = (
+    server_key, agent_receipt, response_content, server_name,
+    ts_response=None, outcome=None,
+))]
+fn sign_bilateral_with_outcome(
+    py: Python<'_>,
+    server_key: &str,
+    agent_receipt: crate::types::PyReceipt,
+    response_content: Bound<'_, PyAny>,
+    server_name: String,
+    ts_response: Option<String>,
+    outcome: Option<Bound<'_, PyAny>>,
+) -> PyResult<PyBilateralReceipt> {
+    let signing_key = parse_signing_key(server_key)?;
+    let inner_receipt = agent_receipt.inner.clone();
+    let response_json: serde_json::Value = pythonize::depythonize(&response_content)?;
+    let ts = ts_response
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+
+    let outcome_parsed: Option<signet_core::Outcome> = match outcome {
+        None => None,
+        Some(obj) => {
+            let v: serde_json::Value = pythonize::depythonize(&obj)?;
+            Some(serde_json::from_value(v).map_err(|e| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "invalid outcome dict (expected {{status: 'executed'|'failed'|'rejected'|'verified', reason?, error?}}): {e}"
+                ))
+            })?)
+        }
+    };
+
+    let bilateral = py
+        .allow_threads(|| {
+            signet_core::sign_bilateral_with_outcome(
+                &signing_key,
+                &inner_receipt,
+                &response_json,
+                &server_name,
+                &ts,
+                outcome_parsed,
+            )
+        })
+        .map_err(to_py_err)?;
+
+    Ok(PyBilateralReceipt { inner: bilateral })
+}
+
 #[pyfunction]
 fn verify_bilateral(
     py: Python<'_>,
@@ -564,6 +618,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_compound, m)?)?;
     m.add_function(wrap_pyfunction!(verify_any, m)?)?;
     m.add_function(wrap_pyfunction!(sign_bilateral, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_bilateral_with_outcome, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral_with_options, m)?)?;
     m.add_function(wrap_pyfunction!(verify_bilateral_detailed, m)?)?;

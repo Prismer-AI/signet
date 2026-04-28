@@ -186,3 +186,27 @@ def test_audit_verify_signatures_v3_with_trusted_keys(tmp_path):
     assert result.valid == 1
     assert result.warnings == []
     assert result.failures == []
+
+
+def test_audit_verify_signatures_v3_is_idempotent(tmp_path):
+    bilateral = _sign_bilateral()
+    audit_dir = Path(tmp_path) / "audit"
+    audit_dir.mkdir()
+    audit_file = audit_dir / f"{bilateral.ts_response[:10]}.jsonl"
+    audit_file.write_text(
+        json.dumps(
+            {
+                "receipt": json.loads(bilateral.to_json()),
+                "prev_hash": "sha256:0",
+                "record_hash": "sha256:1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    first = signet_auth.audit_verify_signatures(str(tmp_path))
+    second = signet_auth.audit_verify_signatures(str(tmp_path))
+    assert first.valid == 1
+    assert second.valid == 1
+    assert first.failures == []
+    assert second.failures == []

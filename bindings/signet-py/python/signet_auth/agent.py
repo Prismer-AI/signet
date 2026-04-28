@@ -146,7 +146,8 @@ class SigningAgent:
         target: str = "",
         transport: str = "stdio",
         *,
-        chain_json: str,
+        chain: list[dict[str, Any]] | str | None = None,
+        chain_json: str | None = None,
     ) -> str:
         """Sign an action with a delegation chain (produces v4 receipt).
 
@@ -155,13 +156,31 @@ class SigningAgent:
             params: Tool parameters.
             target: Target URI.
             transport: Transport type.
-            chain_json: JSON string of the delegation chain array.
+            chain: Delegation chain as a list of dicts (preferred). Each dict
+                is a DelegationToken object. If a JSON string is passed, it is
+                accepted for backward compatibility.
+            chain_json: **Deprecated.** JSON string of the delegation chain
+                array. Use `chain=` with a list of dicts instead.
 
         Returns:
             JSON string of the v4 Receipt.
         """
         if self._secret_key is None:
             raise RuntimeError("SigningAgent has been closed")
+
+        # Resolve chain: prefer `chain` (typed), fall back to deprecated
+        # `chain_json` (kept for backward compatibility).
+        if chain is None and chain_json is None:
+            raise TypeError("sign_authorized() requires either `chain` or `chain_json`")
+        if chain is not None and chain_json is not None:
+            raise TypeError("sign_authorized() takes `chain` OR `chain_json`, not both")
+
+        if chain is not None:
+            resolved_json = chain if isinstance(chain, str) else _json.dumps(chain)
+        else:
+            assert chain_json is not None  # checked above
+            resolved_json = chain_json
+
         action = {
             "tool": tool,
             "params": params if params is not None else {},
@@ -173,7 +192,7 @@ class SigningAgent:
             self._secret_key,
             _json.dumps(action),
             self._name,
-            chain_json,
+            resolved_json,
         )
 
     @staticmethod

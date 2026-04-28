@@ -200,3 +200,95 @@ def test_sign_bilateral_after_close(tmp_path):
 
     with pytest.raises(RuntimeError, match="closed"):
         server.sign_bilateral(agent_receipt)
+
+
+# ─── sign_authorized: chain= vs chain_json= API ───────────────────────────────
+
+
+def _make_chain_for(agent, tmp_path):
+    """Build a one-token delegation chain authorizing `agent`."""
+    import json as _json
+    import signet_auth
+
+    owner = SigningAgent.create("auth-owner", signet_dir=str(tmp_path))
+    scope = _json.dumps(
+        {"tools": ["*"], "targets": ["*"], "max_depth": 0}
+    )
+    token_json = signet_auth.sign_delegation(
+        owner._secret_key,
+        owner.name,
+        agent.public_key,
+        agent.name,
+        scope,
+    )
+    return owner, [_json.loads(token_json)]
+
+
+def test_sign_authorized_with_chain_list(tmp_path):
+    """chain= as list[dict] should work (preferred)."""
+    agent = SigningAgent.create("auth-bot-1", signet_dir=str(tmp_path))
+    _, chain = _make_chain_for(agent, tmp_path)
+
+    receipt_json = agent.sign_authorized(
+        "Bash",
+        params={"cmd": "ls"},
+        target="mcp://local",
+        chain=chain,
+    )
+    import json as _json
+    receipt = _json.loads(receipt_json)
+    assert receipt["v"] == 4
+    assert receipt["action"]["tool"] == "Bash"
+
+
+def test_sign_authorized_with_chain_string(tmp_path):
+    """chain= as JSON string should still work for backward compat."""
+    import json as _json
+    agent = SigningAgent.create("auth-bot-2", signet_dir=str(tmp_path))
+    _, chain = _make_chain_for(agent, tmp_path)
+
+    receipt_json = agent.sign_authorized(
+        "Bash",
+        chain=_json.dumps(chain),
+    )
+    assert _json.loads(receipt_json)["v"] == 4
+
+
+def test_sign_authorized_with_chain_json_legacy(tmp_path):
+    """chain_json= still works (deprecated)."""
+    import json as _json
+    agent = SigningAgent.create("auth-bot-3", signet_dir=str(tmp_path))
+    _, chain = _make_chain_for(agent, tmp_path)
+
+    receipt_json = agent.sign_authorized(
+        "Bash",
+        chain_json=_json.dumps(chain),
+    )
+    assert _json.loads(receipt_json)["v"] == 4
+
+
+def test_sign_authorized_neither_raises(tmp_path):
+    """Neither chain nor chain_json provided → TypeError."""
+    agent = SigningAgent.create("auth-bot-4", signet_dir=str(tmp_path))
+    with pytest.raises(TypeError, match="chain"):
+        agent.sign_authorized("Bash")
+
+
+def test_sign_authorized_both_raises(tmp_path):
+    """Both chain and chain_json provided → TypeError."""
+    import json as _json
+    agent = SigningAgent.create("auth-bot-5", signet_dir=str(tmp_path))
+    _, chain = _make_chain_for(agent, tmp_path)
+    chain_json = _json.dumps(chain)
+
+    with pytest.raises(TypeError, match="not both"):
+        agent.sign_authorized("Bash", chain=chain, chain_json=chain_json)
+
+
+def test_sign_authorized_after_close(tmp_path):
+    """Closed agent raises RuntimeError."""
+    agent = SigningAgent.create("auth-bot-6", signet_dir=str(tmp_path))
+    _, chain = _make_chain_for(agent, tmp_path)
+    agent.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        agent.sign_authorized("Bash", chain=chain)

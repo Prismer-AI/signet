@@ -134,3 +134,66 @@ def test_bilateral_auto_timestamp():
     # ts_response should be auto-generated (non-empty, RFC3339-ish)
     assert len(bilateral.ts_response) > 10
     assert "T" in bilateral.ts_response
+
+
+# ─── Outcome model (sign_bilateral_with_outcome) ──────────────────────────────
+
+
+def test_bilateral_default_has_no_outcome():
+    """Existing sign_bilateral path stays outcome-free for backward compat."""
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    bilateral = signet_auth.sign_bilateral(
+        server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+    )
+    assert bilateral.response.outcome is None
+
+
+def test_bilateral_with_outcome_executed():
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    bilateral = signet_auth.sign_bilateral_with_outcome(
+        server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+        outcome={"status": "executed"},
+    )
+    outcome = bilateral.response.outcome
+    assert outcome is not None
+    assert outcome["status"] == "executed"
+    assert outcome.get("reason") is None
+    assert outcome.get("error") is None
+    # Verifies cleanly.
+    assert signet_auth.verify_bilateral(bilateral, server_kp.public_key) is True
+
+
+def test_bilateral_with_outcome_rejected_with_reason():
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    bilateral = signet_auth.sign_bilateral_with_outcome(
+        server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+        outcome={"status": "rejected", "reason": "policy: deny destructive Bash"},
+    )
+    outcome = bilateral.response.outcome
+    assert outcome["status"] == "rejected"
+    assert outcome["reason"].startswith("policy")
+
+
+def test_bilateral_with_outcome_failed_with_error():
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    bilateral = signet_auth.sign_bilateral_with_outcome(
+        server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+        outcome={"status": "failed", "error": "connection refused"},
+    )
+    outcome = bilateral.response.outcome
+    assert outcome["status"] == "failed"
+    assert outcome["error"] == "connection refused"
+
+
+def test_bilateral_outcome_invalid_status_rejected():
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    with pytest.raises(ValueError, match="invalid outcome"):
+        signet_auth.sign_bilateral_with_outcome(
+            server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+            outcome={"status": "frobnicated"},
+        )

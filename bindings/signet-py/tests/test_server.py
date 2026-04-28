@@ -205,3 +205,78 @@ def test_verify_nonempty_trusted_keys_rejects_unknown_signer():
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
     assert "untrusted" in result.error
+
+
+# ─── Replay protection: NonceChecker ────────────────────────────────────────
+
+
+def test_in_memory_nonce_checker_detects_replay_in_verify_request():
+    """First request: ok. Second: replay detected."""
+    params, pubkey, _ = _signed_request()
+    checker = signet_auth.InMemoryNonceChecker()
+    opts = signet_auth.VerifyOptions(
+        trusted_keys=[pubkey], nonce_checker=checker,
+    )
+    r1 = signet_auth.verify_request(params, opts)
+    assert r1.ok is True
+    r2 = signet_auth.verify_request(params, opts)
+    assert r2.ok is False
+    assert "replay" in r2.error
+
+
+def test_in_memory_nonce_checker_distinct_nonces_pass():
+    """Distinct requests both succeed."""
+    p1, pk1, _ = _signed_request(tool="echo", args={"x": 1})
+    p2, pk2, _ = _signed_request(tool="echo", args={"x": 2})
+    checker = signet_auth.InMemoryNonceChecker()
+    opts1 = signet_auth.VerifyOptions(trusted_keys=[pk1], nonce_checker=checker)
+    opts2 = signet_auth.VerifyOptions(trusted_keys=[pk2], nonce_checker=checker)
+    assert signet_auth.verify_request(p1, opts1).ok is True
+    assert signet_auth.verify_request(p2, opts2).ok is True
+
+
+def test_file_nonce_checker_persists_across_instances(tmp_path):
+    """Two FileNonceChecker on the same path = restart simulation."""
+    params, pubkey, _ = _signed_request()
+    nonce_path = tmp_path / "nonces.json"
+
+    # First "process".
+    checker1 = signet_auth.FileNonceChecker(str(nonce_path))
+    opts1 = signet_auth.VerifyOptions(trusted_keys=[pubkey], nonce_checker=checker1)
+    assert signet_auth.verify_request(params, opts1).ok is True
+    assert nonce_path.exists()
+
+    # Second "process".
+    checker2 = signet_auth.FileNonceChecker(str(nonce_path))
+    opts2 = signet_auth.VerifyOptions(trusted_keys=[pubkey], nonce_checker=checker2)
+    result = signet_auth.verify_request(params, opts2)
+    assert result.ok is False
+    assert "replay" in result.error
+
+
+def test_no_nonce_checker_means_no_replay_protection():
+    """Without nonce_checker, a replayed receipt still passes (legacy behavior)."""
+    params, pubkey, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(trusted_keys=[pubkey])
+    assert signet_auth.verify_request(params, opts).ok is True
+    # Same params, no checker = still ok.
+    assert signet_auth.verify_request(params, opts).ok is True
+
+
+def test_in_memory_nonce_checker_is_replay_record_api():
+    """Direct API surface."""
+    c = signet_auth.InMemoryNonceChecker()
+    assert c.is_replay("rnd_x") is False
+    c.record("rnd_x")
+    assert c.is_replay("rnd_x") is True
+    assert c.is_replay("rnd_y") is False
+
+
+def test_file_nonce_checker_evicts_expired(tmp_path):
+    """0-second TTL expires immediately."""
+    import time
+    nonce_path = tmp_path / "nonces.json"
+    c = signet_auth.FileNonceChecker(str(nonce_path), ttl_secs=0)
+    c.record("rnd_old")
+    time.sleep(0.05)
+    assert c.is_replay("rnd_old") is False

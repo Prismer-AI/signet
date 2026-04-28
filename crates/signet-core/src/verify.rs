@@ -115,6 +115,64 @@ fn is_server_key_mismatch(error: &SignetError) -> bool {
 /// (secure-by-default: in-memory nonce replay protection enabled). To
 /// customize bilateral verification (audit replay, persistent nonce store,
 /// session/call_id binding), call `verify_bilateral_with_options()` directly.
+/// Forensic variant of `verify_any` for re-verifying historical receipts
+/// out of an audit log or evidence bundle. Signature is still required;
+/// the `exp` field is ignored on v1/v4 unilateral receipts and on the
+/// embedded agent receipt of v3 bilateral receipts. Time-window and
+/// nonce-replay checks on v3 are also disabled (this is forensic /
+/// audit replay, not live verification).
+///
+/// Use for audit re-verification (`signet audit --verify`,
+/// `signet audit --restore`). Do NOT use for live request validation.
+pub fn verify_any_allow_expired(
+    receipt_json: &str,
+    pubkey: &VerifyingKey,
+) -> Result<(), SignetError> {
+    let raw: serde_json::Value = serde_json::from_str(receipt_json)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid JSON: {e}")))?;
+    let version = raw.get("v").and_then(|v| v.as_u64()).ok_or_else(|| {
+        SignetError::InvalidReceipt("missing or non-integer 'v' field".to_string())
+    })?;
+    match version {
+        1 => {
+            let receipt: Receipt = serde_json::from_value(raw)
+                .map_err(|e| SignetError::InvalidReceipt(format!("v1 parse: {e}")))?;
+            verify_allow_expired(&receipt, pubkey)
+        }
+        2 => {
+            // v2 compound receipts have no exp field today, so the
+            // strict path is fine.
+            let receipt: CompoundReceipt = serde_json::from_value(raw)
+                .map_err(|e| SignetError::InvalidReceipt(format!("v2 parse: {e}")))?;
+            verify_compound(&receipt, pubkey)
+        }
+        3 => {
+            let receipt: BilateralReceipt = serde_json::from_value(raw)
+                .map_err(|e| SignetError::InvalidReceipt(format!("v3 parse: {e}")))?;
+            let opts = BilateralVerifyOptions::forensic();
+            match verify_bilateral_with_options(&receipt, pubkey, &opts) {
+                Err(error) if is_server_key_mismatch(&error) => Err(SignetError::SignatureMismatch),
+                other => other,
+            }
+        }
+        4 => {
+            let receipt: Receipt = serde_json::from_value(raw)
+                .map_err(|e| SignetError::InvalidReceipt(format!("v4 parse: {e}")))?;
+            let expected_pubkey = format!(
+                "ed25519:{}",
+                base64::engine::general_purpose::STANDARD.encode(pubkey.to_bytes())
+            );
+            if receipt.signer.pubkey != expected_pubkey {
+                return Err(SignetError::SignatureMismatch);
+            }
+            crate::verify_delegation::verify_v4_signature_only(&receipt)
+        }
+        _ => Err(SignetError::InvalidReceipt(format!(
+            "unsupported version: {version}"
+        ))),
+    }
+}
+
 pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     let raw: serde_json::Value = serde_json::from_str(receipt_json)
         .map_err(|e| SignetError::InvalidReceipt(format!("invalid JSON: {e}")))?;
@@ -1588,5 +1646,32 @@ mod tests {
         assert_eq!(opts.max_time_window_secs, 0);
         assert!(opts.nonce_checker.is_none());
         assert!(opts.allow_expired_agent_receipt);
+    }
+
+    #[test]
+    fn test_verify_any_allow_expired_v1_accepts_expired_receipt() {
+        use crate::identity::generate_keypair;
+        use crate::sign::sign_with_expiration;
+        use crate::test_helpers::test_action;
+
+        let (sk, vk) = generate_keypair();
+        let action = test_action();
+        // Expired one hour ago.
+        let exp = (chrono::Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let receipt = sign_with_expiration(&sk, &action, "agent", "owner", &exp).unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+
+        // Strict path rejects.
+        assert!(verify_any(&json, &vk).is_err());
+        // Forensic path accepts.
+        assert!(verify_any_allow_expired(&json, &vk).is_ok());
+
+        // Tampered receipt still fails forensic verify (signature integrity
+        // is enforced, only exp is bypassed).
+        let mut tampered: serde_json::Value = serde_json::from_str(&json).unwrap();
+        tampered["action"]["tool"] = serde_json::Value::String("evil".into());
+        let tampered_str = serde_json::to_string(&tampered).unwrap();
+        assert!(verify_any_allow_expired(&tampered_str, &vk).is_err());
     }
 }

@@ -852,9 +852,13 @@ pub fn verify_signatures_with_options(
                 continue;
             }
 
+            // Audit re-verification is forensic by definition (the records
+            // are historical artifacts). Disable time window, replay, and
+            // tolerate expired embedded agent receipts. Signature integrity
+            // is still required.
             let verify_options = crate::BilateralVerifyOptions {
                 trusted_agent_pubkey: trusted_agent.cloned(),
-                ..crate::BilateralVerifyOptions::insecure_no_replay_check()
+                ..crate::BilateralVerifyOptions::forensic()
             };
 
             match crate::verify_bilateral_with_options_detailed(
@@ -930,7 +934,10 @@ pub fn verify_signatures_with_options(
                 };
                 let receipt_str = serde_json::to_string(&materialized)
                     .map_err(|e| SignetError::CorruptedRecord(format!("serialize: {e}")))?;
-                match crate::verify_any(&receipt_str, &vk) {
+                // Forensic: tolerate expired exp on v1/v4 historical receipts
+                // (they were valid when signed; the audit log is a historical
+                // artifact). Signature is still required.
+                match crate::verify_any_allow_expired(&receipt_str, &vk) {
                     Ok(()) => valid += 1,
                     Err(_) => push_failure("signature mismatch".to_string(), &mut failures),
                 }

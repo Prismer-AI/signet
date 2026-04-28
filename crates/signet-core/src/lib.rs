@@ -43,9 +43,10 @@ pub use trust::{
     TrustKeyEntry, TrustKeyStatus,
 };
 pub use verify::{
-    verify, verify_allow_expired, verify_any, verify_bilateral, verify_bilateral_detailed,
-    verify_bilateral_with_options, verify_bilateral_with_options_detailed, verify_compound,
-    BilateralVerifyOptions, BilateralVerifyOutcome, InMemoryNonceChecker, NonceChecker,
+    verify, verify_allow_expired, verify_any, verify_any_allow_expired, verify_bilateral,
+    verify_bilateral_detailed, verify_bilateral_with_options,
+    verify_bilateral_with_options_detailed, verify_compound, BilateralVerifyOptions,
+    BilateralVerifyOutcome, InMemoryNonceChecker, NonceChecker,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use verify::FileNonceChecker;

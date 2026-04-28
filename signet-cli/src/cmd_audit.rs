@@ -635,7 +635,9 @@ fn verify_audit_receipt_against_bundle(
                         "line {lineno}: untrusted signer pubkey: {signer_pubkey}"
                     )
                 })?;
-            signet_core::verify_any(&receipt_str, &vk).map_err(|e| {
+            // Forensic: bundle re-verification tolerates expired `exp`
+            // on historical v1/v4 receipts.
+            signet_core::verify_any_allow_expired(&receipt_str, &vk).map_err(|e| {
                 anyhow::anyhow!("line {lineno}: signature verification failed: {e}")
             })
         }

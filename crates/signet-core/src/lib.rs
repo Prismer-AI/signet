@@ -30,9 +30,13 @@ pub use policy_load::{parse_policy_json, parse_policy_yaml, validate_policy};
 #[cfg(not(target_arch = "wasm32"))]
 pub use policy_load::load_policy;
 pub use receipt::{
-    Action, BilateralReceipt, CompoundReceipt, Receipt, Response, ServerInfo, Signer,
+    Action, BilateralReceipt, CompoundReceipt, Outcome, OutcomeStatus, Receipt, Response,
+    ServerInfo, Signer,
 };
-pub use sign::{sign, sign_bilateral, sign_compound, sign_with_expiration, sign_with_policy};
+pub use sign::{
+    sign, sign_bilateral, sign_bilateral_with_outcome, sign_compound, sign_with_expiration,
+    sign_with_policy,
+};
 pub use sign_delegation::{sign_authorized, sign_delegation};
 pub use trust::{
     parse_trust_bundle_json, parse_trust_bundle_yaml, validate_trust_bundle, TrustBundle,
@@ -43,6 +47,8 @@ pub use verify::{
     verify_bilateral_with_options, verify_bilateral_with_options_detailed, verify_compound,
     BilateralVerifyOptions, BilateralVerifyOutcome, InMemoryNonceChecker, NonceChecker,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use verify::FileNonceChecker;
 pub use verify_delegation::{
     verify_authorized, verify_chain as verify_delegation_chain, verify_delegation,
     AuthorizedVerifyOptions,

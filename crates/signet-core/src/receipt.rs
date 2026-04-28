@@ -50,9 +50,78 @@ pub struct Receipt {
     pub sig: String,
 }
 
+/// Final status of the action covered by a v2 compound or v3 bilateral
+/// receipt. Distinguishes "intent was signed" from "what happened next".
+///
+/// v1 (unilateral) receipts deliberately do NOT carry an outcome — they
+/// represent intent only. Only v2/v3 receipts can include an outcome,
+/// because both versions are produced AFTER execution and have a
+/// `Response` envelope to attach it to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeStatus {
+    /// Signature and policy verified; not yet executed.
+    /// (Reserved — typical v2/v3 receipts skip straight to executed/failed.)
+    Verified,
+    /// Policy or pre-execution check rejected the action.
+    /// `reason` SHOULD be set.
+    Rejected,
+    /// Action was executed and produced a response.
+    Executed,
+    /// Execution started but failed. `error` SHOULD be set.
+    Failed,
+}
+
+/// Optional outcome attached to a v2/v3 receipt response envelope.
+/// Inside the signature scope — tampering invalidates the receipt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Outcome {
+    pub status: OutcomeStatus,
+    /// Human-readable rejection reason (when status == rejected).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Error type or message (when status == failed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl Outcome {
+    pub fn executed() -> Self {
+        Self {
+            status: OutcomeStatus::Executed,
+            reason: None,
+            error: None,
+        }
+    }
+    pub fn rejected(reason: impl Into<String>) -> Self {
+        Self {
+            status: OutcomeStatus::Rejected,
+            reason: Some(reason.into()),
+            error: None,
+        }
+    }
+    pub fn failed(error: impl Into<String>) -> Self {
+        Self {
+            status: OutcomeStatus::Failed,
+            reason: None,
+            error: Some(error.into()),
+        }
+    }
+    pub fn verified() -> Self {
+        Self {
+            status: OutcomeStatus::Verified,
+            reason: None,
+            error: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub content_hash: String, // sha256(JCS(response_content))
+    /// Optional final outcome. Inside the signature scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

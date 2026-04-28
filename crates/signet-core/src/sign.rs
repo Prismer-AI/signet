@@ -235,6 +235,7 @@ pub fn sign_compound(
     let response_hash = Sha256::digest(canonical_response.as_bytes());
     let response = Response {
         content_hash: format!("sha256:{}", hex::encode(response_hash)),
+        outcome: None,
     };
 
     // 3. Build signer
@@ -280,11 +281,35 @@ pub fn sign_bilateral(
     server_name: &str,
     ts_response: &str,
 ) -> Result<BilateralReceipt, SignetError> {
+    sign_bilateral_with_outcome(
+        server_key,
+        agent_receipt,
+        response_content,
+        server_name,
+        ts_response,
+        None,
+    )
+}
+
+/// Same as `sign_bilateral` but additionally records a final outcome
+/// (executed / failed / rejected / verified) inside the signature scope.
+///
+/// Use this to upgrade a "signed intent" receipt into a "signed workflow
+/// result" — the typical enterprise pilot requirement.
+pub fn sign_bilateral_with_outcome(
+    server_key: &SigningKey,
+    agent_receipt: &Receipt,
+    response_content: &serde_json::Value,
+    server_name: &str,
+    ts_response: &str,
+    outcome: Option<crate::receipt::Outcome>,
+) -> Result<BilateralReceipt, SignetError> {
     // Hash response content
     let canonical_response = canonical::canonicalize(response_content)?;
     let response_hash = Sha256::digest(canonical_response.as_bytes());
     let response = Response {
         content_hash: format!("sha256:{}", hex::encode(response_hash)),
+        outcome,
     };
 
     // Server info
@@ -426,9 +451,103 @@ mod tests {
         assert!(bilateral.id.starts_with("rec_"));
         assert!(bilateral.sig.starts_with("ed25519:"));
         assert!(bilateral.response.content_hash.starts_with("sha256:"));
+        assert!(bilateral.response.outcome.is_none(), "default has no outcome");
         assert_eq!(bilateral.server.name, "github-mcp");
         assert_eq!(bilateral.agent_receipt.id, agent_receipt.id);
         assert_eq!(bilateral.agent_receipt.sig, agent_receipt.sig);
+    }
+
+    #[test]
+    fn test_sign_bilateral_with_outcome_executed() {
+        use crate::receipt::{Outcome, OutcomeStatus};
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+        let response = json!({"ok": true});
+
+        let ts = chrono::Utc::now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral = sign_bilateral_with_outcome(
+            &server_key,
+            &agent_receipt,
+            &response,
+            "srv",
+            &ts,
+            Some(Outcome::executed()),
+        )
+        .unwrap();
+
+        let outcome = bilateral.response.outcome.as_ref().expect("outcome");
+        assert_eq!(outcome.status, OutcomeStatus::Executed);
+        assert!(outcome.reason.is_none());
+        assert!(outcome.error.is_none());
+        // Verify outcome is inside signature scope. Use insecure_no_replay_check
+        // so the in-memory nonce checker (default) doesn't interfere with this
+        // assertion in test context.
+        let opts = crate::verify::BilateralVerifyOptions::insecure_no_replay_check();
+        let result = crate::verify::verify_bilateral_with_options(&bilateral, &server_vk, &opts);
+        assert!(result.is_ok(), "verify failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_sign_bilateral_with_outcome_failed_carries_error() {
+        use crate::receipt::{Outcome, OutcomeStatus};
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+
+        let bilateral = sign_bilateral_with_outcome(
+            &server_key,
+            &agent_receipt,
+            &json!({}),
+            "srv",
+            "2026-04-28T10:00:00.000Z",
+            Some(Outcome::failed("connection refused")),
+        )
+        .unwrap();
+
+        let outcome = bilateral.response.outcome.as_ref().expect("outcome");
+        assert_eq!(outcome.status, OutcomeStatus::Failed);
+        assert_eq!(outcome.error.as_deref(), Some("connection refused"));
+        assert!(outcome.reason.is_none());
+    }
+
+    #[test]
+    fn test_outcome_tampering_invalidates_signature() {
+        // The whole point of putting outcome inside the signed Response is
+        // to detect post-hoc rewrites. Verify that.
+        use crate::receipt::{Outcome, OutcomeStatus};
+        let (agent_key, _) = generate_keypair();
+        let (server_key, server_vk) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+
+        let ts = chrono::Utc::now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut bilateral = sign_bilateral_with_outcome(
+            &server_key,
+            &agent_receipt,
+            &json!({}),
+            "srv",
+            &ts,
+            Some(Outcome::failed("oops")),
+        )
+        .unwrap();
+
+        // Pretend an attacker rewrites failure → success.
+        bilateral.response.outcome = Some(Outcome {
+            status: OutcomeStatus::Executed,
+            reason: None,
+            error: None,
+        });
+
+        let opts = crate::verify::BilateralVerifyOptions::insecure_no_replay_check();
+        match crate::verify::verify_bilateral_with_options(&bilateral, &server_vk, &opts) {
+            Err(_) => {} // expected — sig over original outcome
+            Ok(_) => panic!("tampering with outcome must invalidate signature"),
+        }
     }
 
     #[test]

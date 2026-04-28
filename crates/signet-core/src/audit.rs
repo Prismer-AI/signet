@@ -158,7 +158,13 @@ pub fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
         })
 }
 
-fn compute_record_hash(
+/// Compute the canonical SHA-256 record hash for an audit record:
+/// `sha256(JCS({"prev_hash": ..., "receipt": ...}))`.
+///
+/// Exposed for verifiers (e.g. `signet audit --restore`) that need to
+/// re-derive the chain hash from a serialized record without depending
+/// on the on-disk audit log.
+pub fn compute_record_hash(
     receipt: &serde_json::Value,
     prev_hash: &str,
 ) -> Result<String, SignetError> {
@@ -848,7 +854,7 @@ pub fn verify_signatures_with_options(
 
             let verify_options = crate::BilateralVerifyOptions {
                 trusted_agent_pubkey: trusted_agent.cloned(),
-                ..Default::default()
+                ..crate::BilateralVerifyOptions::insecure_no_replay_check()
             };
 
             match crate::verify_bilateral_with_options_detailed(
@@ -1376,6 +1382,30 @@ mod tests {
         assert_eq!(result.valid, 1);
         assert!(result.warnings.is_empty());
         assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_audit_verify_signatures_v3_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign::sign(&agent_key, &action, "test-agent", "owner").unwrap();
+        let response = json!({"content": [{"type": "text", "text": "ok"}]});
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let bilateral =
+            sign::sign_bilateral(&server_key, &agent_receipt, &response, "test-server", &ts)
+                .unwrap();
+
+        append(dir.path(), &serde_json::to_value(&bilateral).unwrap()).unwrap();
+
+        let first = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+        let second = verify_signatures(dir.path(), &AuditFilter::default()).unwrap();
+
+        assert_eq!(first.valid, 1);
+        assert_eq!(second.valid, 1);
+        assert!(first.failures.is_empty());
+        assert!(second.failures.is_empty());
     }
 
     #[test]

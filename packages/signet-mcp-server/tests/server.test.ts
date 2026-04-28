@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { generateKeypair, sign, verifyBilateral, type SignetAction, type SignetReceipt } from '@signet-auth/core';
-import { verifyRequest, signResponse, NonceCache } from '../src/index.js';
+import { verifyRequest, signResponse, NonceCache, FileNonceCache } from '../src/index.js';
 
 describe('@signet-auth/mcp-server verifyRequest', () => {
   const kp = generateKeypair();
@@ -504,5 +507,74 @@ describe('@signet-auth/mcp-server signResponse', () => {
 
     assert.strictEqual(bilateral.v, 3);
     assert.strictEqual(bilateral.agent_receipt.signer.pubkey, agentReceipt.signer.pubkey);
+  });
+});
+
+describe('@signet-auth/mcp-server FileNonceCache', () => {
+  const kp = generateKeypair();
+
+  function signedRequest(tool: string, args: Record<string, unknown>) {
+    const action: SignetAction = {
+      tool, params: args, params_hash: '',
+      target: 'mcp://test-server', transport: 'stdio',
+    };
+    const r = sign(kp.secretKey, action, 'test-agent', '');
+    return {
+      method: 'tools/call',
+      params: { name: tool, arguments: args, _meta: { _signet: r } },
+    };
+  }
+
+  it('FileNonceCache.check is idempotent for new nonces', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'signet-fnc-'));
+    try {
+      const cache = new FileNonceCache(join(dir, 'n.json'), 60_000, 100);
+      assert.strictEqual(cache.check(kp.publicKey, 'rnd_a'), true);
+      assert.strictEqual(cache.check(kp.publicKey, 'rnd_b'), true);
+      // Replay of rnd_a → false.
+      assert.strictEqual(cache.check(kp.publicKey, 'rnd_a'), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('FileNonceCache survives instance recreation (restart simulation)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'signet-fnc-'));
+    try {
+      const path = join(dir, 'n.json');
+      const c1 = new FileNonceCache(path);
+      assert.strictEqual(c1.check(kp.publicKey, 'rnd_durable'), true);
+      // Re-instantiate on the same path → "restart".
+      const c2 = new FileNonceCache(path);
+      assert.strictEqual(c2.check(kp.publicKey, 'rnd_durable'), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('verifyRequest accepts FileNonceCache for replay protection', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'signet-fnc-'));
+    try {
+      const path = join(dir, 'n.json');
+      const cache = new FileNonceCache(path);
+      const req = signedRequest('echo', { x: 1 });
+
+      const r = req.params._meta._signet as SignetReceipt;
+      const r1 = verifyRequest(req, {
+        trustedKeys: [r.signer.pubkey],
+        nonceCache: cache,
+      });
+      assert.strictEqual(r1.ok, true, r1.error);
+
+      const r2 = verifyRequest(req, {
+        trustedKeys: [r.signer.pubkey],
+        nonceCache: cache,
+      });
+      assert.strictEqual(r2.ok, false);
+      assert(r2.error?.toLowerCase().includes('nonce') || r2.error?.toLowerCase().includes('replay'),
+        `Expected replay error, got: ${r2.error}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

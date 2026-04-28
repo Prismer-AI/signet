@@ -28,7 +28,8 @@
   ],
   "scripts": {
     "build": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/",
-    "test": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/ && node --test dist/tests/core.test.js"
+    "test": "npx tsc && rsync -a --exclude='.gitignore' wasm/ dist/wasm/ && node --test dist/tests/core.test.js dist/tests/interop.test.js",
+    "generate:interop-fixtures": "npm run build && node scripts/generate-interop-fixtures.mjs"
   },
   "publishConfig": {
     "access": "public"

@@ -163,6 +163,51 @@ pub fn wasm_sign_bilateral(
     serde_json::to_string(&bilateral).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Same as `wasm_sign_bilateral` but additionally records a final outcome
+/// (executed / failed / rejected / verified) inside the signature scope.
+///
+/// `outcome_json` is a JSON object with shape:
+///   { "status": "executed" | "failed" | "rejected" | "verified",
+///     "reason": ?string, "error": ?string }
+/// or the literal string "null" / empty string to omit the outcome.
+#[wasm_bindgen]
+pub fn wasm_sign_bilateral_with_outcome(
+    server_key_b64: &str,
+    agent_receipt_json: &str,
+    response_content_json: &str,
+    server_name: &str,
+    ts_response: &str,
+    outcome_json: &str,
+) -> Result<String, JsError> {
+    let signing_key = parse_signing_key(server_key_b64)?;
+
+    let agent_receipt: signet_core::Receipt = serde_json::from_str(agent_receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid agent receipt JSON: {e}")))?;
+
+    let response_content: serde_json::Value = serde_json::from_str(response_content_json)
+        .map_err(|e| JsError::new(&format!("invalid response content JSON: {e}")))?;
+
+    let outcome: Option<signet_core::Outcome> = if outcome_json.is_empty() || outcome_json == "null" {
+        None
+    } else {
+        Some(serde_json::from_str(outcome_json).map_err(|e| {
+            JsError::new(&format!("invalid outcome JSON (expected {{status, reason?, error?}}): {e}"))
+        })?)
+    };
+
+    let bilateral = signet_core::sign_bilateral_with_outcome(
+        &signing_key,
+        &agent_receipt,
+        &response_content,
+        server_name,
+        ts_response,
+        outcome,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&bilateral).map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[wasm_bindgen]
 pub fn wasm_verify_bilateral(receipt_json: &str, server_pubkey_b64: &str) -> Result<bool, JsError> {
     let pubkey_bytes = BASE64

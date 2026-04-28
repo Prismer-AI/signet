@@ -5,7 +5,10 @@ import {
   signDelegation, verifyDelegation, signAuthorized, verifyAuthorized,
   parsePolicyYaml, evaluatePolicy, signWithPolicy, computePolicyHash,
   signWithExpiration, verifyAllowExpired,
+  signCompound, signBilateral, verifyBilateral, verifyAny, contentHash,
+  verifyBilateralWithOptions, verifyBilateralWithOptionsDetailed,
   type Scope, type DelegationToken, type PolicyEvalResult,
+  type CompoundReceipt, type BilateralReceipt, type BilateralVerifyOutcome,
 } from '../src/index.js';
 
 describe('@signet-auth/core', () => {
@@ -420,5 +423,416 @@ describe('receipt expiration', () => {
     const receipt = signWithExpiration(kp.secretKey, testAction, 'agent', 'owner', past);
     receipt.action.tool = 'evil';
     assert.strictEqual(verifyAllowExpired(receipt, kp.publicKey), false);
+  });
+});
+
+// ─── v2 Compound receipts ────────────────────────────────────────────────────
+
+describe('v2 compound receipts', () => {
+  const action: SignetAction = {
+    tool: 'web_search',
+    params: { q: 'test' },
+    params_hash: '',
+    target: 'mcp://search',
+    transport: 'stdio',
+  };
+
+  it('signCompound produces v2 receipt with response', () => {
+    const kp = generateKeypair();
+    const ts = new Date().toISOString();
+    const receipt = signCompound(
+      kp.secretKey, action, { result: 'data' }, 'agent', 'owner', ts, ts,
+    );
+    assert.strictEqual(receipt.v, 2);
+    assert(receipt.id.startsWith('rec_'));
+    assert(receipt.sig.startsWith('ed25519:'));
+    assert.strictEqual(receipt.signer.name, 'agent');
+    assert.strictEqual(receipt.action.tool, 'web_search');
+    assert(receipt.response.content_hash.startsWith('sha256:'));
+  });
+
+  it('verifyAny accepts v2 compound receipts', () => {
+    const kp = generateKeypair();
+    const ts = new Date().toISOString();
+    const receipt = signCompound(
+      kp.secretKey, action, { result: 'data' }, 'agent', 'owner', ts, ts,
+    );
+    assert.strictEqual(verifyAny(JSON.stringify(receipt), kp.publicKey), true);
+  });
+
+  it('v2 tampered action invalidates signature', () => {
+    const kp = generateKeypair();
+    const ts = new Date().toISOString();
+    const receipt = signCompound(
+      kp.secretKey, action, { result: 'data' }, 'agent', 'owner', ts, ts,
+    );
+    receipt.action.tool = 'evil';
+    assert.strictEqual(verifyAny(JSON.stringify(receipt), kp.publicKey), false);
+  });
+
+  it('v2 tampered response invalidates signature', () => {
+    const kp = generateKeypair();
+    const ts = new Date().toISOString();
+    const receipt = signCompound(
+      kp.secretKey, action, { result: 'data' }, 'agent', 'owner', ts, ts,
+    );
+    receipt.response.content_hash = 'sha256:0000';
+    assert.strictEqual(verifyAny(JSON.stringify(receipt), kp.publicKey), false);
+  });
+});
+
+// ─── v3 Bilateral receipts ───────────────────────────────────────────────────
+
+describe('v3 bilateral receipts', () => {
+  const action: SignetAction = {
+    tool: 'create_issue',
+    params: { title: 'bug' },
+    params_hash: '',
+    target: 'mcp://github',
+    transport: 'stdio',
+  };
+
+  it('signBilateral wraps an agent receipt with a server signature', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const ts = new Date().toISOString();
+
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), { ok: true }, 'github-mcp', ts,
+    );
+    assert.strictEqual(bilateral.v, 3);
+    assert(bilateral.id.startsWith('rec_'));
+    assert(bilateral.sig.startsWith('ed25519:'));
+    assert.strictEqual(bilateral.server.name, 'github-mcp');
+    assert.strictEqual(bilateral.agent_receipt.signer.name, 'agent');
+    assert(bilateral.response.content_hash.startsWith('sha256:'));
+  });
+
+  it('verifyBilateral roundtrip succeeds', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.strictEqual(verifyBilateral(JSON.stringify(bilateral), serverKp.publicKey), true);
+  });
+
+  it('verifyBilateral rejects replay on repeated verification by default', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.strictEqual(verifyBilateral(JSON.stringify(bilateral), serverKp.publicKey), true);
+    assert.throws(() => verifyBilateral(JSON.stringify(bilateral), serverKp.publicKey), /replay/i);
+  });
+
+  it('verifyBilateral with wrong server key throws (key mismatch)', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const otherKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    // WASM throws on invalid receipt / key mismatch (not boolean false).
+    assert.throws(() => verifyBilateral(JSON.stringify(bilateral), otherKp.publicKey));
+  });
+
+  it('verifyBilateral rejects tampered response_hash', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    bilateral.response.content_hash = 'sha256:tampered';
+    // Tampered receipt: WASM returns false (signature mismatch is the result,
+    // not a structural error).
+    assert.strictEqual(verifyBilateral(JSON.stringify(bilateral), serverKp.publicKey), false);
+  });
+
+  it('verifyAny dispatches v3 to bilateral verification', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    // verifyAny returns boolean from WASM (true on success).
+    const ok = verifyAny(JSON.stringify(bilateral), serverKp.publicKey);
+    assert.strictEqual(ok, true);
+  });
+
+  it('verifyAny returns false for v3 wrong server key', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const wrongKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.strictEqual(verifyAny(JSON.stringify(bilateral), wrongKp.publicKey), false);
+  });
+
+  it('verifyAny rejects replay on repeated v3 verification by default', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.strictEqual(verifyAny(JSON.stringify(bilateral), serverKp.publicKey), true);
+    assert.throws(() => verifyAny(JSON.stringify(bilateral), serverKp.publicKey), /replay/i);
+  });
+
+  it('verifyBilateralWithOptions can anchor the agent identity to a trusted key', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const wrongAgentKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.strictEqual(verifyBilateralWithOptions(bilateral, serverKp.publicKey, {
+      trustedAgentPublicKey: agentKp.publicKey,
+    }), true);
+    assert.strictEqual(verifyBilateralWithOptions(bilateral, serverKp.publicKey, {
+      trustedAgentPublicKey: wrongAgentKp.publicKey,
+      disableReplayCheck: true,
+    }), false);
+  });
+
+  it('verifyBilateralWithOptionsDetailed reports trust outcome', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    const selfConsistent: BilateralVerifyOutcome = verifyBilateralWithOptionsDetailed(
+      bilateral,
+      serverKp.publicKey,
+      { disableReplayCheck: true },
+    );
+    assert.strictEqual(selfConsistent, 'agent_self_consistent');
+
+    const trusted: BilateralVerifyOutcome = verifyBilateralWithOptionsDetailed(
+      bilateral,
+      serverKp.publicKey,
+      {
+        trustedAgentPublicKey: agentKp.publicKey,
+        disableReplayCheck: true,
+      },
+    );
+    assert.strictEqual(trusted, 'agent_trusted');
+  });
+
+  it('verifyBilateralWithOptions rejects malformed trusted agent keys', () => {
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    assert.throws(
+      () => verifyBilateralWithOptions(bilateral, serverKp.publicKey, {
+        trustedAgentPublicKey: 'garbage',
+        disableReplayCheck: true,
+      }),
+      /invalid trusted agent public key/i,
+    );
+    assert.throws(
+      () => verifyBilateralWithOptionsDetailed(bilateral, serverKp.publicKey, {
+        trustedAgentPublicKey: 'garbage',
+        disableReplayCheck: true,
+      }),
+      /invalid trusted agent public key/i,
+    );
+  });
+
+  it('extensions field is unsigned: tampering does NOT invalidate signature', () => {
+    // This documents the trust boundary documented on UnsignedExtensions.
+    const agentKp = generateKeypair();
+    const serverKp = generateKeypair();
+    const agentReceipt = sign(agentKp.secretKey, action, 'agent', 'owner');
+    const bilateral = signBilateral(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv',
+      new Date().toISOString(),
+    );
+    // No extensions → still verifies.
+    assert.strictEqual(verifyBilateralWithOptions(bilateral, serverKp.publicKey, {
+      disableReplayCheck: true,
+    }), true);
+    // Add extensions after signing — signature still validates because
+    // extensions are explicitly outside the signature scope.
+    const tampered: BilateralReceipt = {
+      ...bilateral,
+      extensions: { trust_score: 100, attacker_added: 'metadata' },
+    };
+    assert.strictEqual(
+      verifyBilateralWithOptions(tampered, serverKp.publicKey, {
+        disableReplayCheck: true,
+      }), true,
+      'extensions added post-signing must not break verification',
+    );
+  });
+});
+
+// ─── verifyAny dispatch ──────────────────────────────────────────────────────
+
+describe('verifyAny dispatch', () => {
+  it('throws on unsupported version', () => {
+    const fake = JSON.stringify({ v: 99, id: 'rec_fake' });
+    const kp = generateKeypair();
+    // Structural error: WASM throws (not boolean false).
+    assert.throws(() => verifyAny(fake, kp.publicKey));
+  });
+
+  it('throws on malformed JSON', () => {
+    const kp = generateKeypair();
+    assert.throws(() => verifyAny('not json {', kp.publicKey));
+  });
+
+  it('throws on payload missing v field', () => {
+    const fake = JSON.stringify({ id: 'rec_x' });
+    const kp = generateKeypair();
+    assert.throws(() => verifyAny(fake, kp.publicKey));
+  });
+
+  it('strips ed25519: prefix from public key', () => {
+    const kp = generateKeypair();
+    const action: SignetAction = {
+      tool: 'x', params: {}, params_hash: '', target: '', transport: 'stdio',
+    };
+    const receipt = sign(kp.secretKey, action, 'a', 'o');
+    // Both with and without prefix should verify.
+    assert.strictEqual(verifyAny(JSON.stringify(receipt), kp.publicKey), true);
+    const prefixed = `ed25519:${kp.publicKey}`;
+    assert.strictEqual(verifyAny(JSON.stringify(receipt), prefixed), true);
+  });
+});
+
+// ─── contentHash ─────────────────────────────────────────────────────────────
+
+describe('contentHash', () => {
+  it('produces sha256: prefixed hash', () => {
+    const h = contentHash({ a: 1, b: 'hello' });
+    assert(h.startsWith('sha256:'));
+    // 64 hex chars after prefix
+    assert.strictEqual(h.length, 'sha256:'.length + 64);
+  });
+
+  it('is deterministic for identical input', () => {
+    const a = contentHash({ x: 1, y: 2 });
+    const b = contentHash({ x: 1, y: 2 });
+    assert.strictEqual(a, b);
+  });
+
+  it('is JCS-canonical: key order does not matter', () => {
+    const a = contentHash({ x: 1, y: 2 });
+    const b = contentHash({ y: 2, x: 1 });
+    assert.strictEqual(a, b, 'JCS canonicalization sorts keys');
+  });
+
+  it('different content produces different hash', () => {
+    const a = contentHash({ x: 1 });
+    const b = contentHash({ x: 2 });
+    assert.notStrictEqual(a, b);
+  });
+
+  it('handles primitives and arrays', () => {
+    assert(contentHash('hello').startsWith('sha256:'));
+    assert(contentHash(42).startsWith('sha256:'));
+    assert(contentHash([1, 2, 3]).startsWith('sha256:'));
+    assert(contentHash(null).startsWith('sha256:'));
+  });
+});
+
+// ─── signBilateralWithOutcome ──────────────────────────────────────────────
+
+describe('signBilateralWithOutcome', () => {
+  const action: SignetAction = {
+    tool: 'create_issue',
+    params: { title: 'bug' },
+    params_hash: '',
+    target: 'mcp://github',
+    transport: 'stdio',
+  };
+
+  function makeAgentReceipt() {
+    const kp = generateKeypair();
+    const r = sign(kp.secretKey, action, 'agent', 'owner');
+    return { agentKp: kp, agentReceipt: r };
+  }
+
+  it('records executed status inside the signature scope', async () => {
+    const { signBilateralWithOutcome } = await import('../src/index.js');
+    const { agentReceipt } = makeAgentReceipt();
+    const serverKp = generateKeypair();
+    const ts = new Date().toISOString();
+    const bilateral = signBilateralWithOutcome(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv', ts,
+      { status: 'executed' },
+    );
+    assert.strictEqual(bilateral.v, 3);
+    assert.deepStrictEqual(bilateral.response.outcome, { status: 'executed' });
+  });
+
+  it('records failed status with error', async () => {
+    const { signBilateralWithOutcome } = await import('../src/index.js');
+    const { agentReceipt } = makeAgentReceipt();
+    const serverKp = generateKeypair();
+    const ts = new Date().toISOString();
+    const bilateral = signBilateralWithOutcome(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv', ts,
+      { status: 'failed', error: 'timeout' },
+    );
+    assert.strictEqual(bilateral.response.outcome?.status, 'failed');
+    assert.strictEqual(bilateral.response.outcome?.error, 'timeout');
+  });
+
+  it('null outcome produces a receipt with no outcome field', async () => {
+    const { signBilateralWithOutcome } = await import('../src/index.js');
+    const { agentReceipt } = makeAgentReceipt();
+    const serverKp = generateKeypair();
+    const ts = new Date().toISOString();
+    const bilateral = signBilateralWithOutcome(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv', ts, null,
+    );
+    assert.strictEqual(bilateral.response.outcome, undefined);
+  });
+
+  it('outcome tampering invalidates the bilateral signature', async () => {
+    const { signBilateralWithOutcome } = await import('../src/index.js');
+    const { agentReceipt } = makeAgentReceipt();
+    const serverKp = generateKeypair();
+    const ts = new Date().toISOString();
+    const bilateral = signBilateralWithOutcome(
+      serverKp.secretKey, JSON.stringify(agentReceipt), {}, 'srv', ts,
+      { status: 'failed', error: 'oops' },
+    );
+    // Attacker rewrites failure → success.
+    bilateral.response.outcome = { status: 'executed' };
+    // Verification must reject. The WASM `verifyBilateral` returns
+    // `false` for signature mismatches on tampered payloads (vs throwing
+    // on structural / key-mismatch errors).
+    assert.strictEqual(
+      verifyBilateral(JSON.stringify(bilateral), serverKp.publicKey),
+      false,
+    );
   });
 });

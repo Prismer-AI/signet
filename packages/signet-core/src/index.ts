@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired, wasm_verify_bilateral_with_options } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_sign_bilateral_with_outcome, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired, wasm_verify_bilateral_with_options } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -36,6 +36,25 @@ export interface SignetReceipt {
   sig: string;
 }
 
+function normalizePublicKey(publicKey: string): string {
+  return publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
+}
+
+function parseAndNormalizePublicKey(publicKey: string, label: string): string {
+  const bare = normalizePublicKey(publicKey);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(bare) || bare.length % 4 !== 0) {
+    throw new Error(`invalid ${label}: invalid base64 public key`);
+  }
+  const decoded = Buffer.from(bare, 'base64');
+  if (decoded.toString('base64').replace(/=+$/u, '') !== bare.replace(/=+$/u, '')) {
+    throw new Error(`invalid ${label}: invalid base64 public key`);
+  }
+  if (decoded.length !== 32) {
+    throw new Error(`invalid ${label}: public key must be 32 bytes`);
+  }
+  return bare;
+}
+
 export function generateKeypair(): SignetKeypair {
   const json = wasm_generate_keypair();
   const result = JSON.parse(json);
@@ -57,12 +76,30 @@ export function sign(
 }
 
 export function verify(receipt: SignetReceipt, publicKey: string): boolean {
-  const bare = publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
+  const bare = normalizePublicKey(publicKey);
   return wasm_verify(JSON.stringify(receipt), bare);
+}
+
+/**
+ * Final outcome attached to a v2/v3 receipt response. Inside the
+ * signature scope — tampering invalidates the receipt.
+ *
+ * Status values:
+ * - `verified`: signature/policy verified; not yet executed (rare)
+ * - `rejected`: pre-execution check rejected the action
+ * - `executed`: action ran and produced a response
+ * - `failed`: execution started but failed
+ */
+export interface SignetOutcome {
+  status: 'verified' | 'rejected' | 'executed' | 'failed';
+  reason?: string;
+  error?: string;
 }
 
 export interface SignetResponse {
   content_hash: string;
+  /** Optional final outcome. Present when produced by sign_bilateral_with_outcome. */
+  outcome?: SignetOutcome;
 }
 
 export interface CompoundReceipt {
@@ -99,11 +136,39 @@ export function signCompound(
 }
 
 export function verifyAny(receiptJson: string, publicKey: string): boolean {
-  const bare = publicKey.startsWith('ed25519:') ? publicKey.slice('ed25519:'.length) : publicKey;
-  return wasm_verify_any(receiptJson, bare);
+  const bare = normalizePublicKey(publicKey);
+  try {
+    const ok = wasm_verify_any(receiptJson, bare);
+    if (ok) {
+      const bilateral = parseBilateralReceipt(receiptJson);
+      if (bilateral) {
+        enforceDefaultBilateralReplayProtection(bilateral);
+      }
+    }
+    return ok;
+  } catch (error) {
+    if (parseBilateralReceipt(receiptJson) && hasServerKeyMismatch(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export interface ServerInfo { pubkey: string; name: string; }
+
+/**
+ * Type for the unsigned `extensions` field on bilateral receipts.
+ *
+ * **WARNING: This field is NOT inside the Ed25519 signature scope.**
+ * Modifying `extensions` after signing does NOT invalidate the receipt's
+ * signature. Do NOT store security-relevant metadata here (agent identity,
+ * trust scores, authorization claims, policy decisions). Safe uses:
+ * debugging metadata, display hints, non-security context.
+ *
+ * See {@link https://github.com/Prismer-AI/signet/blob/main/docs/SECURITY.md SECURITY.md}
+ * "Security implications of `extensions`" for details.
+ */
+export type UnsignedExtensions = Record<string, unknown>;
 
 export interface BilateralReceipt {
   v: number;
@@ -114,7 +179,88 @@ export interface BilateralReceipt {
   ts_response: string;
   nonce: string;
   sig: string;
-  extensions?: unknown;
+  /**
+   * @warning NOT inside the signature scope. Tampering is undetectable.
+   * Use only for non-security metadata. See {@link UnsignedExtensions}.
+   */
+  extensions?: UnsignedExtensions;
+}
+
+export type BilateralVerifyOutcome = 'agent_self_consistent' | 'agent_trusted';
+
+const DEFAULT_BILATERAL_NONCE_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_BILATERAL_NONCE_MAX_ENTRIES = 10_000;
+const seenBilateralNonces = new Map<string, number>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isBilateralReceiptValue(value: unknown): value is BilateralReceipt {
+  return isRecord(value)
+    && value.v === 3
+    && typeof value.nonce === 'string'
+    && isRecord(value.agent_receipt)
+    && isRecord(value.server);
+}
+
+function parseBilateralReceipt(receiptJson: string): BilateralReceipt | null {
+  try {
+    const parsed = JSON.parse(receiptJson);
+    return isBilateralReceiptValue(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function sweepSeenBilateralNonces(now: number): void {
+  const cutoff = now - DEFAULT_BILATERAL_NONCE_TTL_MS;
+  for (const [nonce, ts] of seenBilateralNonces.entries()) {
+    if (ts <= cutoff) {
+      seenBilateralNonces.delete(nonce);
+    }
+  }
+  while (seenBilateralNonces.size > DEFAULT_BILATERAL_NONCE_MAX_ENTRIES) {
+    const oldest = seenBilateralNonces.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    seenBilateralNonces.delete(oldest);
+  }
+}
+
+function enforceDefaultBilateralReplayProtection(receipt: BilateralReceipt): void {
+  const now = Date.now();
+  sweepSeenBilateralNonces(now);
+  if (seenBilateralNonces.has(receipt.nonce)) {
+    throw new Error(`invalid receipt: bilateral nonce replay detected: ${receipt.nonce}`);
+  }
+  seenBilateralNonces.set(receipt.nonce, now);
+}
+
+function hasServerKeyMismatch(error: unknown): boolean {
+  return String(error).includes('caller-supplied server key does not match receipt.server.pubkey');
+}
+
+function trustedAgentMatches(
+  receipt: BilateralReceipt,
+  trustedAgentPublicKey?: string,
+): boolean {
+  if (trustedAgentPublicKey === undefined) {
+    return true;
+  }
+  return normalizePublicKey(receipt.agent_receipt.signer.pubkey)
+    === normalizePublicKey(trustedAgentPublicKey);
+}
+
+function serializeReceiptInput(receipt: unknown): { receiptJson: string; bilateral: BilateralReceipt | null } {
+  if (typeof receipt === 'string') {
+    return { receiptJson: receipt, bilateral: parseBilateralReceipt(receipt) };
+  }
+  return {
+    receiptJson: JSON.stringify(receipt),
+    bilateral: isBilateralReceiptValue(receipt) ? receipt : null,
+  };
 }
 
 export function signBilateral(
@@ -129,11 +275,38 @@ export function signBilateral(
   return JSON.parse(json) as BilateralReceipt;
 }
 
+/**
+ * Same as `signBilateral` but records a final outcome inside the
+ * signature scope. Use when the execution boundary knows whether the
+ * action `executed`, `failed`, was `rejected` (e.g. by policy) or only
+ * `verified` (signature/policy ok, not yet executed).
+ */
+export function signBilateralWithOutcome(
+  serverKey: string,
+  agentReceiptJson: string,
+  responseContent: unknown,
+  serverName: string,
+  tsResponse: string,
+  outcome: SignetOutcome | null,
+): BilateralReceipt {
+  const outcomeJson = outcome === null ? '' : JSON.stringify(outcome);
+  const json = wasm_sign_bilateral_with_outcome(
+    serverKey, agentReceiptJson,
+    JSON.stringify(responseContent), serverName, tsResponse, outcomeJson,
+  );
+  return JSON.parse(json) as BilateralReceipt;
+}
+
 export function verifyBilateral(receiptJson: string, serverPublicKey: string): boolean {
-  const bare = serverPublicKey.startsWith('ed25519:')
-    ? serverPublicKey.slice('ed25519:'.length)
-    : serverPublicKey;
-  return wasm_verify_bilateral(receiptJson, bare);
+  const bare = normalizePublicKey(serverPublicKey);
+  const ok = wasm_verify_bilateral(receiptJson, bare);
+  if (ok) {
+    const bilateral = parseBilateralReceipt(receiptJson);
+    if (bilateral) {
+      enforceDefaultBilateralReplayProtection(bilateral);
+    }
+  }
+  return ok;
 }
 
 export function contentHash(value: unknown): string {
@@ -320,6 +493,42 @@ export interface BilateralVerifyOptionsTS {
   expectedSession?: string;
   expectedCallId?: string;
   maxTimeWindowSecs?: number;
+  trustedAgentPublicKey?: string;
+  disableReplayCheck?: boolean;
+}
+
+function verifyBilateralWithOptionsInternal(
+  receipt: unknown,
+  serverPublicKey: string,
+  options: BilateralVerifyOptionsTS,
+): BilateralVerifyOutcome | false {
+  const { receiptJson, bilateral } = serializeReceiptInput(receipt);
+  const bareKey = normalizePublicKey(serverPublicKey);
+  const normalizedTrustedAgentPublicKey = options.trustedAgentPublicKey === undefined
+    ? undefined
+    : parseAndNormalizePublicKey(options.trustedAgentPublicKey, 'trusted agent public key');
+  const ok = wasm_verify_bilateral_with_options(
+    receiptJson,
+    bareKey,
+    options.expectedSession ?? '',
+    options.expectedCallId ?? '',
+    BigInt(options.maxTimeWindowSecs ?? 300),
+  );
+  if (!ok) {
+    return false;
+  }
+  if (bilateral === null) {
+    throw new Error('invalid bilateral receipt: expected v3 receipt payload');
+  }
+  if (!trustedAgentMatches(bilateral, normalizedTrustedAgentPublicKey)) {
+    return false;
+  }
+  if (!options.disableReplayCheck) {
+    enforceDefaultBilateralReplayProtection(bilateral);
+  }
+  return options.trustedAgentPublicKey === undefined
+    ? 'agent_self_consistent'
+    : 'agent_trusted';
 }
 
 export function verifyBilateralWithOptions(
@@ -327,16 +536,19 @@ export function verifyBilateralWithOptions(
   serverPublicKey: string,
   options: BilateralVerifyOptionsTS = {},
 ): boolean {
-  const bareKey = serverPublicKey.startsWith('ed25519:')
-    ? serverPublicKey.slice('ed25519:'.length)
-    : serverPublicKey;
-  return wasm_verify_bilateral_with_options(
-    JSON.stringify(receipt),
-    bareKey,
-    options.expectedSession ?? '',
-    options.expectedCallId ?? '',
-    BigInt(options.maxTimeWindowSecs ?? 300),
-  );
+  return verifyBilateralWithOptionsInternal(receipt, serverPublicKey, options) !== false;
+}
+
+export function verifyBilateralWithOptionsDetailed(
+  receipt: unknown,
+  serverPublicKey: string,
+  options: BilateralVerifyOptionsTS = {},
+): BilateralVerifyOutcome {
+  const outcome = verifyBilateralWithOptionsInternal(receipt, serverPublicKey, options);
+  if (outcome === false) {
+    throw new Error('bilateral verification failed');
+  }
+  return outcome;
 }
 
 // ─── Expiration functions ───────────────────────────────────────────────────

@@ -1,5 +1,14 @@
 import { verify, contentHash, type SignetReceipt } from '@signet-auth/core';
-import type { NonceCache } from './nonce-cache.js';
+
+/**
+ * Minimal structural type accepted by `verifyRequest` for replay
+ * protection. Both `NonceCache` (in-memory) and `FileNonceCache`
+ * (durable, single-host) satisfy this shape, as can any custom
+ * Redis / SQL backend.
+ */
+export interface NonceCacheLike {
+  check(signerPubkey: string, nonce: string): boolean;
+}
 
 export interface TrustKeyEntry {
   id: string;
@@ -39,8 +48,10 @@ export interface VerifyOptions {
   maxAge?: number;
   /** If set, receipt.action.target must match this value. */
   expectedTarget?: string;
-  /** If set, rejects duplicate nonces (replay protection). */
-  nonceCache?: NonceCache;
+  /** If set, rejects duplicate nonces (replay protection). Accepts
+   *  any object with `check(signerPubkey, nonce) => boolean`, e.g.
+   *  `NonceCache` (in-memory) or `FileNonceCache` (persistent). */
+  nonceCache?: NonceCacheLike;
   /** Clock skew tolerance in seconds for future-dated receipts. Default: 30. */
   clockSkewTolerance?: number;
 }

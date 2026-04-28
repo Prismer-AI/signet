@@ -21,12 +21,25 @@ class NonceChecker(Protocol):
     Compatible with `signet_core::verify::NonceChecker` (Rust trait).
     Implementations: `InMemoryNonceChecker`, `FileNonceChecker`,
     plus any custom Redis / SQL backend you care to write.
+
+    `check_and_record` is the atomic primitive used by `verify_request`.
+    Backends with multi-thread or multi-process exposure MUST implement
+    it under a single critical section (lock, transaction). The default
+    fallback in `verify_request` (is_replay → record) is racy.
     """
 
     def is_replay(self, nonce: str) -> bool:
         ...
 
     def record(self, nonce: str) -> None:
+        ...
+
+    def check_and_record(self, nonce: str) -> bool:
+        """Atomically check + record a nonce.
+
+        Returns True if the nonce was fresh (and is now recorded), or
+        False if it had been seen before.
+        """
         ...
 
 
@@ -60,6 +73,19 @@ class InMemoryNonceChecker:
                 oldest = min(self._seen, key=self._seen.get)  # type: ignore[arg-type]
                 self._seen.pop(oldest, None)
             self._seen[nonce] = now
+
+    def check_and_record(self, nonce: str) -> bool:
+        """Atomic under self._lock — single critical section."""
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            self._sweep(now)
+            if nonce in self._seen:
+                return False
+            if len(self._seen) >= self._max:
+                oldest = min(self._seen, key=self._seen.get)  # type: ignore[arg-type]
+                self._seen.pop(oldest, None)
+            self._seen[nonce] = now
+            return True
 
 
 class FileNonceChecker:
@@ -129,6 +155,28 @@ class FileNonceChecker:
             except OSError:
                 # Best-effort persistence; matches Rust FileNonceChecker.
                 pass
+
+    def check_and_record(self, nonce: str) -> bool:
+        """Atomic check+record under the process-local lock. NOTE: this
+        is process-local only — for cross-process atomicity use the
+        Rust `FileNonceChecker` (which holds a `fs2` advisory file lock)
+        or a Redis/SQL backend."""
+        now = datetime.now(timezone.utc)
+        with self._lock:
+            state = self._read()
+            cutoff = now - self._ttl
+            state = {k: v for k, v in state.items() if v > cutoff}
+            if nonce in state:
+                return False
+            if len(state) >= self._max:
+                oldest_key = min(state, key=state.get)  # type: ignore[arg-type]
+                state.pop(oldest_key, None)
+            state[nonce] = now
+            try:
+                self._write(state)
+            except OSError:
+                pass
+            return True
 
 
 @dataclass
@@ -320,18 +368,23 @@ def verify_request(
         if signed != actual:
             return ServerVerifyResult(ok=False, error="params mismatch: signed params differ from request arguments")
 
-    # 10. Replay protection (optional). Check + record under the same
-    # nonce; for a NonceChecker that supports atomic check-and-set, this
-    # is fine. The InMemoryNonceChecker / FileNonceChecker shipped here
-    # acquire a lock for read+write, so a tight check-then-record window
-    # is safe against single-process concurrent requests.
+    # 10. Replay protection (optional). Use the atomic check_and_record
+    # primitive so two concurrent verifications of the same nonce cannot
+    # both observe it as fresh. Fall back to is_replay → record for
+    # legacy backends that don't implement check_and_record.
     if opts.nonce_checker is not None:
         nonce = receipt.nonce
         if not isinstance(nonce, str) or not nonce:
             return ServerVerifyResult(ok=False, error="missing nonce")
-        if opts.nonce_checker.is_replay(nonce):
-            return ServerVerifyResult(ok=False, error="replay detected")
-        opts.nonce_checker.record(nonce)
+        check_and_record = getattr(opts.nonce_checker, "check_and_record", None)
+        if callable(check_and_record):
+            if not check_and_record(nonce):
+                return ServerVerifyResult(ok=False, error="replay detected")
+        else:
+            # Legacy non-atomic path (warning: race-prone under concurrency).
+            if opts.nonce_checker.is_replay(nonce):
+                return ServerVerifyResult(ok=False, error="replay detected")
+            opts.nonce_checker.record(nonce)
 
     # All checks pass
     return ServerVerifyResult(

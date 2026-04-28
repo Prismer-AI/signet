@@ -396,6 +396,7 @@ pub fn wasm_verify_bilateral_with_options(
             Some(expected_call_id.to_string())
         },
         nonce_checker: None, // WASM has no persistent state for nonce checking
+        allow_expired_agent_receipt: false,
     };
 
     match signet_core::verify_bilateral_with_options(&receipt, &server_vk, &opts) {

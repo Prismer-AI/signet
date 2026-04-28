@@ -174,6 +174,30 @@ pub trait NonceChecker: Send + Sync {
     fn is_replay(&self, nonce: &str) -> bool;
     /// Record that this nonce has been seen.
     fn record(&self, nonce: &str);
+
+    /// Atomically check and record a nonce.
+    ///
+    /// Returns `Ok(())` if the nonce was fresh (and is now recorded), or
+    /// `Err(())` if it had been seen before.
+    ///
+    /// **Concurrency contract:** the check and the record MUST happen
+    /// under a single critical section so two concurrent verifiers cannot
+    /// both observe the nonce as fresh and both record it (TOCTOU).
+    /// `verify_bilateral_with_options_detailed` uses this method.
+    ///
+    /// The default implementation calls `is_replay` then `record` in
+    /// sequence. **This is racy** — backends with multi-thread or
+    /// multi-process exposure SHOULD override with a locked atomic
+    /// operation. The shipped `InMemoryNonceChecker`, `FileNonceChecker`,
+    /// and `ProcessGlobalNonceChecker` all do.
+    #[allow(clippy::result_unit_err)]
+    fn check_and_record(&self, nonce: &str) -> Result<(), ()> {
+        if self.is_replay(nonce) {
+            return Err(());
+        }
+        self.record(nonce);
+        Ok(())
+    }
 }
 
 static DEFAULT_BILATERAL_NONCE_CHECKER: OnceLock<InMemoryNonceChecker> = OnceLock::new();
@@ -193,6 +217,10 @@ impl NonceChecker for ProcessGlobalNonceChecker {
 
     fn record(&self, nonce: &str) {
         Self::shared().record(nonce);
+    }
+
+    fn check_and_record(&self, nonce: &str) -> Result<(), ()> {
+        Self::shared().check_and_record(nonce)
     }
 }
 
@@ -238,6 +266,25 @@ impl NonceChecker for InMemoryNonceChecker {
             }
         }
         map.insert(nonce.to_string(), chrono::Utc::now());
+    }
+
+    /// Atomic check-and-record: holds the mutex across the read and the
+    /// write so two concurrent threads cannot both observe a nonce as
+    /// fresh.
+    fn check_and_record(&self, nonce: &str) -> Result<(), ()> {
+        let mut map = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        let cutoff = chrono::Utc::now() - self.ttl;
+        map.retain(|_, ts| *ts > cutoff);
+        if map.contains_key(nonce) {
+            return Err(());
+        }
+        if map.len() >= self.max_entries {
+            if let Some(oldest_key) = map.iter().min_by_key(|(_, ts)| *ts).map(|(k, _)| k.clone()) {
+                map.remove(&oldest_key);
+            }
+        }
+        map.insert(nonce.to_string(), chrono::Utc::now());
+        Ok(())
     }
 }
 
@@ -425,6 +472,30 @@ impl NonceChecker for FileNonceChecker {
             let _ = self.write_state(&map);
         })
     }
+
+    /// Atomic check-and-record under a single advisory file lock. Two
+    /// processes pointing at the same nonce file cannot both observe a
+    /// nonce as fresh.
+    fn check_and_record(&self, nonce: &str) -> Result<(), ()> {
+        self.with_lock(|| {
+            let mut map = self.read_state();
+            let cutoff = chrono::Utc::now() - self.ttl;
+            map.retain(|_, ts| *ts > cutoff);
+            if map.contains_key(nonce) {
+                return Err(());
+            }
+            if map.len() >= self.max_entries {
+                if let Some(oldest_key) =
+                    map.iter().min_by_key(|(_, ts)| *ts).map(|(k, _)| k.clone())
+                {
+                    map.remove(&oldest_key);
+                }
+            }
+            map.insert(nonce.to_string(), chrono::Utc::now());
+            let _ = self.write_state(&map);
+            Ok(())
+        })
+    }
 }
 
 /// Options for bilateral receipt verification.
@@ -451,6 +522,12 @@ pub struct BilateralVerifyOptions {
     /// is checked — not the agent nonce (which is already verified by the
     /// unilateral path).
     pub nonce_checker: Option<Box<dyn NonceChecker>>,
+
+    /// When true, the embedded agent receipt's `exp` field is ignored
+    /// (signature still required). Use for forensic / audit re-verification
+    /// of historical receipts whose original validity window has lapsed.
+    /// Default: false (strict).
+    pub allow_expired_agent_receipt: bool,
 }
 
 impl Default for BilateralVerifyOptions {
@@ -471,6 +548,7 @@ impl Default for BilateralVerifyOptions {
             expected_session: None,
             expected_call_id: None,
             nonce_checker: Some(Box::new(ProcessGlobalNonceChecker)),
+            allow_expired_agent_receipt: false,
         }
     }
 }
@@ -485,6 +563,21 @@ impl BilateralVerifyOptions {
             expected_session: None,
             expected_call_id: None,
             nonce_checker: None,
+            allow_expired_agent_receipt: false,
+        }
+    }
+
+    /// Forensic re-verification preset for `signet audit --restore` and
+    /// similar audit-replay paths: signature still required, but neither
+    /// time window nor nonce replay nor `exp` are enforced.
+    pub fn forensic() -> Self {
+        Self {
+            max_time_window_secs: 0,
+            trusted_agent_pubkey: None,
+            expected_session: None,
+            expected_call_id: None,
+            nonce_checker: None,
+            allow_expired_agent_receipt: true,
         }
     }
 
@@ -616,7 +709,12 @@ pub fn verify_bilateral_with_options_detailed(
         }
     }
 
-    verify(&receipt.agent_receipt, &agent_vk)?;
+    if options.allow_expired_agent_receipt {
+        // Forensic mode: signature still required, but exp ignored.
+        verify_allow_expired(&receipt.agent_receipt, &agent_vk)?;
+    } else {
+        verify(&receipt.agent_receipt, &agent_vk)?;
+    }
 
     // 3. Verify timestamp ordering: agent signed before server responded
     let agent_ts = chrono::DateTime::parse_from_rfc3339(&receipt.agent_receipt.ts)
@@ -678,14 +776,15 @@ pub fn verify_bilateral_with_options_detailed(
 
     // 7. Check server nonce replay (Issue #1)
     // Only check the server nonce — agent nonce is already verified by verify().
+    // Atomic check-and-record so two concurrent verifiers cannot both
+    // observe the same nonce as fresh.
     if let Some(ref checker) = options.nonce_checker {
-        if checker.is_replay(&receipt.nonce) {
+        if checker.check_and_record(&receipt.nonce).is_err() {
             return Err(SignetError::InvalidReceipt(format!(
                 "bilateral nonce replay detected: {}",
                 receipt.nonce
             )));
         }
-        checker.record(&receipt.nonce);
     }
 
     Ok(if options.trusted_agent_pubkey.is_some() {
@@ -1412,5 +1511,82 @@ mod tests {
         let state = checker.read_state();
         assert_eq!(state.len(), 3, "must cap at max_entries");
         assert!(state.contains_key("nonce-4"));
+    }
+
+    // ─── Atomic check_and_record (TOCTOU defense) ─────────────────────────
+
+    #[test]
+    fn test_in_memory_check_and_record_atomic() {
+        let checker = InMemoryNonceChecker::new(100, 3600);
+        // First call: fresh nonce → Ok and records.
+        assert!(checker.check_and_record("alpha").is_ok());
+        // Second call on the same nonce: Err (replay).
+        assert!(checker.check_and_record("alpha").is_err());
+        // Distinct nonce still passes.
+        assert!(checker.check_and_record("beta").is_ok());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_file_nonce_checker_check_and_record_atomic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nonces.json");
+        let checker = FileNonceChecker::new(&path, 100, 3600);
+        assert!(checker.check_and_record("durable").is_ok());
+        assert!(checker.check_and_record("durable").is_err());
+    }
+
+    /// Stress test that check_and_record under contention never lets two
+    /// threads both observe the same nonce as fresh.
+    #[test]
+    fn test_in_memory_check_and_record_concurrent() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let checker = Arc::new(InMemoryNonceChecker::new(10_000, 3600));
+        // 8 threads each try the same 200 nonces in random-ish order.
+        // For each nonce, exactly ONE thread must succeed; the other
+        // 7 must observe replay.
+        let mut handles = Vec::new();
+        let success_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let attempt_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for thread_id in 0..8 {
+            let c = Arc::clone(&checker);
+            let s = Arc::clone(&success_counter);
+            let a = Arc::clone(&attempt_counter);
+            handles.push(thread::spawn(move || {
+                for i in 0..200 {
+                    let nonce = format!("n-{}", (thread_id + i) % 200);
+                    a.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if c.check_and_record(&nonce).is_ok() {
+                        s.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let attempts = attempt_counter.load(std::sync::atomic::Ordering::Relaxed);
+        let successes = success_counter.load(std::sync::atomic::Ordering::Relaxed);
+        // 200 unique nonces → exactly 200 successes, regardless of how
+        // the 1600 attempts were distributed.
+        assert_eq!(attempts, 1600);
+        assert_eq!(
+            successes, 200,
+            "under contention, exactly 200 unique nonces must each succeed once"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_bilateral_forensic_options_skip_window_replay_and_exp() {
+        // Forensic preset disables time window, replay, and exp checks
+        // — required for `signet audit --restore` to re-verify historical
+        // bilateral receipts whose embedded agent has expired.
+        let opts = BilateralVerifyOptions::forensic();
+        assert_eq!(opts.max_time_window_secs, 0);
+        assert!(opts.nonce_checker.is_none());
+        assert!(opts.allow_expired_agent_receipt);
     }
 }

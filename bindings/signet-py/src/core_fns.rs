@@ -157,6 +157,7 @@ fn build_bilateral_options(
         expected_session,
         expected_call_id,
         nonce_checker,
+        allow_expired_agent_receipt: false,
     })
 }
 

@@ -653,15 +653,10 @@ fn verify_audit_receipt_against_bundle(
                         "line {lineno}: untrusted server pubkey: {server_pubkey}"
                     )
                 })?;
-            // Bilateral receipts inside an audit log are historical artifacts;
-            // disable nonce-replay protection (we expect to re-verify them
-            // arbitrarily many times) and disable the time window (logs are
-            // forensic).
-            let opts = signet_core::BilateralVerifyOptions {
-                max_time_window_secs: 0,
-                nonce_checker: None,
-                ..signet_core::BilateralVerifyOptions::insecure_no_replay_check()
-            };
+            // Forensic re-verification: signature still required, but
+            // disable time window, nonce replay, AND embedded-agent `exp`
+            // checks (historical receipts may have expired).
+            let opts = signet_core::BilateralVerifyOptions::forensic();
             let bilateral: signet_core::BilateralReceipt =
                 serde_json::from_str(&receipt_str).map_err(|e| {
                     anyhow::anyhow!("line {lineno}: parse v3: {e}")

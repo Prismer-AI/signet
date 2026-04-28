@@ -50,6 +50,7 @@ tmp/
 scripts/*
 !scripts/version-sync.mjs
 !scripts/check-openclaw-contract.mjs
+!scripts/demo-pilot.sh
 .codex
 
 # Recordings (large binaries)

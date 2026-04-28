@@ -47,6 +47,14 @@
   <sub><a href="https://www.youtube.com/watch?v=7OiGV_pyZas">▶ Walkthrough: signing, audit log, and verification</a> · <a href="https://www.youtube.com/watch?v=PQnZC594qZc">▶ Demo: execution boundary &amp; MCP integration</a></sub>
 </p>
 
+<p align="center">
+  <img src="demo-pilot.gif" alt="Pilot demo: identity → sign → bundle → restore on auditor's machine" width="820">
+</p>
+
+<p align="center">
+  <sub>Single-host pilot flow: sign every tool call, hand off a signed evidence bundle, re-verify on any machine — no signet keystore required. <a href="docs/guides/team-deployment.md">Pilot runbook →</a></sub>
+</p>
+
 **Your AI agent just placed an order, deleted a row, sent an email, merged a PR. Can you prove exactly what it did — to an auditor, a customer, or yourself after an incident?**
 
 Signet is the **independent verification layer** for agent actions. Every tool call gets a signed receipt that anyone can verify offline, without trusting the platform that hosted the agent or the vendor that stored the logs.

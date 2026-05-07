@@ -7,23 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-11
+
+> **Note:** This release consolidates changes accumulated since v0.9.0 that were not
+> individually documented in the v0.9.1, v0.9.2, and v0.9.3 maintenance releases.
+> Sub-sections below cover the full delta from v0.9.0 through v0.10.0, with the
+> Pilot Readiness suite (outcome binding, durable nonce store, server-key
+> persistence, forensic bundle/restore) being the v0.10.0-specific work.
+
 ### Added
 
-#### Receipt Expiration (Issue #3)
-- **signet-core**: `exp: Option<String>` field on `Receipt`, inside the signature scope
-- **signet-core**: `sign_with_expiration()` — sign with an RFC 3339 expiration time
-- **signet-core**: `verify()` rejects expired receipts by default
-- **signet-core**: `verify_allow_expired()` — audit/forensic override, skips expiration check
-- **signet-auth (Python)**: `sign_with_expiration()`, `verify_allow_expired()` bindings
-- **@signet-auth/core**: `signWithExpiration()`, `verifyAllowExpired()` TypeScript functions
-
-#### Bilateral Verify Options (Issues #1, #4)
-- **signet-core**: `expected_session` and `expected_call_id` on `BilateralVerifyOptions` — cross-check agent receipt fields against expected values (Issue #4)
-- **signet-core**: `NonceChecker` trait + `InMemoryNonceChecker` — replay protection for bilateral server nonces (Issue #1)
-- **signet-auth (Python)**: `verify_bilateral_with_options()` with session/call_id/nonce params
-- **@signet-auth/core**: `verifyBilateralWithOptions()` TypeScript function
-
-#### Pilot Readiness (2026-04-28 doc tracking #1, #2, #3, #4, #5)
+#### Pilot Readiness — v0.10.0 headline (2026-04-28)
 
 - **signet-cli**: `signet proxy --server-key <name>` — persistent server signing identity for stable bilateral pubkey across restarts. Trust bundles can now anchor a stable server identity. Refuses identical agent/server keys.
 - **signet-core**: `FileNonceChecker` — JSON file-backed nonce store, survives process restarts. Single-host pilot grade. Native-only (gated off WASM).
@@ -31,33 +25,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **signet-cli**: `signet audit --bundle <dir>` — portable signed evidence bundle (records.jsonl + manifest.json + hash-summary.txt + optional trust-bundle.json) for off-host audit handoff.
 - **signet-cli**: `signet audit --restore <dir>` — re-verify a previously produced evidence bundle on any machine, no signet keystore required.
 - **signet-cli**: `signet audit --include-trust-bundle <path>` — embed a trust bundle snapshot in the evidence package.
+- **signet-cli**: `signet audit --verify` and `signet audit --restore` apply forensic verification (replay-tolerant nonce semantics).
 - **signet-core**: `Outcome` + `OutcomeStatus` (`verified`/`rejected`/`executed`/`failed`) attached to v2/v3 `Response`. Inside the signature scope; tampering is detectable.
 - **signet-core**: `sign_bilateral_with_outcome()` — produce a v3 receipt that records both intent and final result.
+- **signet-core**: Atomic `check_and_record` + `BilateralVerifyOptions::forensic()` — replay-tolerant verification mode for audit/forensic flows.
+- **signet-core**: `audit::extract_policy_decision()` and `audit::compute_record_hash()` exposed for forensic restoration.
 - **signet-auth (Python)**: `sign_bilateral_with_outcome()` binding accepting `outcome={"status": ..., "reason"?, "error"?}` dict.
-- **@signet-auth/core**: `SignetOutcome` type + `SignetResponse.outcome?` field.
+- **@signet-auth/core**: `signBilateralWithOutcome()` + `SignetOutcome` type + `SignetResponse.outcome?` field + `FileNonceCache` adapter.
 - **docs/guides/team-deployment.md**: end-to-end pilot deployment runbook.
+- **packages/signet-openclaw-plugin** v0.1.0/0.1.1: OpenClaw gateway plugin — `before_tool_call`/`after_tool_call` hooks, hash-chained audit, Ed25519 + policy + XChaCha20-Poly1305 encryption, daily contract-drift CI against `openclaw/openclaw` main, fail-closed by default.
 
-#### Documentation
+#### Receipt Expiration (Issue #3, included in v0.9.1)
+
+- **signet-core**: `exp: Option<String>` field on `Receipt`, inside the signature scope
+- **signet-core**: `sign_with_expiration()` — sign with an RFC 3339 expiration time
+- **signet-core**: `verify()` rejects expired receipts by default
+- **signet-core**: `verify_allow_expired()` — audit/forensic override, skips expiration check
+- **signet-auth (Python)**: `sign_with_expiration()`, `verify_allow_expired()` bindings
+- **@signet-auth/core**: `signWithExpiration()`, `verifyAllowExpired()` TypeScript functions
+
+#### Bilateral Verify Options (Issues #1, #4, included in v0.9.1)
+
+- **signet-core**: `expected_session` and `expected_call_id` on `BilateralVerifyOptions` — cross-check agent receipt fields against expected values (Issue #4)
+- **signet-core**: `NonceChecker` trait + `InMemoryNonceChecker` — replay protection for bilateral server nonces (Issue #1)
+- **signet-auth (Python)**: `verify_bilateral_with_options()` with session/call_id/nonce params
+- **@signet-auth/core**: `verifyBilateralWithOptions()` TypeScript function
+
+#### CLI hardening (included in v0.9.1)
+
+- **signet-cli**: `signet explore` command for interactive receipt browsing
+- **signet-cli**: `--ttl` flag on delegation token creation for short-lived authority
+- **signet-cli**: Quickstart CLI (`signet quickstart`) for one-command first-run experience
+- **signet-auth (Python)**: `@signet_sign` decorator API — wrap any function with audit signing
+- **signet-auth (Python)**: `ComplianceBackend` Protocol adapter (LangChain RFC #35691)
+
+#### Trust Bundle + Encrypted Audit (included in v0.9.2)
+
+- **signet-core**: Trust bundle format + verify enhancements — distribute and pin trusted signer keys
+- **signet-core**: Encrypted audit envelope (XChaCha20-Poly1305) — logs are both verifiable and confidential
+- **signet-cli**: `signet trust` subcommand + `signet audit --trust-bundle <path>` + `signet audit --decrypt-params`
+- **signet-cli**: Hardened proxy execution + trusted-key audit flows
+- **signet-auth (Python)**: Trust bundle support and audit decryption in `signet_auth`
+- **@signet-auth/mcp-server**: Trust bundle option for `VerifyOptions`
+- **@signet-auth/node** (v0.10.0 wrapper): bounded timeout + `passphraseFromEnv` option, CLI compat probe, env-var/temp-file fallback for argv length limits, session forwarding
+
+#### Documentation (mostly v0.9.1)
+
 - **SECURITY.md**: Signed vs unsigned field tables for v1/v3/v4 receipts, extensions attack scenario warning (Issue #2)
 - **COMPLIANCE.md**: Compliance mapping for SOC 2, ISO 27001, EU AI Act, DORA, NIST AI RMF
+- **README.md**: Independent verification layer positioning, hero reframed around independent proof ownership
+- **docs/RFC-0002-composite-receipt.md**: Composite receipt for cross-layer verification
+- **CONTRIBUTING.md**: Repository contributor guide
 - **Codespaces**: `.devcontainer/` + `demo.sh` for one-click browser experience
 
 #### Ecosystem
+
 - **signet-action**: GitHub Action for CI audit chain verification
 - **dify-plugin-signet**: Dify plugin (local-first, no API key)
+- **examples/langchain-compliance**: Signed audit receipts for LangChain compliance flows
 - 5 example repos: LangChain, CrewAI, MCP, OpenAI Agents, Pydantic AI
 
 ### Changed
-- `sign_inner()` extracted — `sign()`, `sign_with_expiration()`, `sign_with_policy()` are now thin wrappers (net -46 lines)
-- `verify_receipt_signature()` extracted — `verify()` and `verify_allow_expired()` share signature logic
-- CLI exit codes unified: 1=verification/policy fail, 2=approval needed, 3=general error
-- `cmd_policy.rs` uses `bail!()` instead of `process::exit()` — flows through main.rs error handler
+
 - **`verify_any()` now auto-dispatches v3 bilateral receipts** to `verify_bilateral()` instead of returning an error. Previous behavior required calling `verify_bilateral()` explicitly.
 - **`BilateralVerifyOptions::default()` now enables in-memory nonce replay protection by default** (10k entries, 1 hour TTL). Previous default had `nonce_checker: None`. Use `BilateralVerifyOptions::insecure_no_replay_check()` for audit/forensic replay where nonce reuse is expected. **This is a behavioral break for code that calls `verify_bilateral()` repeatedly on the same receipt.**
 - **Python `SigningAgent.sign_authorized()` now accepts `chain=` (typed `list[dict] | str`)** as the preferred parameter. `chain_json=` is kept for backward compatibility.
 - **TypeScript `BilateralReceipt.extensions`** is now typed as `UnsignedExtensions` (alias for `Record<string, unknown>`) with prominent JSDoc warning that the field is outside the signature scope. Previously typed as `unknown` with no warning.
+- `sign_inner()` extracted — `sign()`, `sign_with_expiration()`, `sign_with_policy()` are now thin wrappers (net -46 lines)
+- `verify_receipt_signature()` extracted — `verify()` and `verify_allow_expired()` share signature logic
+- CLI exit codes unified: 1 = verification/policy fail, 2 = approval needed, 3 = general error
+- `cmd_policy.rs` uses `bail!()` instead of `process::exit()` — flows through main.rs error handler
+- **CI**: release pipeline gates `@signet-auth/node` publish on `smoke-cargo` (cargo install + sign/verify roundtrip) so the npm wrapper is never published before the matching `signet` CLI is installable from crates.io.
+
+### Fixed
+
+- **signet-cli**: hardened proxy execution and added trusted-key audit flows
+- **signet-core**: tightened trust verification and audit integrity surfaces
+- **@signet-auth/mcp-tools**: restored canonical `Prismer-AI` casing in `mcpName`
+- **packages/signet-openclaw-plugin**: receipts bound to OpenClaw `session`/`runId`/`toolCallId`; preserves `target` verbatim; readiness un-latches on every sign failure; system-failure detection widened to cover `EACCES` + non-JSON CLI output
 
 ### Tests
+
 - 537 total tests (269 Rust core + 40 CLI + 195 Python + 33 TypeScript)
 
 ## [0.9.0] - 2026-04-13
@@ -340,6 +388,7 @@ audit::append(&dir, &receipt_json)?;  // was: audit::append(&dir, &receipt)
 - WASM binding (wasm-bindgen) for Node.js
 - End-to-end MCP agent example (agent + echo server)
 
+[0.10.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.10.0
 [0.9.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.9.0
 [0.8.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.8.0
 [0.7.0]: https://github.com/Prismer-AI/signet/releases/tag/v0.7.0

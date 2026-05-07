@@ -57,7 +57,7 @@
     }
   },
   "dependencies": {
-    "@signet-auth/node": "^0.9.3"
+    "@signet-auth/node": "^0.10.0"
   },
   "devDependencies": {
     "@types/node": "^22",

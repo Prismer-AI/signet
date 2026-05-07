@@ -299,7 +299,7 @@ function classifySelfCheckError(
     return {
       ok: false,
       reason: `signet identity '${cfg.keyName}' not found`,
-      remediation: `Run \`signet identity create ${cfg.keyName}\` to create the signing identity.`,
+      remediation: `Run \`signet identity generate --name ${cfg.keyName}\` to create the signing identity.`,
     };
   }
   if (/decryption|passphrase/i.test(haystack)) {

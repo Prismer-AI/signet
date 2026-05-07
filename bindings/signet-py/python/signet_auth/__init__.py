@@ -1,7 +1,12 @@
 """signet-auth: Cryptographic action receipts for AI agents."""
 
 from signet_auth.agent import SigningAgent
-from signet_auth.decorator import signet_sign, sign, init as init_signer
+from signet_auth.decorator import (
+    signet_sign,
+    signet_tool,
+    protect_tool,
+    init as init_signer,
+)
 from signet_auth.server import (
     FileNonceChecker,
     InMemoryNonceChecker,
@@ -96,6 +101,10 @@ __all__ = [
     "__version__",
     # High-level class
     "SigningAgent",
+    "signet_tool",
+    "protect_tool",
+    "signet_sign",
+    "init_signer",
     # Exceptions
     "SignetError",
     "InvalidKeyError",

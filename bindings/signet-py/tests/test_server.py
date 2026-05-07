@@ -25,6 +25,8 @@ def test_verify_valid_signature():
     opts = signet_auth.VerifyOptions(trusted_keys=[pubkey])
     result = signet_auth.verify_request(params, opts)
     assert result.ok is True
+    assert result.has_receipt is True
+    assert result.trusted is True
     assert result.signer_name == "test-agent"
     assert result.signer_pubkey == pubkey
 
@@ -34,6 +36,8 @@ def test_verify_untrusted_key():
     opts = signet_auth.VerifyOptions(trusted_keys=["ed25519:AAAA"])
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
+    assert result.has_receipt is True
+    assert result.trusted is False
     assert "untrusted" in result.error
 
 
@@ -60,6 +64,8 @@ def test_verify_trust_bundle_active_agent():
     )
     result = signet_auth.verify_request(params, opts)
     assert result.ok is True
+    assert result.has_receipt is True
+    assert result.trusted is True
 
 
 def test_verify_trust_bundle_disabled_agent_rejected():
@@ -86,6 +92,8 @@ def test_verify_trust_bundle_disabled_agent_rejected():
     )
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
+    assert result.has_receipt is True
+    assert result.trusted is False
     assert "untrusted" in result.error
 
 
@@ -95,6 +103,8 @@ def test_verify_invalid_signature():
     opts = signet_auth.VerifyOptions(trusted_keys=[pubkey])
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
+    assert result.has_receipt is True
+    assert result.trusted is False
     assert "invalid signature" in result.error
 
 
@@ -103,6 +113,8 @@ def test_verify_unsigned_required():
     opts = signet_auth.VerifyOptions(require_signature=True)
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
+    assert result.has_receipt is False
+    assert result.trusted is False
     assert result.error == "unsigned request"
 
 
@@ -111,6 +123,8 @@ def test_verify_unsigned_optional():
     opts = signet_auth.VerifyOptions(require_signature=False)
     result = signet_auth.verify_request(params, opts)
     assert result.ok is True
+    assert result.has_receipt is False
+    assert result.trusted is False
 
 
 def test_verify_returns_signer_info():
@@ -118,6 +132,8 @@ def test_verify_returns_signer_info():
     opts = signet_auth.VerifyOptions(trusted_keys=[pubkey])
     result = signet_auth.verify_request(params, opts)
     assert result.ok is True
+    assert result.has_receipt is True
+    assert result.trusted is True
     assert result.signer_name == "test-agent"
     assert result.signer_pubkey == pubkey
 
@@ -146,6 +162,8 @@ def test_verify_malformed_signet():
     opts = signet_auth.VerifyOptions()
     result = signet_auth.verify_request(params, opts)
     assert result.ok is False
+    assert result.has_receipt is True
+    assert result.trusted is False
     assert "malformed" in result.error
 
 
@@ -196,6 +214,8 @@ def test_verify_empty_trusted_keys_accepts_any_valid_signer():
     opts = signet_auth.VerifyOptions(trusted_keys=[])
     result = signet_auth.verify_request(params, opts)
     assert result.ok is True
+    assert result.has_receipt is True
+    assert result.trusted is False
 
 
 def test_verify_nonempty_trusted_keys_rejects_unknown_signer():
@@ -251,6 +271,8 @@ def test_file_nonce_checker_persists_across_instances(tmp_path):
     opts2 = signet_auth.VerifyOptions(trusted_keys=[pubkey], nonce_checker=checker2)
     result = signet_auth.verify_request(params, opts2)
     assert result.ok is False
+    assert result.has_receipt is True
+    assert result.trusted is False
     assert "replay" in result.error
 
 
@@ -261,6 +283,16 @@ def test_no_nonce_checker_means_no_replay_protection():
     assert signet_auth.verify_request(params, opts).ok is True
     # Same params, no checker = still ok.
     assert signet_auth.verify_request(params, opts).ok is True
+
+
+def test_verify_signature_only_mode_marks_request_untrusted():
+    params, pubkey, _ = _signed_request()
+    opts = signet_auth.VerifyOptions(trusted_keys=[])
+    result = signet_auth.verify_request(params, opts)
+    assert result.ok is True
+    assert result.has_receipt is True
+    assert result.trusted is False
+    assert result.signer_pubkey == pubkey
 
 
 def test_in_memory_nonce_checker_is_replay_record_api():

@@ -194,7 +194,7 @@ fn sign_bilateral(
 
 /// Sign a bilateral (v3) receipt with an explicit outcome status.
 ///
-/// `outcome` is a dict shaped like `{"status": "executed" | "failed" | "rejected" | "verified",
+/// `outcome` is a dict shaped like `{"status": "executed" | "failed" | "rejected" | "requires_approval" | "verified",
 /// "reason": Optional[str], "error": Optional[str]}` or None to omit. The
 /// outcome is included in the signature scope — tampering invalidates the
 /// receipt.
@@ -224,7 +224,7 @@ fn sign_bilateral_with_outcome(
             let v: serde_json::Value = pythonize::depythonize(&obj)?;
             Some(serde_json::from_value(v).map_err(|e| {
                 pyo3::exceptions::PyValueError::new_err(format!(
-                    "invalid outcome dict (expected {{status: 'executed'|'failed'|'rejected'|'verified', reason?, error?}}): {e}"
+                    "invalid outcome dict (expected {{status: 'executed'|'failed'|'rejected'|'requires_approval'|'verified', reason?, error?}}): {e}"
                 ))
             })?)
         }

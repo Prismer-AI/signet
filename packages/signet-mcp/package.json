@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "description": "Client-side MCP signing transport for Signet receipts",
   "keywords": [
     "mcp",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@signet-auth/core": "^0.9.3"
+    "@signet-auth/core": "^0.10.0"
   },
   "devDependencies": {
     "@types/node": "^22",

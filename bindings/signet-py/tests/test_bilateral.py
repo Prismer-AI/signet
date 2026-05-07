@@ -189,6 +189,19 @@ def test_bilateral_with_outcome_failed_with_error():
     assert outcome["error"] == "connection refused"
 
 
+def test_bilateral_with_outcome_requires_approval_with_reason():
+    _, agent_receipt = _make_agent_receipt()
+    server_kp = signet_auth.generate_keypair()
+    bilateral = signet_auth.sign_bilateral_with_outcome(
+        server_kp.secret_key, agent_receipt, RESPONSE_CONTENT, "srv",
+        outcome={"status": "requires_approval", "reason": "human approval required"},
+    )
+    outcome = bilateral.response.outcome
+    assert outcome["status"] == "requires_approval"
+    assert outcome["reason"] == "human approval required"
+    assert outcome.get("error") is None
+
+
 def test_bilateral_outcome_invalid_status_rejected():
     _, agent_receipt = _make_agent_receipt()
     server_kp = signet_auth.generate_keypair()

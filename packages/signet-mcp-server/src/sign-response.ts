@@ -1,4 +1,11 @@
-import { contentHash, signBilateral, verify, type BilateralReceipt, type SignetReceipt } from '@signet-auth/core';
+import {
+  contentHash,
+  signBilateralWithOutcome,
+  verify,
+  type BilateralReceipt,
+  type SignetOutcome,
+  type SignetReceipt,
+} from '@signet-auth/core';
 import { getVerifiedRequestContext } from './verify-request.js';
 
 export interface SignResponseOptions {
@@ -6,6 +13,24 @@ export interface SignResponseOptions {
   serverName: string;
   /** Explicit opt-in for signature-only deployments without trust anchors. */
   allowUntrustedRequest?: boolean;
+  /** Override the default inferred outcome. */
+  outcome?: SignetOutcome;
+}
+
+function inferOutcome(response: unknown): SignetOutcome {
+  if (response && typeof response === 'object' && 'isError' in response && (response as { isError?: unknown }).isError === true) {
+    const content = (response as { content?: unknown }).content;
+    const text = Array.isArray(content)
+      ? content
+          .find((item): item is { text?: unknown } => typeof item === 'object' && item !== null)
+          ?.text
+      : undefined;
+    return {
+      status: 'failed',
+      error: typeof text === 'string' ? text : 'MCP tool result returned isError=true',
+    };
+  }
+  return { status: 'executed' };
 }
 
 export function signResponse(
@@ -55,11 +80,12 @@ export function signResponse(
 
   // 5. Sign bilateral: server key + agent receipt JSON + response content + server name + timestamp
   const tsResponse = new Date().toISOString();
-  return signBilateral(
+  return signBilateralWithOutcome(
     options.serverKey,
     JSON.stringify(signet),
     response,
     options.serverName,
     tsResponse,
+    options.outcome ?? inferOutcome(response),
   );
 }

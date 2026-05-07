@@ -17,7 +17,7 @@
       },
       "signerOwner": {
         "type": "string",
-        "description": "DEPRECATED no-op. The receipt's signer.owner is taken from the identity metadata stored by `signet identity create --owner <name>`. Kept in the schema so configs from earlier scaffolds still validate; remove it from your config when convenient."
+        "description": "DEPRECATED no-op. The receipt's signer.owner is taken from the identity metadata stored by `signet identity generate --name <name> --owner <owner>`. Kept in the schema so configs from earlier scaffolds still validate; remove it from your config when convenient."
       },
       "policy": {
         "type": "string",

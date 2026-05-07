@@ -1,6 +1,6 @@
 {
   "name": "@signet-auth/mcp-tools",
-  "version": "0.9.3",
+  "version": "0.10.0",
   "description": "Standalone MCP server exposing Signet signing, verification, and content hash tools",
   "keywords": [
     "mcp",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@signet-auth/core": "^0.9.3"
+    "@signet-auth/core": "^0.10.0"
   },
   "devDependencies": {
     "@types/node": "^22",

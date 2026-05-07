@@ -219,6 +219,8 @@ class ServerVerifyResult:
     signer_name: str | None = None
     signer_pubkey: str | None = None
     error: str | None = None
+    has_receipt: bool = False
+    trusted: bool = False
 
 
 def _active_agent_keys_from_bundle(bundle: dict[str, Any]) -> list[str]:
@@ -280,21 +282,41 @@ def verify_request(
     # 2. Check presence
     if signet is None:
         if opts.require_signature:
-            return ServerVerifyResult(ok=False, error="unsigned request")
-        return ServerVerifyResult(ok=True)
+            return ServerVerifyResult(
+                ok=False,
+                error="unsigned request",
+                has_receipt=False,
+                trusted=False,
+            )
+        return ServerVerifyResult(ok=True, has_receipt=False, trusted=False)
 
     # 3. Validate receipt shape
     if not isinstance(signet, dict):
-        return ServerVerifyResult(ok=False, error="malformed receipt")
+        return ServerVerifyResult(
+            ok=False,
+            error="malformed receipt",
+            has_receipt=True,
+            trusted=False,
+        )
     for key in ("v", "sig", "action", "signer", "ts"):
         if key not in signet:
-            return ServerVerifyResult(ok=False, error="malformed receipt")
+            return ServerVerifyResult(
+                ok=False,
+                error="malformed receipt",
+                has_receipt=True,
+                trusted=False,
+            )
 
     # 4. Verify signature
     try:
         receipt = Receipt.from_json(json.dumps(signet))
     except Exception:
-        return ServerVerifyResult(ok=False, error="malformed receipt")
+        return ServerVerifyResult(
+            ok=False,
+            error="malformed receipt",
+            has_receipt=True,
+            trusted=False,
+        )
 
     prefixed_pubkey = receipt.signer.pubkey
     bare_pubkey = (
@@ -306,10 +328,20 @@ def verify_request(
     try:
         valid = verify(receipt, bare_pubkey)
     except Exception:
-        return ServerVerifyResult(ok=False, error="invalid signature")
+        return ServerVerifyResult(
+            ok=False,
+            error="invalid signature",
+            has_receipt=True,
+            trusted=False,
+        )
 
     if not valid:
-        return ServerVerifyResult(ok=False, error="invalid signature")
+        return ServerVerifyResult(
+            ok=False,
+            error="invalid signature",
+            has_receipt=True,
+            trusted=False,
+        )
 
     # 5. Check trusted keys — empty trusted_keys and no trust_bundle means
     # "verify signature only, don't check trust". Supplying a trust bundle
@@ -321,34 +353,61 @@ def verify_request(
             else []
         )
     except ValueError:
-        return ServerVerifyResult(ok=False, error="invalid trust bundle")
+        return ServerVerifyResult(
+            ok=False,
+            error="invalid trust bundle",
+            has_receipt=True,
+            trusted=False,
+        )
 
     trusted_keys = list(dict.fromkeys([*opts.trusted_keys, *trust_bundle_keys]))
     trust_anchors_provided = bool(opts.trusted_keys) or opts.trust_bundle is not None
 
     if trust_anchors_provided:
         if prefixed_pubkey not in trusted_keys:
-            return ServerVerifyResult(ok=False, error=f"untrusted signer: {prefixed_pubkey}")
+            return ServerVerifyResult(
+                ok=False,
+                error=f"untrusted signer: {prefixed_pubkey}",
+                has_receipt=True,
+                trusted=False,
+            )
 
     # 6. Check freshness
     try:
         receipt_time = datetime.fromisoformat(receipt.ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError, TypeError):
-        return ServerVerifyResult(ok=False, error="invalid receipt timestamp")
+        return ServerVerifyResult(
+            ok=False,
+            error="invalid receipt timestamp",
+            has_receipt=True,
+            trusted=False,
+        )
 
     now = datetime.now(timezone.utc)
     age = (now - receipt_time).total_seconds()
 
     if age > opts.max_age:
-        return ServerVerifyResult(ok=False, error="receipt too old")
+        return ServerVerifyResult(
+            ok=False,
+            error="receipt too old",
+            has_receipt=True,
+            trusted=False,
+        )
     if age < -CLOCK_SKEW_TOLERANCE_SECONDS:
-        return ServerVerifyResult(ok=False, error="receipt from future")
+        return ServerVerifyResult(
+            ok=False,
+            error="receipt from future",
+            has_receipt=True,
+            trusted=False,
+        )
 
     # 7. Check target
     if opts.expected_target and receipt.action.target != opts.expected_target:
         return ServerVerifyResult(
             ok=False,
             error=f"target mismatch: expected {opts.expected_target}, got {receipt.action.target}",
+            has_receipt=True,
+            trusted=False,
         )
 
     # 8. Anti-staple: tool name
@@ -357,6 +416,8 @@ def verify_request(
         return ServerVerifyResult(
             ok=False,
             error=f'tool mismatch: receipt signed for "{receipt.action.tool}", request is for "{request_tool}"',
+            has_receipt=True,
+            trusted=False,
         )
 
     # 9. Anti-staple: params (use raw signet dict to avoid Rust type coercion)
@@ -366,7 +427,12 @@ def verify_request(
         signed = json.dumps(receipt_params, separators=(",", ":")) if receipt_params is not None else "null"
         actual = json.dumps(request_args, separators=(",", ":")) if request_args is not None else "null"
         if signed != actual:
-            return ServerVerifyResult(ok=False, error="params mismatch: signed params differ from request arguments")
+            return ServerVerifyResult(
+                ok=False,
+                error="params mismatch: signed params differ from request arguments",
+                has_receipt=True,
+                trusted=False,
+            )
 
     # 10. Replay protection (optional). Use the atomic check_and_record
     # primitive so two concurrent verifications of the same nonce cannot
@@ -375,15 +441,30 @@ def verify_request(
     if opts.nonce_checker is not None:
         nonce = receipt.nonce
         if not isinstance(nonce, str) or not nonce:
-            return ServerVerifyResult(ok=False, error="missing nonce")
+            return ServerVerifyResult(
+                ok=False,
+                error="missing nonce",
+                has_receipt=True,
+                trusted=False,
+            )
         check_and_record = getattr(opts.nonce_checker, "check_and_record", None)
         if callable(check_and_record):
             if not check_and_record(nonce):
-                return ServerVerifyResult(ok=False, error="replay detected")
+                return ServerVerifyResult(
+                    ok=False,
+                    error="replay detected",
+                    has_receipt=True,
+                    trusted=False,
+                )
         else:
             # Legacy non-atomic path (warning: race-prone under concurrency).
             if opts.nonce_checker.is_replay(nonce):
-                return ServerVerifyResult(ok=False, error="replay detected")
+                return ServerVerifyResult(
+                    ok=False,
+                    error="replay detected",
+                    has_receipt=True,
+                    trusted=False,
+                )
             opts.nonce_checker.record(nonce)
 
     # All checks pass
@@ -391,4 +472,6 @@ def verify_request(
         ok=True,
         signer_name=receipt.signer.name,
         signer_pubkey=prefixed_pubkey,
+        has_receipt=True,
+        trusted=trust_anchors_provided,
     )

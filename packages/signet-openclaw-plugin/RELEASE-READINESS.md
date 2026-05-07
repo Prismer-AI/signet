@@ -41,7 +41,7 @@ Signet on this list = first-mover position in the audit-and-compliance category 
    - Suggested top section:
      ```
      ## 60-second quickstart
-     1. signet identity create openclaw-agent
+     1. signet identity generate --name openclaw-agent
      2. openclaw plugins install @signet-auth/openclaw-plugin
      3. add { "signet": { "config": {} } } to ~/.openclaw/config.json
      4. openclaw start

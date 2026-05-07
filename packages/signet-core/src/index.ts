@@ -87,11 +87,12 @@ export function verify(receipt: SignetReceipt, publicKey: string): boolean {
  * Status values:
  * - `verified`: signature/policy verified; not yet executed (rare)
  * - `rejected`: pre-execution check rejected the action
+ * - `requires_approval`: action paused pending a human or external approval step
  * - `executed`: action ran and produced a response
  * - `failed`: execution started but failed
  */
 export interface SignetOutcome {
-  status: 'verified' | 'rejected' | 'executed' | 'failed';
+  status: 'verified' | 'rejected' | 'requires_approval' | 'executed' | 'failed';
   reason?: string;
   error?: string;
 }

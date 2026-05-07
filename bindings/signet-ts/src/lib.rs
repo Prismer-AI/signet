@@ -164,10 +164,10 @@ pub fn wasm_sign_bilateral(
 }
 
 /// Same as `wasm_sign_bilateral` but additionally records a final outcome
-/// (executed / failed / rejected / verified) inside the signature scope.
+/// (executed / failed / rejected / requires_approval / verified) inside the signature scope.
 ///
 /// `outcome_json` is a JSON object with shape:
-///   { "status": "executed" | "failed" | "rejected" | "verified",
+///   { "status": "executed" | "failed" | "rejected" | "requires_approval" | "verified",
 ///     "reason": ?string, "error": ?string }
 /// or the literal string "null" / empty string to omit the outcome.
 #[wasm_bindgen]

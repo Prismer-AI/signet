@@ -205,6 +205,7 @@ Status vocabulary:
 
 | status | when to use | required field |
 | --- | --- | --- |
+| `requires_approval` | execution boundary paused waiting for approval | `reason` |
 | `executed` | tool ran and returned a response | (none) |
 | `failed` | execution started but errored | `error` |
 | `rejected` | pre-execution check denied the action | `reason` |
@@ -212,6 +213,19 @@ Status vocabulary:
 
 The outcome lives **inside the signature scope** — tampering
 invalidates the receipt.
+
+Current proxy boundary note:
+
+- `signet proxy` now records signed bilateral outcomes automatically for
+  normal execution-boundary responses:
+  - successful server response → `executed`
+  - JSON-RPC / MCP error response → `failed`
+- local proxy-side policy outcomes are also signed without forwarding
+  upstream:
+  - policy deny → `rejected`
+  - policy `require_approval` → `requires_approval`
+- the proxy still appends a hash-chained `policy_violation` audit record
+  alongside those bilateral outcomes for easier operator review
 
 ---
 

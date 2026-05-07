@@ -73,11 +73,48 @@ signet audit --since 24h --export today.json
 signet audit --since 24h --export today-readable.json --decrypt-params
 ```
 
-Current limitation:
-
-- `signet audit --export` writes a JSON record dump for review; it is not yet a signed evidence bundle with a manifest or restore flow
+`signet audit --export` is the lightweight review path: it writes a JSON
+record dump for local analysis or ad hoc reporting.
 
 When `--decrypt-params` is used, the export preserves the original hash-chained `receipt` and adds a `materialized_receipt` field with locally decrypted `action.params`.
+
+### Build a portable evidence bundle
+
+```bash
+signet audit --since 30d --bundle april-bundle
+signet audit --since 30d --bundle april-bundle \
+  --include-trust-bundle /var/lib/signet/trust/pilot.json
+```
+
+This produces:
+
+```text
+april-bundle/
+├── records.jsonl
+├── manifest.json
+├── hash-summary.txt
+└── trust-bundle.json   # optional snapshot
+```
+
+Use `--bundle` when you need a portable audit handoff rather than a local
+JSON review file. `manifest.json` includes the bundle producer, generation
+time, host, record count, chain start/tip, time window, and the SHA-256 of
+`records.jsonl`.
+
+### Restore and re-verify a bundle
+
+```bash
+signet audit --restore april-bundle
+signet audit --restore april-bundle --trust-bundle /path/to/pilot.json
+```
+
+Restore verifies:
+
+- `records.jsonl` SHA-256 matches the manifest
+- `prev_hash` links cleanly across the bundle
+- each stored `record_hash` recomputes from `{prev_hash, receipt}`
+- the final chain tip matches the manifest
+- when a trust bundle snapshot is present, or `--trust-bundle` is supplied, Ed25519 signatures re-verify off-host too
 
 ### Inspect decrypted params locally
 

@@ -116,7 +116,7 @@ Signet adds a lightweight trust layer for agent actions:
 
 - **MCP proxy**: `signet proxy --target <cmd> --key <name>` — drop Signet in front of any MCP server as a transparent stdio proxy. No changes to the agent or server required. Signs every `tools/call` and appends bilateral co-signatures to the local audit path; client-visible bilateral response handling is stronger through integrated transport/server helpers.
 - **Trace correlation**: `trace_id` and `parent_receipt_id` fields on `Action` link receipts across multi-step workflows into a causal chain. Both fields are part of the signed payload — tampering invalidates the signature.
-- **Policy engine**: `signet sign --policy policy.yaml` enforces policy before signing and binds the decision into the receipt. The proxy also respects `--policy`, blocking denied calls before they reach the server.
+- **Policy engine**: `signet sign --policy policy.yaml` enforces policy before signing and binds the decision into the receipt. The proxy also respects `--policy`, blocking denied calls before they reach the server while producing signed bilateral `rejected` / `requires_approval` outcomes and a hash-chained `policy_violation` audit record.
 - **Delegation chains**: `signet delegate ...` produces v4 receipts that prove who authorized the agent and what scope it had.
 - **Local dashboard**: `signet dashboard` shows timeline, chain integrity, signature health, and delegated vs direct activity.
 - **Broader integrations**: official Claude Code plugin, Codex plugin, MCP middleware, Python SDK, and Vercel AI SDK callbacks.
@@ -427,12 +427,15 @@ Every `tools/call` request gets a signed receipt injected into `params._meta._si
 If you control the MCP server too, verify requests before execution:
 
 ```typescript
-import { verifyRequest } from "@signet-auth/mcp-server";
+import { FileNonceCache, verifyRequest } from "@signet-auth/mcp-server";
+
+const nonceCache = new FileNonceCache(".signet/nonces.json");
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const verified = verifyRequest(request, {
     trustedKeys: ["ed25519:..."],
     maxAge: 300,
+    nonceCache,
   });
   if (!verified.ok) return { content: [{ type: "text", text: verified.error }], isError: true };
   if (!verified.trusted) return { content: [{ type: "text", text: "untrusted signer" }], isError: true };
@@ -519,6 +522,37 @@ assert agent.verify(receipt)
 # Query audit log
 for record in agent.audit_query(since="24h"):
     print(f"{record.receipt.ts} {record.receipt.action.tool}")
+```
+
+For plain Python tools, the lowest-friction entry point is the decorator layer:
+
+```python
+from signet_auth import SigningAgent, signet_tool
+
+agent = SigningAgent.create("tool-bot", owner="team")
+
+@signet_tool(agent=agent, target="mcp://github.prod", audit_encrypt_params=True)
+def create_issue(title: str, repo: str) -> str:
+    return f"{repo}:{title}"
+```
+
+If you run a Python MCP server or other execution boundary, use `verify_request()` with a durable nonce backend in the pilot shape:
+
+```python
+from signet_auth import FileNonceChecker, VerifyOptions, verify_request
+
+nonce_checker = FileNonceChecker(".signet/nonces.json")
+opts = VerifyOptions(
+    trusted_keys=["ed25519:..."],
+    expected_target="mcp://github.prod",
+    nonce_checker=nonce_checker,
+)
+
+result = verify_request(request_params, opts)
+if not result.ok:
+    raise ValueError(result.error or "verification failed")
+if not result.trusted:
+    raise ValueError("untrusted signer")
 ```
 
 #### LangChain Integration
@@ -696,7 +730,7 @@ SigningTransport (wraps any MCP transport)
     +---> Forwards request to MCP server (unchanged)
 ```
 
-Client-side signing works without changing the server. If you control the server too, add `verifyRequest()` and optional `signResponse()` for execution-boundary verification and bilateral receipts. `signResponse()` should only run after a successful trusted `verifyRequest()`.
+Client-side signing works without changing the server. If you control the server too, add `verifyRequest()` and optional `signResponse()` for execution-boundary verification and bilateral receipts. `signResponse()` should only run after a successful trusted `verifyRequest()`, and it can now carry final `executed` / `failed` / `rejected` / `requires_approval` outcome state inside the bilateral signature.
 
 ## Action Receipt
 

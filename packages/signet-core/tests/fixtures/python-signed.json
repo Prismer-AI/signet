@@ -1,0 +1,146 @@
+{
+  "v1": {
+    "receipt": {
+      "v": 1,
+      "id": "rec_eb46e7a1174db1c896fc9b8afcc31dea",
+      "action": {
+        "tool": "interop_v1",
+        "params": {
+          "k": "v"
+        },
+        "params_hash": "sha256:666c1aa02e8068c6d5cc1d3295009432c16790bec28ec8ce119d0d1a18d61319",
+        "target": "mcp://test",
+        "transport": "stdio"
+      },
+      "signer": {
+        "pubkey": "ed25519:tg/5z4EMU9nFIGjhZSzhh3a/RNLWBvJ798vn2+La1dk=",
+        "name": "py-signer-v1",
+        "owner": "interop"
+      },
+      "ts": "2026-04-27T12:18:44.766Z",
+      "nonce": "rnd_3887bc3f49e8aa1109dd2760173466f3",
+      "sig": "ed25519:pz3DjU6bMbjc1aX3PEvUNFv0D1zt18JUwZyCPq8tSSFkAS8eZAJPxfWVu04Cqp3Ahv1gv26reTuWy6xJ0LsSBw=="
+    },
+    "public_key": "tg/5z4EMU9nFIGjhZSzhh3a/RNLWBvJ798vn2+La1dk="
+  },
+  "v2": {
+    "receipt": {
+      "v": 2,
+      "id": "rec_224e3f902eac6ada71763309bb00a544",
+      "action": {
+        "tool": "interop_v2",
+        "params": {
+          "k": "v"
+        },
+        "params_hash": "sha256:666c1aa02e8068c6d5cc1d3295009432c16790bec28ec8ce119d0d1a18d61319",
+        "target": "mcp://test",
+        "transport": "stdio"
+      },
+      "response": {
+        "content_hash": "sha256:1aad36b0fb02621b951649811957ba7ad67d4838c2932d02088f7d6e8db74313"
+      },
+      "signer": {
+        "pubkey": "ed25519:HxyDnFE8dQ62Z3VCub0kjL2BPfGaSIr57casSpaJpgU=",
+        "name": "py-signer-v2",
+        "owner": "interop"
+      },
+      "ts_request": "2026-04-21T12:00:00.000Z",
+      "ts_response": "2026-04-21T12:00:00.000Z",
+      "nonce": "rnd_bb3941b530ff72fd9f4c1b21baa94a0d",
+      "sig": "ed25519:52BWPR2sX24ctzBNubuLFfM5MRfkZc/DZx5F2ktjlJtjwa5j/TI9yY0+9n5tHAtpAK4a4Zvki5vbMLA0YBIZBg=="
+    },
+    "public_key": "HxyDnFE8dQ62Z3VCub0kjL2BPfGaSIr57casSpaJpgU="
+  },
+  "v3": {
+    "receipt": {
+      "v": 3,
+      "id": "rec_d95d1fed433cabca13382cde906099cf",
+      "agent_receipt": {
+        "v": 1,
+        "id": "rec_92ccfead6a4d2850f2772f20b855cd78",
+        "action": {
+          "tool": "interop_v3",
+          "params": {
+            "q": "hi"
+          },
+          "params_hash": "sha256:fca03ff443ac59e006e72573c15a72b8eed50b10ba49bd6ed62938a2cf8967a0",
+          "target": "mcp://test",
+          "transport": "stdio"
+        },
+        "signer": {
+          "pubkey": "ed25519:kDVMkwxpDFIyZAayViXcjmru24D77+ZXFpA2Ugi6wB0=",
+          "name": "py-agent-v3",
+          "owner": "owner"
+        },
+        "ts": "2026-04-27T12:18:44.767Z",
+        "nonce": "rnd_e4e9e6f460b68e3383f074ad4f431d00",
+        "sig": "ed25519:fimmFCf+nVZ+3FKbgtjVkAfUuJ62dTEsmAKd0QM5afHRrb2LirQzoMHELwi+oMFub96/n6d9ipd6/RAo5Aw2BQ=="
+      },
+      "response": {
+        "content_hash": "sha256:014473a883cd7093a0284d241f069d68558796b00e70697d3496233bea34dbb1"
+      },
+      "server": {
+        "pubkey": "ed25519:OwJQemo7Mo9lH/leulKP7D6obRCZcDJf+mqWLAiieio=",
+        "name": "py-server-v3"
+      },
+      "ts_response": "2026-04-27T12:18:44.767Z",
+      "nonce": "rnd_d0a658c7cafc1f6e0cfc11efb7b6f564",
+      "sig": "ed25519:6UtzaGwHxHp96Odk6XoFpLCGqWmvPHmmObvCKp5kWaqU7sM3vE0Mp2RxUzJchgwmToHPXPI0t75pOPnt8GomBw=="
+    },
+    "agent_public_key": "kDVMkwxpDFIyZAayViXcjmru24D77+ZXFpA2Ugi6wB0=",
+    "server_public_key": "OwJQemo7Mo9lH/leulKP7D6obRCZcDJf+mqWLAiieio="
+  },
+  "v4": {
+    "receipt": {
+      "v": 4,
+      "id": "rec_4c0be7b11f14638b589b3059b0dfa0c6",
+      "action": {
+        "tool": "interop_v4",
+        "params": {},
+        "params_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "target": "mcp://test",
+        "transport": "stdio"
+      },
+      "signer": {
+        "pubkey": "ed25519:aaP1gRH+UxnTsSif5uwamHALC6wlnUbnPd7op+4Zruo=",
+        "name": "py-delegate-v4",
+        "owner": "py-owner-v4"
+      },
+      "authorization": {
+        "chain": [
+          {
+            "v": 1,
+            "id": "del_316f67b69d70818564457d394a193fd9",
+            "delegator": {
+              "pubkey": "ed25519:ECwNsRWLNoNh+LttzWtVr6PtGIzRGkX25tdY4ntIbQs=",
+              "name": "py-owner-v4"
+            },
+            "delegate": {
+              "pubkey": "ed25519:aaP1gRH+UxnTsSif5uwamHALC6wlnUbnPd7op+4Zruo=",
+              "name": "py-delegate-v4"
+            },
+            "scope": {
+              "tools": [
+                "*"
+              ],
+              "targets": [
+                "*"
+              ],
+              "max_depth": 0
+            },
+            "issued_at": "2026-04-27T12:18:44.767Z",
+            "nonce": "rnd_0119cb3e77ec16483cdbe9890e23ee8e",
+            "sig": "ed25519:OshvROjFN1fdcNFx0EQVd9a93F+8xeRWWQ1Z3/eTwMxnX8y0Dr0GTFgeF93zqR67uYPS4gWMstpEwyWtdGliAw=="
+          }
+        ],
+        "chain_hash": "sha256:9f755c3ccab5026846c43ccf7a3837660a2bc044818751e1fdcb9779e0d7210d",
+        "root_pubkey": "ed25519:ECwNsRWLNoNh+LttzWtVr6PtGIzRGkX25tdY4ntIbQs="
+      },
+      "ts": "2026-04-27T12:18:44.767Z",
+      "nonce": "rnd_fbf2bafad1793c1d5b71aae1e42c6d59",
+      "sig": "ed25519:2lu5fAlWFDxeHGjr0Hgd07O3f3enalSc6canwRBynaCdmENhdTN5Vmoull+qYP6R+GuXdBOjQHqjJZWYm9CrBg=="
+    },
+    "delegate_public_key": "aaP1gRH+UxnTsSif5uwamHALC6wlnUbnPd7op+4Zruo=",
+    "owner_public_key": "ECwNsRWLNoNh+LttzWtVr6PtGIzRGkX25tdY4ntIbQs="
+  }
+}

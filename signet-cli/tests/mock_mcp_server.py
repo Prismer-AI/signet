@@ -32,6 +32,17 @@ for line in sys.stdin:
         has_signet = "yes" if params.get("_meta", {}).get("_signet") else "no"
         tool_name = params.get("name", "unknown")
         arguments = params.get("arguments", {})
+        if tool_name == "explode":
+            resp = {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "error": {
+                    "code": -32000,
+                    "message": "boom",
+                },
+            }
+            print(json.dumps(resp), flush=True)
+            continue
         # Echo back the receipt ID if signed
         signet_data = params.get("_meta", {}).get("_signet", {})
         receipt_id = signet_data.get("id", "none")

@@ -15,7 +15,7 @@ The plugin shells out to the local `signet` CLI via [`@signet-auth/node`](https:
 
 - An OpenClaw gateway (`>=2026.3.24-beta.2`)
 - The `signet` CLI on `$PATH` — install via [`cargo install signet-cli`](https://crates.io/crates/signet-cli) or the [release binaries](https://github.com/Prismer-AI/signet/releases)
-- A Signet identity: `signet identity create openclaw-agent`
+- A Signet identity: `signet identity generate --name openclaw-agent`
 
 ## Install
 
@@ -49,7 +49,7 @@ Add the plugin to your OpenClaw config (`~/.openclaw/config.json`):
 ```
 
 > **Note**: `receipt.signer.owner` is taken from the identity's stored metadata
-> (set with `signet identity create --owner <name>`), not from this plugin
+> (set with `signet identity generate --name <name> --owner <owner>`), not from this plugin
 > config — Signet's CLI does not accept a per-call owner override.
 
 If your identity is passphrase-protected, export it before starting the gateway:

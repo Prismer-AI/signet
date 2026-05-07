@@ -171,10 +171,17 @@ struct Stats {
     truncated: bool,
     by_tool: HashMap<String, usize>,
     by_signer: HashMap<String, usize>,
+    by_record_type: HashMap<String, usize>,
+    by_outcome: HashMap<String, usize>,
     by_version: HashMap<String, usize>,
     by_authorization: HashMap<String, usize>,
+    by_policy_decision: HashMap<String, usize>,
     earliest: Option<String>,
     latest: Option<String>,
+}
+
+fn stats_signer_name(receipt: &serde_json::Value) -> Option<&str> {
+    audit::extract_signer_name(receipt)
 }
 
 async fn get_stats(State(state): State<Arc<AppState>>) -> Result<Json<Stats>, AppError> {
@@ -196,8 +203,11 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> Result<Json<Stats>, Ap
     }
     let mut by_tool: HashMap<String, usize> = HashMap::new();
     let mut by_signer: HashMap<String, usize> = HashMap::new();
+    let mut by_record_type: HashMap<String, usize> = HashMap::new();
+    let mut by_outcome: HashMap<String, usize> = HashMap::new();
     let mut by_version: HashMap<String, usize> = HashMap::new();
     let mut by_authorization: HashMap<String, usize> = HashMap::new();
+    let mut by_policy_decision: HashMap<String, usize> = HashMap::new();
     let mut earliest: Option<String> = None;
     let mut latest: Option<String> = None;
 
@@ -206,16 +216,27 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> Result<Json<Stats>, Ap
         if let Some(tool) = audit::extract_tool(r) {
             *by_tool.entry(tool.to_string()).or_default() += 1;
         }
-        if let Some(name) = audit::extract_signer_name(r) {
+        if let Some(name) = stats_signer_name(r) {
             *by_signer.entry(name.to_string()).or_default() += 1;
+        }
+        *by_record_type
+            .entry(audit::extract_record_type(r).to_string())
+            .or_default() += 1;
+        if let Some(status) = audit::extract_outcome_status(r) {
+            *by_outcome.entry(status.to_string()).or_default() += 1;
         }
         if let Some(v) = r.get("v").and_then(|v| v.as_u64()) {
             *by_version.entry(format!("v{v}")).or_default() += 1;
         }
         // Track delegated vs direct signing
-        let has_auth = r.get("authorization").is_some();
-        let auth_label = if has_auth { "delegated" } else { "direct" };
-        *by_authorization.entry(auth_label.to_string()).or_default() += 1;
+        if audit::extract_record_type(r) == "receipt" {
+            let has_auth = r.get("authorization").is_some();
+            let auth_label = if has_auth { "delegated" } else { "direct" };
+            *by_authorization.entry(auth_label.to_string()).or_default() += 1;
+        }
+        if let Some(decision) = audit::extract_policy_decision(r) {
+            *by_policy_decision.entry(decision.to_string()).or_default() += 1;
+        }
         if let Some(ts) = audit::extract_timestamp(r) {
             if earliest.as_ref().is_none_or(|e| ts < e.as_str()) {
                 earliest = Some(ts.to_string());
@@ -231,8 +252,11 @@ async fn get_stats(State(state): State<Arc<AppState>>) -> Result<Json<Stats>, Ap
         truncated,
         by_tool,
         by_signer,
+        by_record_type,
+        by_outcome,
         by_version,
         by_authorization,
+        by_policy_decision,
         earliest,
         latest,
     }))
@@ -303,6 +327,49 @@ mod tests {
             format!("ed25519:{}", BASE64.encode(agent_vk.as_bytes())),
             format!("ed25519:{}", BASE64.encode(server_vk.as_bytes())),
         )
+    }
+
+    fn stats_fixture(dir: &std::path::Path) {
+        let (agent_key, _) = signet_core::generate_keypair();
+        let (server_key, _) = signet_core::generate_keypair();
+        let action = signet_core::Action {
+            tool: "payments.refund".to_string(),
+            params: serde_json::json!({"order_id":"ord_123","amount":49}),
+            params_hash: String::new(),
+            target: "mcp://payments".to_string(),
+            transport: "stdio".to_string(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: Some("tr_stats".to_string()),
+            parent_receipt_id: None,
+        };
+        let receipt = signet_core::sign(&agent_key, &action, "agent", "").unwrap();
+        signet_core::audit::append(dir, &serde_json::to_value(&receipt).unwrap()).unwrap();
+
+        let bilateral = signet_core::sign_bilateral_with_outcome(
+            &server_key,
+            &receipt,
+            &serde_json::json!({"blocked": true}),
+            "server",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            Some(signet_core::Outcome::requires_approval(
+                "manager approval required",
+            )),
+        )
+        .unwrap();
+        signet_core::audit::append(dir, &serde_json::to_value(&bilateral).unwrap()).unwrap();
+
+        let eval = signet_core::policy::PolicyEvalResult {
+            decision: signet_core::policy::RuleAction::Deny,
+            matched_rules: vec!["deny-refund".to_string()],
+            winning_rule: Some("deny-refund".to_string()),
+            reason: "refund exceeds threshold".to_string(),
+            evaluated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            policy_name: "payments-prod".to_string(),
+            policy_hash: "sha256:feedface".to_string(),
+        };
+        signet_core::audit::append_violation(dir, &action, "agent", &eval).unwrap();
     }
 
     #[tokio::test]
@@ -387,5 +454,34 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn stats_api_includes_outcomes_and_record_types() {
+        let dir = tempfile::tempdir().unwrap();
+        stats_fixture(dir.path());
+        let app = routes().with_state(Arc::new(AppState {
+            signet_dir: dir.path().to_path_buf(),
+            dev: false,
+        }));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total_records"].as_u64(), Some(3));
+        assert_eq!(json["by_record_type"]["receipt"].as_u64(), Some(2));
+        assert_eq!(json["by_record_type"]["policy_violation"].as_u64(), Some(1));
+        assert_eq!(json["by_outcome"]["requires_approval"].as_u64(), Some(1));
+        assert_eq!(json["by_policy_decision"]["deny"].as_u64(), Some(1));
     }
 }

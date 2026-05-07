@@ -390,6 +390,7 @@ describe('@signet-auth/mcp-server signResponse', () => {
     assert(bilateral.server !== undefined, 'server should be present');
     assert(bilateral.server.name === 'test-server', `server.name should be test-server, got: ${bilateral.server.name}`);
     assert(bilateral.response.content_hash.startsWith('sha256:'), `content_hash should start with sha256:, got: ${bilateral.response.content_hash}`);
+    assert.strictEqual(bilateral.response.outcome?.status, 'executed');
   });
 
   it('test_sign_response_embeds_agent_receipt — v3.agent_receipt matches the original v1 receipt', () => {
@@ -474,6 +475,40 @@ describe('@signet-auth/mcp-server signResponse', () => {
 
     assert.strictEqual(bilateral.v, 3);
     assert(bilateral.sig.startsWith('ed25519:'));
+    assert.strictEqual(bilateral.response.outcome?.status, 'executed');
+  });
+
+  it('test_sign_response_infers_failed_outcome_for_mcp_error_result — isError=true becomes failed', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = {
+      content: [{ type: 'text', text: 'tool failed' }],
+      isError: true,
+    };
+    verifyTrustedRequest(req);
+
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+    });
+
+    assert.strictEqual(bilateral.response.outcome?.status, 'failed');
+    assert.strictEqual(bilateral.response.outcome?.error, 'tool failed');
+  });
+
+  it('test_sign_response_explicit_outcome_overrides_default_inference — caller can record rejected', () => {
+    const req = signedRequest('echo', { message: 'hello' });
+    const response = { content: [{ type: 'text', text: 'denied' }], isError: true };
+    verifyTrustedRequest(req);
+
+    const bilateral = signResponse(req, response, {
+      serverKey: serverKp.secretKey,
+      serverName: 'test-server',
+      outcome: { status: 'rejected', reason: 'policy denied destructive tool' },
+    });
+
+    assert.strictEqual(bilateral.response.outcome?.status, 'rejected');
+    assert.strictEqual(bilateral.response.outcome?.reason, 'policy denied destructive tool');
+    assert.strictEqual(bilateral.response.outcome?.error, undefined);
   });
 
   it('test_sign_response_rejects_request_mutation_after_verification — request args changed after verifyRequest() → throws Error', () => {

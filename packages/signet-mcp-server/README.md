@@ -26,9 +26,9 @@ npm install @modelcontextprotocol/sdk @signet-auth/mcp-server
 
 ```typescript
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { NonceCache, verifyRequest } from "@signet-auth/mcp-server";
+import { FileNonceCache, verifyRequest } from "@signet-auth/mcp-server";
 
-const nonceCache = new NonceCache();
+const nonceCache = new FileNonceCache(".signet/nonces.json");
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const verified = verifyRequest(request, {
@@ -58,8 +58,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 Useful exports:
 
 - `verifyRequest()` checks signature validity, freshness, target binding, and tool/params matching, and tells you whether the signer is trusted
-- `NonceCache` adds replay protection
-- `signResponse()` lets the server co-sign a response after a successful trusted `verifyRequest()`
+- `FileNonceCache` adds replay protection that survives ordinary restarts in a single-host pilot deployment
+- `NonceCache` is still available for tests and demos
+- `signResponse()` lets the server co-sign a response after a successful trusted `verifyRequest()`, by default records an `executed` or `failed` outcome, and also accepts an explicit `outcome` override for cases like `rejected` or `requires_approval`
 
 ## Related packages
 

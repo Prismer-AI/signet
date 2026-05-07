@@ -21,6 +21,54 @@ receipt = agent.sign("web_search", params={"query": "signet"}, target="mcp://loc
 print(receipt.id)
 ```
 
+## Decorator Entry Point
+
+For plain Python tools, the easiest way to adopt Signet is the decorator layer:
+
+```python
+from signet_auth import SigningAgent, signet_tool
+
+agent = SigningAgent.create("tool-bot", owner="alice")
+
+@signet_tool(
+    agent=agent,
+    target="mcp://github.prod",
+    audit_encrypt_params=True,
+)
+def create_issue(title: str, repo: str) -> str:
+    return f"{repo}:{title}"
+```
+
+`@signet_tool` also supports:
+
+- async tool functions
+- custom `tool_name`
+- explicit `transport`
+- `on_sign_error="warn" | "raise"`
+
+## MCP Server Verification
+
+If you enforce Signet at the execution boundary, use `verify_request()` with a durable nonce backend:
+
+```python
+from signet_auth import FileNonceChecker, VerifyOptions, verify_request
+
+nonce_checker = FileNonceChecker(".signet/nonces.json")
+opts = VerifyOptions(
+    trusted_keys=["ed25519:..."],
+    expected_target="mcp://github.prod",
+    nonce_checker=nonce_checker,
+)
+
+result = verify_request(request_params, opts)
+if not result.ok:
+    raise ValueError(result.error or "verification failed")
+if not result.trusted:
+    raise ValueError("untrusted signer")
+```
+
+`ServerVerifyResult` tells you both whether a receipt was present (`has_receipt`) and whether the signer was anchored to trust (`trusted`). `FileNonceChecker` is the default single-host pilot shape; `InMemoryNonceChecker` is still useful for tests and demos.
+
 ## Framework Integrations
 
 | Framework | Import |

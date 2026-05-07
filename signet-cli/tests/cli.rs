@@ -2547,7 +2547,7 @@ fn test_proxy_with_policy_denied() {
         "\n",
     );
 
-    let (status, _stdout, stderr) = run_proxy(
+    let (status, stdout, stderr) = run_proxy(
         dir.path(),
         &mock_server_cmd(),
         "denkey",
@@ -2562,6 +2562,120 @@ fn test_proxy_with_policy_denied() {
     assert!(
         stderr.contains("DENIED") || stderr.contains("policy violation"),
         "should deny: {stderr}",
+    );
+    assert!(
+        stderr.contains("1 signed, 1 bilateral"),
+        "deny path should still produce a bilateral outcome: {stderr}",
+    );
+
+    let forwarded: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(forwarded["error"]["code"].as_i64(), Some(-32600));
+    assert!(
+        forwarded["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("policy violation"),
+        "should forward policy violation as JSON-RPC error: {stdout}",
+    );
+
+    let audit_dir = dir.path().join("audit");
+    let files: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
+        .collect();
+    assert_eq!(files.len(), 1, "expected exactly one audit jsonl file");
+    let content = fs::read_to_string(files[0].path()).unwrap();
+    assert!(
+        content.contains(r#""type":"policy_violation""#)
+            || content.contains(r#""type": "policy_violation""#),
+        "should append policy_violation audit record: {content}",
+    );
+    assert!(
+        content.contains(r#""status":"rejected""#)
+            && content.contains(r#""reason":"no rules matched, using default action""#),
+        "proxy deny path should emit a signed rejected bilateral outcome: {content}",
+    );
+}
+
+#[test]
+fn test_proxy_with_policy_requires_approval() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "appkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        "version: 1\nname: approval-all\ndefault_action: require_approval\nrules: []\n",
+    )
+    .unwrap();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"Bash","arguments":{"cmd":"ls"}}}"#,
+        "\n",
+    );
+
+    let (status, stdout, stderr) = run_proxy(
+        dir.path(),
+        &mock_server_cmd(),
+        "appkey",
+        input,
+        &["--policy", policy_path.to_str().unwrap()],
+    );
+    assert!(
+        status.success(),
+        "proxy should return a handled JSON-RPC error: {stderr}"
+    );
+    assert!(
+        stderr.contains("NEEDS APPROVAL") || stderr.contains("requires approval"),
+        "should mark request as needing approval: {stderr}",
+    );
+    assert!(
+        stderr.contains("1 signed, 1 bilateral"),
+        "requires-approval path should produce a bilateral outcome: {stderr}",
+    );
+
+    let forwarded: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(forwarded["error"]["code"].as_i64(), Some(-32600));
+    assert!(
+        forwarded["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("requires approval"),
+        "should forward approval requirement as JSON-RPC error: {stdout}",
+    );
+
+    let audit_dir = dir.path().join("audit");
+    let files: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
+        .collect();
+    assert_eq!(files.len(), 1, "expected exactly one audit jsonl file");
+    let content = fs::read_to_string(files[0].path()).unwrap();
+    assert!(
+        content.contains(r#""type":"policy_violation""#)
+            || content.contains(r#""type": "policy_violation""#),
+        "should append policy_violation audit record: {content}",
+    );
+    assert!(
+        content.contains(r#""status":"requires_approval""#)
+            && content.contains(r#""reason":"no rules matched, using default action""#),
+        "approval path should emit a signed requires_approval bilateral outcome: {content}",
     );
 }
 
@@ -2628,7 +2742,7 @@ fn test_proxy_bilateral_cosigning() {
         "\n",
     );
 
-    let (status, _stdout, stderr) =
+    let (status, stdout, stderr) =
         run_proxy(dir.path(), &mock_server_cmd(), "bilatkey", input, &[]);
     assert!(status.success(), "proxy should succeed: {stderr}");
 
@@ -2642,6 +2756,10 @@ fn test_proxy_bilateral_cosigning() {
     assert!(
         stderr.contains("bilateral: echo") && stderr.contains("response co-signed"),
         "should bilateral co-sign: {stderr}",
+    );
+    assert!(
+        stderr.contains("bilateral mode: audit-only; responses are forwarded unchanged"),
+        "should explain audit-only bilateral mode: {stderr}",
     );
 
     // Should log "1 signed, 1 bilateral"
@@ -2672,6 +2790,57 @@ fn test_proxy_bilateral_cosigning() {
     assert!(
         content.contains("agent_receipt"),
         "should embed agent_receipt: {content}"
+    );
+    assert!(
+        content.contains(r#""outcome":{"status":"executed"}"#)
+            || content.contains(r#""outcome": {"status": "executed"}"#)
+            || content.contains(r#""status":"executed""#),
+        "should record executed outcome in bilateral receipt: {content}"
+    );
+
+    // The transparent proxy path must not inject bilateral metadata into the
+    // JSON-RPC response body; that path is audit-only.
+    assert!(
+        !stdout.contains("_signet_bilateral"),
+        "proxy should forward response unchanged without bilateral metadata: {stdout}",
+    );
+}
+
+#[test]
+fn test_proxy_bilateral_failed_outcome_on_server_error() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "failkey", "--unencrypted"])
+        .assert()
+        .success();
+
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"explode","arguments":{"msg":"test"}}}"#,
+        "\n",
+    );
+
+    let (status, stdout, stderr) = run_proxy(dir.path(), &mock_server_cmd(), "failkey", input, &[]);
+    assert!(status.success(), "proxy should succeed: {stderr}");
+    let forwarded: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(forwarded["error"]["code"].as_i64(), Some(-32000));
+    assert_eq!(forwarded["error"]["message"].as_str(), Some("boom"));
+
+    let audit_dir = dir.path().join("audit");
+    let files: Vec<_> = fs::read_dir(&audit_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
+        .collect();
+    let content = fs::read_to_string(files[0].path()).unwrap();
+    assert!(
+        content.contains(r#""status":"failed""#) && content.contains(r#""error":"boom""#),
+        "should record failed outcome with server error in bilateral receipt: {content}"
     );
 }
 
@@ -2953,6 +3122,63 @@ fn setup_explore_env(dir: &std::path::Path, key: &str, tools: &[&str]) {
     }
 }
 
+fn append_explore_bilateral_outcome_record(
+    dir: &std::path::Path,
+    status: signet_core::Outcome,
+    response: serde_json::Value,
+) {
+    let (agent_key, _) = signet_core::generate_keypair();
+    let (server_key, _) = signet_core::generate_keypair();
+    let action = signet_core::Action {
+        tool: "payments.refund".to_string(),
+        params: serde_json::json!({"order_id":"ord_123","amount":49}),
+        params_hash: String::new(),
+        target: "mcp://payments".to_string(),
+        transport: "stdio".to_string(),
+        session: None,
+        call_id: None,
+        response_hash: None,
+        trace_id: Some("tr_explore".to_string()),
+        parent_receipt_id: Some("rec_parent".to_string()),
+    };
+    let receipt = signet_core::sign(&agent_key, &action, "exp-outcome", "").unwrap();
+    let bilateral = signet_core::sign_bilateral_with_outcome(
+        &server_key,
+        &receipt,
+        &response,
+        "edge-proxy",
+        &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        Some(status),
+    )
+    .unwrap();
+    signet_core::audit::append(dir, &serde_json::to_value(&bilateral).unwrap()).unwrap();
+}
+
+fn append_explore_policy_violation(dir: &std::path::Path) {
+    let action = signet_core::Action {
+        tool: "payments.refund".to_string(),
+        params: serde_json::json!({"order_id":"ord_123","amount":99}),
+        params_hash: String::new(),
+        target: "mcp://payments".to_string(),
+        transport: "stdio".to_string(),
+        session: None,
+        call_id: None,
+        response_hash: None,
+        trace_id: None,
+        parent_receipt_id: None,
+    };
+    let eval = signet_core::policy::PolicyEvalResult {
+        decision: signet_core::policy::RuleAction::Deny,
+        matched_rules: vec!["deny-refund".to_string()],
+        winning_rule: Some("deny-refund".to_string()),
+        reason: "refund exceeds threshold".to_string(),
+        evaluated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        policy_name: "payments-prod".to_string(),
+        policy_hash: "sha256:feedface".to_string(),
+    };
+    signet_core::audit::append_violation(dir, &action, "policy-agent", &eval).unwrap();
+}
+
 #[test]
 fn test_explore_default_table() {
     let dir = tempdir().unwrap();
@@ -3028,6 +3254,46 @@ fn test_explore_show_receipt() {
         .stdout(predicate::str::contains("bash"))
         .stdout(predicate::str::contains("exp4"))
         .stdout(predicate::str::contains("ed25519:"));
+}
+
+#[test]
+fn test_explore_show_bilateral_outcome() {
+    let dir = tempdir().unwrap();
+    append_explore_bilateral_outcome_record(
+        dir.path(),
+        signet_core::Outcome::requires_approval("manager approval required"),
+        serde_json::json!({"blocked": true}),
+    );
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--show", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Outcome"))
+        .stdout(predicate::str::contains("requires_approval"))
+        .stdout(predicate::str::contains("manager approval required"))
+        .stdout(predicate::str::contains("Agent sig:"))
+        .stdout(predicate::str::contains("Server sig:"))
+        .stdout(predicate::str::contains("Server:"));
+}
+
+#[test]
+fn test_explore_show_policy_violation() {
+    let dir = tempdir().unwrap();
+    append_explore_policy_violation(dir.path());
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--show", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Policy Violation"))
+        .stdout(predicate::str::contains("Status:      rejected"))
+        .stdout(predicate::str::contains("Decision:    deny"))
+        .stdout(predicate::str::contains("policy-agent"))
+        .stdout(predicate::str::contains("refund exceeds threshold"))
+        .stdout(predicate::str::contains("deny-refund"));
 }
 
 #[test]
@@ -3182,9 +3448,33 @@ fn test_explore_stats() {
         .args(["explore", "--stats"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Total receipts: 6"))
+        .stdout(predicate::str::contains("Total records: 6"))
         .stdout(predicate::str::contains("write"))
         .stdout(predicate::str::contains("v1 (unilateral)"));
+}
+
+#[test]
+fn test_explore_stats_include_outcomes_and_record_types() {
+    let dir = tempdir().unwrap();
+    setup_explore_env(dir.path(), "expstats", &["read"]);
+    append_explore_bilateral_outcome_record(
+        dir.path(),
+        signet_core::Outcome::failed("connection refused"),
+        serde_json::json!({"error": "connection refused"}),
+    );
+    append_explore_policy_violation(dir.path());
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["explore", "--stats"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("By outcome:"))
+        .stdout(predicate::str::contains("failed"))
+        .stdout(predicate::str::contains("By record type:"))
+        .stdout(predicate::str::contains("policy_violation"))
+        .stdout(predicate::str::contains("Policy gate decisions:"))
+        .stdout(predicate::str::contains("deny"));
 }
 
 #[test]
@@ -3631,7 +3921,13 @@ fn test_audit_bundle_roundtrip() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "bundle-key", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "bundle-key",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -3666,10 +3962,9 @@ fn test_audit_bundle_roundtrip() {
     assert!(bundle_dir.join("hash-summary.txt").exists());
 
     // Parse manifest and check shape.
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap(),
-    )
-    .unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap())
+            .unwrap();
     assert_eq!(manifest["format_version"], 1);
     assert_eq!(manifest["record_count"], 3);
     assert!(manifest["records_sha256"].as_str().unwrap().len() == 64);
@@ -3694,14 +3989,27 @@ fn test_audit_bundle_restore_detects_jsonl_tamper() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "tamper-key", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "tamper-key",
+            "--unencrypted",
+        ])
         .assert()
         .success();
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "sign", "--key", "tamper-key", "--tool", "bash",
-            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+            "sign",
+            "--key",
+            "tamper-key",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"x":1}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -3737,8 +4045,15 @@ fn test_audit_bundle_with_trust_bundle_snapshot() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "sign", "--key", "tb-key", "--tool", "bash",
-            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+            "sign",
+            "--key",
+            "tb-key",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"x":1}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -3751,17 +4066,19 @@ fn test_audit_bundle_with_trust_bundle_snapshot() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "audit", "--bundle", bundle_dir.to_str().unwrap(),
-            "--include-trust-bundle", trust_path.to_str().unwrap(),
+            "audit",
+            "--bundle",
+            bundle_dir.to_str().unwrap(),
+            "--include-trust-bundle",
+            trust_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
     assert!(bundle_dir.join("trust-bundle.json").exists());
-    let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap(),
-    )
-    .unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(bundle_dir.join("manifest.json")).unwrap())
+            .unwrap();
     assert_eq!(manifest["has_trust_bundle"], true);
 }
 
@@ -3777,8 +4094,15 @@ fn test_audit_bundle_restore_recomputes_record_hash() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "sign", "--key", "rh-key", "--tool", "bash",
-            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+            "sign",
+            "--key",
+            "rh-key",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"x":1}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -3827,8 +4151,15 @@ fn test_audit_bundle_restore_with_trust_bundle_verifies_signatures() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "sign", "--key", "tbv-key", "--tool", "bash",
-            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+            "sign",
+            "--key",
+            "tbv-key",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"x":1}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -3839,7 +4170,8 @@ fn test_audit_bundle_restore_with_trust_bundle_verifies_signatures() {
     let pubkey = format!("ed25519:{}", pub_obj["pubkey"].as_str().unwrap());
     let trust_path = dir.path().join("trust.json");
     write_trust_bundle(
-        &trust_path, "pilot",
+        &trust_path,
+        "pilot",
         &[],
         &[("tbv-key", pubkey.as_str())],
         &[],
@@ -3849,8 +4181,11 @@ fn test_audit_bundle_restore_with_trust_bundle_verifies_signatures() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "audit", "--bundle", bundle_dir.to_str().unwrap(),
-            "--include-trust-bundle", trust_path.to_str().unwrap(),
+            "audit",
+            "--bundle",
+            bundle_dir.to_str().unwrap(),
+            "--include-trust-bundle",
+            trust_path.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -3876,8 +4211,15 @@ fn test_audit_bundle_refuses_clobber_foreign_dir() {
     signet()
         .env("SIGNET_HOME", dir.path())
         .args([
-            "sign", "--key", "rk", "--tool", "bash",
-            "--params", r#"{"x":1}"#, "--target", "mcp://local",
+            "sign",
+            "--key",
+            "rk",
+            "--tool",
+            "bash",
+            "--params",
+            r#"{"x":1}"#,
+            "--target",
+            "mcp://local",
         ])
         .assert()
         .success();
@@ -3927,12 +4269,24 @@ fn test_proxy_server_key_persistent_pubkey_stable() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "agent-pk", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "agent-pk",
+            "--unencrypted",
+        ])
         .assert()
         .success();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "server-pk", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "server-pk",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -3955,7 +4309,10 @@ fn test_proxy_server_key_persistent_pubkey_stable() {
     };
 
     let (status1, _, stderr1) = run_proxy(
-        dir.path(), &mock_server_cmd(), "agent-pk", input,
+        dir.path(),
+        &mock_server_cmd(),
+        "agent-pk",
+        input,
         &["--server-key", "server-pk"],
     );
     assert!(status1.success(), "first run should succeed: {stderr1}");
@@ -3966,7 +4323,10 @@ fn test_proxy_server_key_persistent_pubkey_stable() {
     );
 
     let (status2, _, stderr2) = run_proxy(
-        dir.path(), &mock_server_cmd(), "agent-pk", input,
+        dir.path(),
+        &mock_server_cmd(),
+        "agent-pk",
+        input,
         &["--server-key", "server-pk"],
     );
     assert!(status2.success(), "second run should succeed: {stderr2}");
@@ -3986,7 +4346,13 @@ fn test_proxy_ephemeral_pubkey_changes_each_run() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "agent-eph", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "agent-eph",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -4009,8 +4375,14 @@ fn test_proxy_ephemeral_pubkey_changes_each_run() {
     let (s1, _, e1) = run_proxy(dir.path(), &mock_server_cmd(), "agent-eph", input, &[]);
     let (s2, _, e2) = run_proxy(dir.path(), &mock_server_cmd(), "agent-eph", input, &[]);
     assert!(s1.success() && s2.success(), "both runs should succeed");
-    assert!(e1.contains("(ephemeral)"), "first run should report ephemeral: {e1}");
-    assert!(e2.contains("(ephemeral)"), "second run should report ephemeral: {e2}");
+    assert!(
+        e1.contains("(ephemeral)"),
+        "first run should report ephemeral: {e1}"
+    );
+    assert!(
+        e2.contains("(ephemeral)"),
+        "second run should report ephemeral: {e2}"
+    );
     assert_ne!(
         extract_server_pubkey(&e1),
         extract_server_pubkey(&e2),
@@ -4024,7 +4396,13 @@ fn test_proxy_server_key_rejects_same_as_agent_key() {
     let dir = tempdir().unwrap();
     signet()
         .env("SIGNET_HOME", dir.path())
-        .args(["identity", "generate", "--name", "shared-id", "--unencrypted"])
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "shared-id",
+            "--unencrypted",
+        ])
         .assert()
         .success();
 
@@ -4033,10 +4411,16 @@ fn test_proxy_server_key_rejects_same_as_agent_key() {
         "\n",
     );
     let (status, _, stderr) = run_proxy(
-        dir.path(), &mock_server_cmd(), "shared-id", input,
+        dir.path(),
+        &mock_server_cmd(),
+        "shared-id",
+        input,
         &["--server-key", "shared-id"],
     );
-    assert!(!status.success(), "proxy should reject identical key/server-key");
+    assert!(
+        !status.success(),
+        "proxy should reject identical key/server-key"
+    );
     assert!(
         stderr.contains("must differ from --key") || stderr.contains("same pubkey"),
         "stderr should explain rejection: {stderr}",

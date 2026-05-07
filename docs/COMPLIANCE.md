@@ -64,21 +64,25 @@ Article 12 requires high-risk AI systems to have logging capabilities that recor
 ### Exporting Article 12-supporting audit evidence
 
 ```bash
-# Export audit records for a specific period
-signet audit --since 90d --export article12-evidence.json
+# Build a portable evidence bundle for a specific period
+signet audit --since 90d \
+  --bundle article12-evidence \
+  --include-trust-bundle /var/lib/signet/trust/pilot.json
 
-# Verify chain integrity before submission
-signet verify --chain
-
-# Verify all signatures
-signet audit --verify
+# Re-verify the bundle on another machine
+signet audit --restore article12-evidence
 ```
 
-The exported JSON contains receipts with full signature data for later review.
+The bundle contains:
 
-Current limitation:
+- `records.jsonl` with the original hash-chained audit records
+- `manifest.json` with producer, host, time window, record count, chain tip, and SHA-256 of `records.jsonl`
+- `hash-summary.txt` for human-readable evidence handoff
+- `trust-bundle.json` when a trust snapshot is embedded
 
-- this export is a raw JSON record dump, not yet a signed evidence bundle with its own manifest, restore flow, or off-host verification packaging
+If you only need a local review artifact, `signet audit --export` still
+produces a raw JSON record dump. For off-host review and re-verification,
+the evidence bundle is the supported path.
 
 ---
 

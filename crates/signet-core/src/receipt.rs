@@ -66,6 +66,9 @@ pub enum OutcomeStatus {
     /// Policy or pre-execution check rejected the action.
     /// `reason` SHOULD be set.
     Rejected,
+    /// Action was blocked pending a human or external approval step.
+    /// `reason` SHOULD be set.
+    RequiresApproval,
     /// Action was executed and produced a response.
     Executed,
     /// Execution started but failed. `error` SHOULD be set.
@@ -105,6 +108,13 @@ impl Outcome {
             status: OutcomeStatus::Failed,
             reason: None,
             error: Some(error.into()),
+        }
+    }
+    pub fn requires_approval(reason: impl Into<String>) -> Self {
+        Self {
+            status: OutcomeStatus::RequiresApproval,
+            reason: Some(reason.into()),
+            error: None,
         }
     }
     pub fn verified() -> Self {

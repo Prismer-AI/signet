@@ -451,7 +451,10 @@ mod tests {
         assert!(bilateral.id.starts_with("rec_"));
         assert!(bilateral.sig.starts_with("ed25519:"));
         assert!(bilateral.response.content_hash.starts_with("sha256:"));
-        assert!(bilateral.response.outcome.is_none(), "default has no outcome");
+        assert!(
+            bilateral.response.outcome.is_none(),
+            "default has no outcome"
+        );
         assert_eq!(bilateral.server.name, "github-mcp");
         assert_eq!(bilateral.agent_receipt.id, agent_receipt.id);
         assert_eq!(bilateral.agent_receipt.sig, agent_receipt.sig);
@@ -466,8 +469,7 @@ mod tests {
         let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
         let response = json!({"ok": true});
 
-        let ts = chrono::Utc::now()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let bilateral = sign_bilateral_with_outcome(
             &server_key,
             &agent_receipt,
@@ -515,6 +517,30 @@ mod tests {
     }
 
     #[test]
+    fn test_sign_bilateral_with_outcome_requires_approval_carries_reason() {
+        use crate::receipt::{Outcome, OutcomeStatus};
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let action = test_action();
+        let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
+
+        let bilateral = sign_bilateral_with_outcome(
+            &server_key,
+            &agent_receipt,
+            &json!({}),
+            "srv",
+            "2026-04-28T10:00:00.000Z",
+            Some(Outcome::requires_approval("human approval required")),
+        )
+        .unwrap();
+
+        let outcome = bilateral.response.outcome.as_ref().expect("outcome");
+        assert_eq!(outcome.status, OutcomeStatus::RequiresApproval);
+        assert_eq!(outcome.reason.as_deref(), Some("human approval required"));
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
     fn test_outcome_tampering_invalidates_signature() {
         // The whole point of putting outcome inside the signed Response is
         // to detect post-hoc rewrites. Verify that.
@@ -524,8 +550,7 @@ mod tests {
         let action = test_action();
         let agent_receipt = sign(&agent_key, &action, "agent", "owner").unwrap();
 
-        let ts = chrono::Utc::now()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let mut bilateral = sign_bilateral_with_outcome(
             &server_key,
             &agent_receipt,

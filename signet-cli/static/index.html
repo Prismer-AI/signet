@@ -183,6 +183,34 @@ tr:hover { background: var(--paper2); }
 .badge-v2 { color: #6a3d8a; border-color: #6a3d8a; }
 .badge-v3 { color: var(--green); border-color: var(--green); }
 .badge-v4 { color: var(--accent); border-color: var(--accent); }
+.badge-policy {
+  color: var(--yellow);
+  border-color: var(--yellow);
+  background: var(--yellow-bg);
+}
+.badge-status-intent,
+.badge-status-verified {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+.badge-status-executed {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-bg);
+}
+.badge-status-failed,
+.badge-status-rejected,
+.badge-status-deny {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--red-bg);
+}
+.badge-status-requires_approval,
+.badge-status-require_approval {
+  color: var(--yellow);
+  border-color: var(--yellow);
+  background: var(--yellow-bg);
+}
 
 .mono { font-family: var(--mono); font-size: 12px; }
 
@@ -392,6 +420,7 @@ async function fetchJSON(url) {
 }
 
 function receiptTime(r) {
+  if (isPolicyViolation(r)) return r.ts;
   const v = r.v || 1;
   if (v === 1 || v === 4) return r.ts;
   if (v === 2) return r.ts_request;
@@ -411,10 +440,36 @@ function receiptTool(r) {
   return r.action?.tool || r.agent_receipt?.action?.tool || '';
 }
 function receiptSigner(r) {
-  return r.signer?.name || r.agent_receipt?.signer?.name || '';
+  return r.signer?.name || r.agent_receipt?.signer?.name || r.agent || '';
 }
 function receiptTarget(r) {
   return r.action?.target || r.agent_receipt?.action?.target || '';
+}
+function isPolicyViolation(r) {
+  return r.type === 'policy_violation';
+}
+function recordType(r) {
+  if (isPolicyViolation(r)) return 'policy';
+  return `v${r.v || 1}`;
+}
+function recordStatus(r) {
+  return r.response?.outcome?.status || (isPolicyViolation(r) ? normalizePolicyStatus(r.decision || 'policy_violation') : 'intent');
+}
+function recordId(rec) {
+  return rec.receipt?.id || rec.record_hash || '';
+}
+function kindBadge(r) {
+  if (isPolicyViolation(r)) return h('span', {class: 'badge badge-policy'}, 'policy');
+  const v = r.v || 1;
+  return h('span', {class: `badge badge-v${v}`}, `v${v}`);
+}
+function statusBadge(status) {
+  return h('span', {class: `badge badge-status-${status}`}, status);
+}
+function normalizePolicyStatus(decision) {
+  if (decision === 'deny') return 'rejected';
+  if (decision === 'require_approval') return 'requires_approval';
+  return decision;
 }
 
 function navigate(view) {
@@ -480,21 +535,45 @@ async function renderTimeline() {
 
     const table = h('table', null,
       h('thead', null, h('tr', null,
-        h('th', null, 'Timestamp'), h('th', null, 'Ver.'), h('th', null, 'Signer'),
-        h('th', null, 'Tool'), h('th', null, 'Target'), h('th', null, 'Receipt')
+        h('th', null, 'Timestamp'), h('th', null, 'Record'), h('th', null, 'Status'),
+        h('th', null, 'Signer'), h('th', null, 'Tool'), h('th', null, 'Target'), h('th', null, 'Receipt')
       )),
       h('tbody', null, ...records.map((rec, i) => {
         const r = rec.receipt;
-        const v = r.v || 1;
         const row = h('tr', {style: 'cursor:pointer', onclick: () => toggleRow(i, rec)},
           h('td', {class: 'mono'}, fmtTime(receiptTime(r))),
-          h('td', null, h('span', {class: `badge badge-v${v}`}, `v${v}`)),
+          h('td', null, kindBadge(r)),
+          h('td', null, statusBadge(recordStatus(r))),
           h('td', null, receiptSigner(r)),
           h('td', {class: 'mono'}, receiptTool(r)),
           h('td', {class: 'mono'}, truncate(receiptTarget(r), 28)),
-          h('td', {class: 'mono'}, truncate(r.id, 20))
+          h('td', {class: 'mono'}, truncate(recordId(rec), 20))
         );
         const detailParts = [];
+        const outcome = r.response?.outcome;
+        if (outcome) {
+          detailParts.push(h('div', {class: 'chain-viz'},
+            h('div', null,
+              h('strong', null, 'Outcome: '),
+              statusBadge(outcome.status)
+            ),
+            outcome.reason ? h('span', {class: 'chain-scope'}, `Reason: ${outcome.reason}`) : null,
+            outcome.error ? h('span', {class: 'chain-scope'}, `Error: ${outcome.error}`) : null,
+            r.server?.name ? h('span', {class: 'chain-scope'}, `Server: ${r.server.name}`) : null
+          ));
+        } else if (isPolicyViolation(r)) {
+          const rules = Array.isArray(r.matched_rules) ? r.matched_rules.join(', ') : '';
+          detailParts.push(h('div', {class: 'chain-viz'},
+            h('div', null,
+              h('strong', null, 'Policy Gate: '),
+              statusBadge(recordStatus(r))
+            ),
+            r.decision ? h('span', {class: 'chain-scope'}, `Decision: ${r.decision}`) : null,
+            r.reason ? h('span', {class: 'chain-scope'}, `Reason: ${r.reason}`) : null,
+            r.policy ? h('span', {class: 'chain-scope'}, `Policy: ${r.policy}`) : null,
+            rules ? h('span', {class: 'chain-scope'}, `Rules: ${rules}`) : null
+          ));
+        }
         const chain = receiptChain(r);
         if (chain && chain.length > 0) {
           const nodes = [];
@@ -515,7 +594,7 @@ async function renderTimeline() {
         }
         detailParts.push(h('pre', {class: 'receipt-detail'}, JSON.stringify(r, null, 2)));
         const detail = h('tr', {id: `detail-${i}`, style: 'display:none'},
-          h('td', {colspan: '6'}, ...detailParts)
+          h('td', {colspan: '7'}, ...detailParts)
         );
         return [row, detail];
       }).flat())
@@ -683,6 +762,10 @@ async function renderStats() {
       h('div', {class: 'stat-card'},
         h('div', {class: 'label'}, 'Distinct Tools'),
         h('div', {class: 'value'}, String(Object.keys(stats.by_tool).length))
+      ),
+      h('div', {class: 'stat-card'},
+        h('div', {class: 'label'}, 'Policy Violations'),
+        h('div', {class: 'value'}, String(stats.by_record_type?.policy_violation || 0))
       )
     );
 
@@ -708,8 +791,11 @@ async function renderStats() {
     }
     parts.push(makeChart('By Tool', stats.by_tool));
     parts.push(makeChart('By Signer', stats.by_signer));
+    if (stats.by_record_type) parts.push(makeChart('By Record Type', stats.by_record_type));
+    if (stats.by_outcome && Object.keys(stats.by_outcome).length) parts.push(makeChart('By Outcome', stats.by_outcome));
     parts.push(makeChart('By Version', stats.by_version));
-    if (stats.by_authorization) parts.push(makeChart('By Authorization', stats.by_authorization));
+    if (stats.by_authorization && Object.keys(stats.by_authorization).length) parts.push(makeChart('By Authorization', stats.by_authorization));
+    if (stats.by_policy_decision && Object.keys(stats.by_policy_decision).length) parts.push(makeChart('By Policy Gate Decision', stats.by_policy_decision));
     app.replaceChildren(...parts);
   } catch (e) {
     app.replaceChildren(h('div', {class: 'empty'}, `Error: ${e.message}`));

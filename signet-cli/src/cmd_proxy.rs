@@ -209,6 +209,14 @@ struct PendingRequest {
 
 type PendingMap = Arc<Mutex<HashMap<String, PendingRequest>>>;
 
+enum SignToolsCallDisposition {
+    Forwarded,
+    LocalResponse {
+        response_json: String,
+        bilateral_recorded: bool,
+    },
+}
+
 /// Evict stale entries from the pending map. Returns evicted entries
 /// so the caller can log their v1 receipts.
 fn evict_stale(pending: &PendingMap, ttl_secs: u64) -> Vec<PendingRequest> {
@@ -378,6 +386,10 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         server_pubkey_b64, server_key_origin
     );
     eprintln!("[signet proxy] bilateral co-signing: enabled (independent keys)");
+    eprintln!(
+        "[signet proxy] bilateral mode: audit-only; responses are forwarded unchanged. \
+         Use client/server helpers for client-visible bilateral artifacts."
+    );
 
     let mut command = if args.shell {
         if cfg!(windows) {
@@ -448,7 +460,9 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
         let policy = policy.clone();
         let dir = dir.clone();
         let target_uri = target_uri.clone();
+        let server_sk = server_sk.clone();
         let call_counter = call_counter.clone();
+        let bilateral_counter = bilateral_counter.clone();
         let pending = pending.clone();
         async move {
             let mut reader = BufReader::new(stdin);
@@ -485,6 +499,7 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                             match sign_tools_call(
                                 &mut msg,
                                 &sk,
+                                &server_sk,
                                 &signer_name,
                                 &owner,
                                 policy.as_ref(),
@@ -493,8 +508,21 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                 &target_uri,
                                 &pending,
                             ) {
-                                Ok(_) => {
+                                Ok(SignToolsCallDisposition::Forwarded) => {
                                     call_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                Ok(SignToolsCallDisposition::LocalResponse {
+                                    response_json,
+                                    bilateral_recorded,
+                                }) => {
+                                    call_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    if bilateral_recorded {
+                                        bilateral_counter
+                                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    }
+                                    out_writer.write_all(response_json.as_bytes()).await?;
+                                    out_writer.flush().await?;
+                                    continue;
                                 }
                                 Err(e) => {
                                     let rpc_id =
@@ -564,14 +592,16 @@ async fn run_proxy(args: ProxyArgs) -> Result<()> {
                                         .or_else(|| msg.get("error"))
                                         .cloned()
                                         .unwrap_or(serde_json::json!({}));
+                                    let outcome = infer_response_outcome(&msg);
                                     let ts = chrono::Utc::now()
                                         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                                    match signet_core::sign_bilateral(
+                                    match signet_core::sign_bilateral_with_outcome(
                                         &server_sk,
                                         &req.receipt,
                                         &response_content,
                                         "signet-proxy",
                                         &ts,
+                                        Some(outcome),
                                     ) {
                                         Ok(bilateral) => {
                                             if !no_log {
@@ -680,11 +710,53 @@ fn extract_rpc_id(msg: &serde_json::Value) -> Option<String> {
     })
 }
 
+fn extract_error_message(value: &serde_json::Value) -> String {
+    value
+        .get("message")
+        .and_then(|v| v.as_str())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            value
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("text"))
+                .and_then(|v| v.as_str())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn infer_response_outcome(msg: &serde_json::Value) -> signet_core::Outcome {
+    if let Some(error) = msg.get("error") {
+        return signet_core::Outcome::failed(extract_error_message(error));
+    }
+
+    if let Some(result) = msg.get("result") {
+        if result
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            return signet_core::Outcome::failed(extract_error_message(result));
+        }
+    }
+
+    signet_core::Outcome::executed()
+}
+
+fn append_audit_value(dir: &std::path::Path, value: &serde_json::Value, warning_label: &str) {
+    if let Err(e) = signet_core::audit::append(dir, value) {
+        eprintln!("[signet proxy] warning: {warning_label}: {e}");
+    }
+}
+
 /// Sign a tools/call request, store pending receipt for bilateral, inject into params.
 #[allow(clippy::too_many_arguments)]
 fn sign_tools_call(
     msg: &mut serde_json::Value,
     sk: &ed25519_dalek::SigningKey,
+    server_sk: &ed25519_dalek::SigningKey,
     signer_name: &str,
     signer_owner: &str,
     policy: Option<&signet_core::Policy>,
@@ -692,7 +764,7 @@ fn sign_tools_call(
     no_log: bool,
     target_uri: &str,
     pending: &PendingMap,
-) -> Result<()> {
+) -> Result<SignToolsCallDisposition> {
     let params = msg
         .get("params")
         .ok_or_else(|| anyhow::anyhow!("tools/call missing params"))?;
@@ -708,6 +780,7 @@ fn sign_tools_call(
         .unwrap_or(serde_json::json!({}));
 
     let call_id = extract_rpc_id(msg);
+    let rpc_id_json = msg.get("id").cloned().unwrap_or(serde_json::json!(null));
 
     let action = signet_core::Action {
         tool: tool_name.clone(),
@@ -727,6 +800,33 @@ fn sign_tools_call(
         match eval.decision {
             signet_core::RuleAction::Deny => {
                 eprintln!("[signet proxy] DENIED: {} ({})", tool_name, eval.reason);
+                let receipt = signet_core::sign(sk, &action, signer_name, signer_owner)?;
+                if !no_log {
+                    if let Ok(val) = serde_json::to_value(&receipt) {
+                        append_audit_value(dir, &val, "audit log failed");
+                    }
+                }
+                eprintln!("[signet proxy] signed: {} ({})", tool_name, receipt.id);
+
+                let error_message = format!("policy violation: {}", eval.reason);
+                let error_body = serde_json::json!({
+                    "code": -32600,
+                    "message": error_message,
+                });
+                let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let bilateral = signet_core::sign_bilateral_with_outcome(
+                    server_sk,
+                    &receipt,
+                    &error_body,
+                    "signet-proxy",
+                    &ts,
+                    Some(signet_core::Outcome::rejected(eval.reason.clone())),
+                )?;
+                if !no_log {
+                    if let Ok(val) = serde_json::to_value(&bilateral) {
+                        append_audit_value(dir, &val, "bilateral audit failed");
+                    }
+                }
                 if !no_log {
                     if let Err(e) =
                         signet_core::audit::append_violation(dir, &action, signer_name, &eval)
@@ -734,13 +834,53 @@ fn sign_tools_call(
                         eprintln!("[signet proxy] warning: audit log failed: {e}");
                     }
                 }
-                bail!("policy violation: {}", eval.reason);
+                eprintln!(
+                    "[signet proxy] bilateral: {} ({}) ← locally rejected",
+                    tool_name, bilateral.id,
+                );
+                let mut response_json = serde_json::to_string(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": rpc_id_json,
+                    "error": error_body,
+                }))?;
+                response_json.push('\n');
+                return Ok(SignToolsCallDisposition::LocalResponse {
+                    response_json,
+                    bilateral_recorded: true,
+                });
             }
             signet_core::RuleAction::RequireApproval => {
                 eprintln!(
                     "[signet proxy] NEEDS APPROVAL: {} ({})",
                     tool_name, eval.reason
                 );
+                let receipt = signet_core::sign(sk, &action, signer_name, signer_owner)?;
+                if !no_log {
+                    if let Ok(val) = serde_json::to_value(&receipt) {
+                        append_audit_value(dir, &val, "audit log failed");
+                    }
+                }
+                eprintln!("[signet proxy] signed: {} ({})", tool_name, receipt.id);
+
+                let error_message = format!("requires approval: {}", eval.reason);
+                let error_body = serde_json::json!({
+                    "code": -32600,
+                    "message": error_message,
+                });
+                let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                let bilateral = signet_core::sign_bilateral_with_outcome(
+                    server_sk,
+                    &receipt,
+                    &error_body,
+                    "signet-proxy",
+                    &ts,
+                    Some(signet_core::Outcome::requires_approval(eval.reason.clone())),
+                )?;
+                if !no_log {
+                    if let Ok(val) = serde_json::to_value(&bilateral) {
+                        append_audit_value(dir, &val, "bilateral audit failed");
+                    }
+                }
                 if !no_log {
                     if let Err(e) =
                         signet_core::audit::append_violation(dir, &action, signer_name, &eval)
@@ -748,7 +888,20 @@ fn sign_tools_call(
                         eprintln!("[signet proxy] warning: audit log failed: {e}");
                     }
                 }
-                bail!("requires approval: {}", eval.reason);
+                eprintln!(
+                    "[signet proxy] bilateral: {} ({}) ← waiting for approval",
+                    tool_name, bilateral.id,
+                );
+                let mut response_json = serde_json::to_string(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": rpc_id_json,
+                    "error": error_body,
+                }))?;
+                response_json.push('\n');
+                return Ok(SignToolsCallDisposition::LocalResponse {
+                    response_json,
+                    bilateral_recorded: true,
+                });
             }
             signet_core::RuleAction::Allow => {
                 let (receipt, _) = signet_core::sign_with_policy(
@@ -809,5 +962,5 @@ fn sign_tools_call(
 
     eprintln!("[signet proxy] signed: {} ({})", tool_name, receipt.id);
 
-    Ok(())
+    Ok(SignToolsCallDisposition::Forwarded)
 }

@@ -156,6 +156,41 @@ pub fn extract_signer_name(receipt: &serde_json::Value) -> Option<&str> {
                 .and_then(|s| s.get("name"))
                 .and_then(|n| n.as_str())
         })
+        // policy_violation: receipt.agent
+        .or_else(|| receipt.get("agent").and_then(|agent| agent.as_str()))
+}
+
+/// Returns the logical record type stored in the audit log.
+/// Signed receipts omit `type` and are reported as `receipt`.
+pub fn extract_record_type(receipt: &serde_json::Value) -> &str {
+    receipt
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("receipt")
+}
+
+/// Extract the signed response outcome status for v2/v3 receipts.
+pub fn extract_outcome_status(receipt: &serde_json::Value) -> Option<&str> {
+    receipt
+        .get("response")
+        .and_then(|response| response.get("outcome"))
+        .and_then(|outcome| outcome.get("status"))
+        .and_then(|status| status.as_str())
+}
+
+/// Extract a policy decision label from either a signed policy attestation
+/// or a top-level policy_violation audit record.
+pub fn extract_policy_decision(receipt: &serde_json::Value) -> Option<&str> {
+    if extract_record_type(receipt) == "policy_violation" {
+        return receipt
+            .get("decision")
+            .and_then(|decision| decision.as_str());
+    }
+
+    receipt
+        .get("policy")
+        .and_then(|policy| policy.get("decision"))
+        .and_then(|decision| decision.as_str())
 }
 
 /// Compute the canonical SHA-256 record hash for an audit record:
@@ -1568,5 +1603,56 @@ mod tests {
         assert_eq!(result.valid, 1);
         assert!(result.warnings.is_empty());
         assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_extract_helpers_for_bilateral_outcome() {
+        let (agent_key, _) = generate_keypair();
+        let (server_key, _) = generate_keypair();
+        let receipt = sign::sign(&agent_key, &test_action(), "agent", "").unwrap();
+        let bilateral = sign::sign_bilateral_with_outcome(
+            &server_key,
+            &receipt,
+            &json!({"ok": true}),
+            "server",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            Some(crate::receipt::Outcome::requires_approval(
+                "human approval required",
+            )),
+        )
+        .unwrap();
+        let value = serde_json::to_value(&bilateral).unwrap();
+
+        assert_eq!(extract_record_type(&value), "receipt");
+        assert_eq!(extract_signer_name(&value), Some("agent"));
+        assert_eq!(extract_tool(&value), Some("github_create_issue"));
+        assert_eq!(extract_outcome_status(&value), Some("requires_approval"));
+        assert_eq!(extract_policy_decision(&value), None);
+    }
+
+    #[test]
+    fn test_extract_helpers_for_policy_violation() {
+        let dir = tempfile::tempdir().unwrap();
+        let action = test_action();
+        let eval = crate::policy::PolicyEvalResult {
+            decision: crate::policy::RuleAction::Deny,
+            matched_rules: vec!["deny-all".to_string()],
+            winning_rule: Some("deny-all".to_string()),
+            reason: "denied by policy".to_string(),
+            evaluated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            policy_name: "default".to_string(),
+            policy_hash: "sha256:deadbeef".to_string(),
+        };
+        let record = serde_json::to_value(
+            append_violation(dir.path(), &action, "agent-denied", &eval).unwrap(),
+        )
+        .unwrap();
+        let receipt = &record["receipt"];
+
+        assert_eq!(extract_record_type(receipt), "policy_violation");
+        assert_eq!(extract_signer_name(receipt), Some("agent-denied"));
+        assert_eq!(extract_tool(receipt), Some("github_create_issue"));
+        assert_eq!(extract_outcome_status(receipt), None);
+        assert_eq!(extract_policy_decision(receipt), Some("deny"));
     }
 }

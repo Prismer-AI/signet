@@ -2,6 +2,8 @@
 
 Cryptographic tool-call receipts for [OpenClaw](https://openclaw.ai), powered by [Signet](https://github.com/Prismer-AI/signet).
 
+![tamper-evident audit log demo](demo/audit-only.gif)
+
 Every tool call dispatched by your OpenClaw gateway is:
 
 1. **Signed** with an Ed25519 key (Signet receipt v1+)

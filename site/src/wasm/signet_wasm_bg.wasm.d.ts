@@ -1,0 +1,32 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const wasm_compute_policy_hash: (a: number, b: number) => [number, number, number, number];
+export const wasm_content_hash: (a: number, b: number) => [number, number, number, number];
+export const wasm_evaluate_policy: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const wasm_generate_keypair: () => [number, number, number, number];
+export const wasm_parse_policy_yaml: (a: number, b: number) => [number, number, number, number];
+export const wasm_pubkey_from_seed: (a: number, b: number) => [number, number, number, number];
+export const wasm_sign: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+export const wasm_sign_authorized: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+export const wasm_sign_bilateral: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+export const wasm_sign_bilateral_with_outcome: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+export const wasm_sign_compound: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => [number, number, number, number];
+export const wasm_sign_delegation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
+export const wasm_sign_with_expiration: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+export const wasm_sign_with_policy: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
+export const wasm_verify: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const wasm_verify_allow_expired: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const wasm_verify_any: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const wasm_verify_authorized: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number, number];
+export const wasm_verify_bilateral: (a: number, b: number, c: number, d: number) => [number, number, number];
+export const wasm_verify_bilateral_with_options: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: bigint) => [number, number, number];
+export const wasm_verify_delegation: (a: number, b: number) => [number, number, number];
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

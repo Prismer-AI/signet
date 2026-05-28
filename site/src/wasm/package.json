@@ -1,0 +1,17 @@
+{
+  "name": "signet-wasm",
+  "type": "module",
+  "description": "WASM bindings for signet-core",
+  "version": "0.10.0",
+  "license": "Apache-2.0 OR MIT",
+  "files": [
+    "signet_wasm_bg.wasm",
+    "signet_wasm.js",
+    "signet_wasm.d.ts"
+  ],
+  "main": "signet_wasm.js",
+  "types": "signet_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

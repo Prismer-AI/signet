@@ -1,0 +1,9 @@
+node_modules
+dist
+*.local
+.vercel
+
+# The browser WASM in src/wasm/ is a committed deploy artifact: it lets Vercel
+# and GitHub Pages build with a plain `vite build`, no Rust/wasm-pack toolchain.
+# The repo-root .gitignore ignores *.wasm, so re-include the binary explicitly.
+!src/wasm/*.wasm

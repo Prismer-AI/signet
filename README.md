@@ -38,6 +38,10 @@
 </p>
 
 <p align="center">
+  <a href="https://signet-auth.vercel.app"><strong>▶ Try the live demo</strong></a> — sign a tool call in your browser, change a field, and watch verification fail. <sub>(mirror: <a href="https://prismer-ai.github.io/signet/">GitHub Pages</a>)</sub>
+</p>
+
+<p align="center">
   <a href="https://www.youtube.com/watch?v=7OiGV_pyZas">
     <img src="https://img.youtube.com/vi/7OiGV_pyZas/maxresdefault.jpg" alt="Watch the Signet walkthrough on YouTube" width="820">
   </a>

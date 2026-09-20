@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-20
+
 ### Added
 
 - **signet-core**: Constraint wiring (v0.11 S5, final increment). `Scope.constraints` replaces the dead `budget` field (old token JSON still parses — the unknown field is dropped). `BudgetUsage` counts prior receipts per `del:<token_id>` (every budgeted token in each chain — minting child tokens cannot expand an ancestor's budget) and per `dec:<decision_id>` (decision replay visibility). `check_call_count` fails at exactly `max_calls` prior uses. `SignGates { usage, revocations }` threads local knowledge through `sign_with_decision` / `sign_with_policy_authority` / `sign_authorized_full`; structural gates (narrowing invariant, subject consistency) always run, local gates (revocation, budgets, decision replay counting) run when supplied. Narrowing: decision constraints may shrink token constraints, never widen; cross-currency monetary pairs refuse; amounts compare as arbitrary-precision decimals. Chainless decisions also pass the revocation gate. New error variant `BudgetExhausted`.

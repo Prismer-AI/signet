@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>你的 Agent 跑在别人的基础设施上。证明归你所有。</strong><br/>
-  <sub>每次工具调用生成密码学证据 —— 签名、哈希链、可离线验证。独立于任何平台和厂商。</sub>
+  <sub>每一次 Agent 行动的密码学信任与授权证据 —— 身份、委托、策略、回执：签名、哈希链、可离线验证。独立于任何平台和厂商。</sub>
 </p>
 
 [![CI](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml/badge.svg)](https://github.com/Prismer-AI/signet/actions/workflows/ci.yml)

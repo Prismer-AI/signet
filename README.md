@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Don't just log agent actions. Prove them.</strong><br/>
-  <sub>Cryptographic receipts for every AI agent tool call — signed, hash-chained, offline-verifiable. Independent of any provider.</sub>
+  <sub>Cryptographic trust and authorization evidence for every AI agent action — identity, delegation, policy, receipts: signed, hash-chained, offline-verifiable. Independent of any provider.</sub>
 </p>
 
 <p align="center">
@@ -61,7 +61,7 @@
 
 **Your AI agent just placed an order, deleted a row, sent an email, merged a PR. Can you prove exactly what it did — to an auditor, a customer, or yourself after an incident?**
 
-Signet is the **independent verification layer** for agent actions. Every tool call gets a signed receipt that anyone can verify offline, without trusting the platform that hosted the agent or the vendor that stored the logs.
+Signet is the **independent trust layer** for agent actions. Every tool call gets a signed receipt that anyone can verify offline, without trusting the platform that hosted the agent or the vendor that stored the logs — and since 0.11, the authorization behind an action carries its own proof: who the agent is (principal), who let it act (delegation), and who allowed this specific action (authority-signed decision).
 
 > **Your agents run on their infrastructure. The proof belongs to you.**
 
@@ -116,14 +116,13 @@ Signet adds a lightweight trust layer for agent actions:
 - **Attest policy** by embedding a signed `PolicyAttestation` when a YAML policy is satisfied
 - **Inspect locally** with an append-only audit log and dashboard, no hosted control plane required
 
-## What's New In 0.9
+## What's New In 0.11
 
-- **MCP proxy**: `signet proxy --target <cmd> --key <name>` — drop Signet in front of any MCP server as a transparent stdio proxy. No changes to the agent or server required. Signs every `tools/call` and appends bilateral co-signatures to the local audit path; client-visible bilateral response handling is stronger through integrated transport/server helpers.
-- **Trace correlation**: `trace_id` and `parent_receipt_id` fields on `Action` link receipts across multi-step workflows into a causal chain. Both fields are part of the signed payload — tampering invalidates the signature.
-- **Policy engine**: `signet sign --policy policy.yaml` enforces policy before signing and binds the decision into the receipt. The proxy also respects `--policy`, blocking denied calls before they reach the server while producing signed bilateral `rejected` / `requires_approval` outcomes and a hash-chained `policy_violation` audit record.
-- **Delegation chains**: `signet delegate ...` produces v4 receipts that prove who authorized the agent and what scope it had.
-- **Local dashboard**: `signet dashboard` shows timeline, chain integrity, signature health, and delegated vs direct activity.
-- **Broader integrations**: official Claude Code plugin, Codex plugin, MCP middleware, Python SDK, and Vercel AI SDK callbacks.
+- **Canonical principals**: every identity can carry a scoped principal URI (`agent://prismer/deploy-bot`), signed inside receipts and delegation tokens; `acting_for` claims are machine-corroborated by the chain root.
+- **Authority-signed authorization decisions**: `signet authorize` pre-approves one intent; `signet sign --decision` produces a receipt backed by it (or `--authority-key` does it in one step). A decision binds to the action via `intent_hash`, so replay onto a different action is refused.
+- **Revocation**: `signet revoke` invalidates delegation tokens and decisions with an issuer-signed record. Verification reports an explicit status — `revoked` fails, `unknown` is never reported as authorized (`--require-revocation-known` for strict mode). Evidence bundles carry revocation records.
+- **Conditions and limits**: policy rules carry typed obligations (`require_approval`, `sandbox`, …); delegation scopes carry constraints (`--max-calls`, `--spend-limit`). Sign paths enforce call-count budgets and the narrowing invariant (a grant can shrink a delegation, never widen it).
+- **Hardening**: `verify()` now correctly verifies v4 receipts; rate-limited policy rules fail closed when no state is supplied; delegation expiry binds to wall clock (backdating a receipt timestamp no longer dodges it).
 
 ## Compliance
 

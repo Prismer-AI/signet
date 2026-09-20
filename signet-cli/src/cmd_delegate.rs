@@ -47,6 +47,12 @@ pub struct CreateArgs {
     /// Parent scope JSON file (for scope narrowing validation)
     #[arg(long)]
     pub parent_scope: Option<String>,
+    /// Max calls under this token (sugar for a call_count constraint)
+    #[arg(long)]
+    pub max_calls: Option<u64>,
+    /// Spend limit as <amount>,<currency> e.g. 500.00,USD (declarative monetary constraint)
+    #[arg(long, value_name = "AMOUNT,CURRENCY")]
+    pub spend_limit: Option<String>,
     /// Delegator principal URI (e.g. user://prismer/alice); defaults to the key's stored principal
     #[arg(long)]
     pub from_principal: Option<String>,
@@ -160,12 +166,30 @@ fn create(args: CreateArgs) -> Result<()> {
         _ => None,
     };
 
+    let mut constraints = Vec::new();
+    if let Some(max_calls) = args.max_calls {
+        constraints.push(signet_core::Constraint::CallCount { max_calls });
+    }
+    if let Some(spec) = args.spend_limit.as_deref() {
+        let (amount, currency) = spec.split_once(',').ok_or_else(|| {
+            anyhow::anyhow!("--spend-limit expects <amount>,<currency> e.g. 500.00,USD")
+        })?;
+        constraints.push(signet_core::Constraint::Monetary {
+            amount: amount.trim().to_string(),
+            currency: currency.trim().to_string(),
+        });
+    }
+
     let scope = signet_core::Scope {
         tools: parse_tools_targets(&args.tools)?,
         targets: parse_tools_targets(&args.targets)?,
         max_depth: args.max_depth,
         expires,
-        budget: None,
+        constraints: if constraints.is_empty() {
+            None
+        } else {
+            Some(constraints)
+        },
     };
 
     let parent_scope = if let Some(ref path) = args.parent_scope {
@@ -276,19 +300,23 @@ fn sign(args: DelegateSignArgs) -> Result<()> {
 
     let principal = args.principal.as_deref().or(info.principal.as_deref());
 
-    // Fail-closed revocation gate: local records are consulted before signing.
+    // Fail-closed local gates (revocation + call-count budgets) from the
+    // local audit log and revocation file.
+    let gates_usage = crate::cmd_revoke::budget_usage_from_audit(&dir);
     let revocations = crate::cmd_revoke::load_local_revocations();
-    crate::cmd_revoke::ensure_not_revoked(
-        signet_core::check_revocation(&chain, &[], &revocations)?,
-        "delegation chain",
-    )?;
+    let gates = signet_core::SignGates {
+        usage: &gates_usage,
+        revocations: &revocations,
+    };
 
-    let receipt = signet_core::sign_authorized_with_principal(
+    let receipt = signet_core::sign_authorized_full(
         &sk,
         &action,
         &info.name,
         principal,
         args.acting_for.as_deref(),
+        None,
+        Some(&gates),
         chain,
     )?;
     let json = serde_json::to_string(&receipt)?;

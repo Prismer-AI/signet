@@ -27,7 +27,7 @@ pub use authorization::{
     authorize, intent_hash, verify_decision, verify_decision_for_action, verify_decision_trusted,
     AuthorizationDecision, CanonicalIntent, DecisionBasis, DecisionType,
 };
-pub use constraint::{decimal_lte, Constraint, Decimal};
+pub use constraint::{check_call_count, decimal_lte, BudgetUsage, Constraint, Decimal};
 pub use delegation::{
     validate_scope_narrowing, Authorization, DelegationIdentity, DelegationToken, Scope,
 };
@@ -58,8 +58,8 @@ pub use sign::{
     sign_with_policy_with_principal, sign_with_principal,
 };
 pub use sign_delegation::{
-    sign_authorized, sign_authorized_with_principal, sign_delegation,
-    sign_delegation_with_principals,
+    sign_authorized, sign_authorized_full, sign_authorized_with_principal, sign_delegation,
+    sign_delegation_with_principals, SignGates,
 };
 pub use trust::{
     parse_trust_bundle_json, parse_trust_bundle_yaml, validate_trust_bundle, TrustBundle,

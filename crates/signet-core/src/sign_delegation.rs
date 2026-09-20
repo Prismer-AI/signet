@@ -134,22 +134,76 @@ pub fn sign_delegation_with_principals(
     })
 }
 
-/// Chain gates for the combined v4+decision path (spec §3.3).
-///
-/// Phase 3 scope: the decision's subject must match the chain's final
-/// delegate principal when the chain carries one — the grant and the
-/// delegation must point at the same agent. Revocation (fail-closed) and
-/// call-count budget gates join here in their phases.
-pub(crate) fn enforce_chain_gates(
+/// Sign-time gate inputs (spec §3.3): usage counts (local audit log) and
+/// revocation records (local file). None of this is trust material — it is
+/// the fail-closed local knowledge the signer consults before signing.
+pub struct SignGates<'a> {
+    pub usage: &'a crate::constraint::BudgetUsage,
+    pub revocations: &'a [crate::revocation::RevocationRecord],
+}
+
+/// Structural gates — always enforced when a decision rides a chain:
+/// the narrowing invariant (decision constraints ⊆ token constraints) and
+/// subject/delegate-principal consistency. These are invariants of the
+/// artifacts themselves, not of local knowledge.
+pub(crate) fn enforce_chain_gates_structural(
     chain: &[DelegationToken],
     decision: &crate::authorization::AuthorizationDecision,
 ) -> Result<(), SignetError> {
+    for token in chain {
+        if let Some(token_constraints) = token.scope.constraints.as_ref() {
+            crate::constraint::check_narrowing(&decision.constraints, token_constraints)?;
+        }
+    }
+
     if let Some(final_principal) = chain.last().and_then(|t| t.delegate.principal.as_deref()) {
         if decision.subject != final_principal {
             return Err(SignetError::DecisionInvalid(format!(
                 "decision subject '{}' does not match chain delegate principal '{final_principal}'",
                 decision.subject
             )));
+        }
+    }
+    Ok(())
+}
+
+/// Local-knowledge gates (spec §3.3): revocation (fail-closed against local
+/// records) and call-count budgets — every budgeted token in the chain,
+/// counted per token id so minting child tokens cannot expand an ancestor's
+/// budget. Consulted only when the caller supplies usage/revocation data.
+pub(crate) fn enforce_chain_gates_local(
+    chain: &[DelegationToken],
+    decision: Option<&crate::authorization::AuthorizationDecision>,
+    gates: &SignGates<'_>,
+) -> Result<(), SignetError> {
+    let decisions: Vec<crate::authorization::AuthorizationDecision> =
+        decision.map(|d| vec![d.clone()]).unwrap_or_default();
+    if let crate::revocation::RevocationStatus::Revoked { at, .. } =
+        crate::revocation::check_revocation(chain, &decisions, gates.revocations)?
+    {
+        let id = decisions
+            .first()
+            .map(|d| d.decision_id.clone())
+            .or_else(|| chain.first().map(|t| t.id.clone()))
+            .unwrap_or_default();
+        return Err(SignetError::DelegationRevoked {
+            artifact_id: id,
+            at,
+        });
+    }
+
+    use crate::constraint::Constraint;
+    for token in chain {
+        if let Some(constraints) = token.scope.constraints.as_ref() {
+            for c in constraints {
+                if let Constraint::CallCount { max_calls } = c {
+                    crate::constraint::check_call_count(
+                        &format!("del:{}", token.id),
+                        *max_calls,
+                        gates.usage,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
@@ -163,6 +217,32 @@ pub fn sign_authorized(
     chain: Vec<DelegationToken>,
 ) -> Result<Receipt, SignetError> {
     sign_authorized_with_principal(key, action, signer_name, None, None, chain)
+}
+
+/// Fully-parameterized v4 signing: optional decision, optional local gates
+/// (revocation + call-count budgets). The public entry the CLI uses for both
+/// the chain-only and the chain+decision paths.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_authorized_full(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_principal: Option<&str>,
+    acting_for: Option<&str>,
+    decision: Option<&crate::authorization::AuthorizationDecision>,
+    gates: Option<&SignGates<'_>>,
+    chain: Vec<DelegationToken>,
+) -> Result<Receipt, SignetError> {
+    sign_authorized_inner(
+        key,
+        action,
+        signer_name,
+        signer_principal,
+        acting_for,
+        decision,
+        gates,
+        chain,
+    )
 }
 
 /// `sign_authorized` with canonical principals on the signer.
@@ -184,6 +264,7 @@ pub fn sign_authorized_with_principal(
         signer_principal,
         acting_for,
         None,
+        None,
         chain,
     )
 }
@@ -191,6 +272,7 @@ pub fn sign_authorized_with_principal(
 /// The v4 + decision combined path. The chain gates run whenever a decision
 /// rides a chain (subject consistency today; revocation and budget gates
 /// land with their phases).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sign_authorized_inner(
     key: &SigningKey,
     action: &Action,
@@ -198,6 +280,7 @@ pub(crate) fn sign_authorized_inner(
     signer_principal: Option<&str>,
     acting_for: Option<&str>,
     decision: Option<&crate::authorization::AuthorizationDecision>,
+    gates: Option<&SignGates<'_>>,
     chain: Vec<DelegationToken>,
 ) -> Result<Receipt, SignetError> {
     if chain.is_empty() {
@@ -232,7 +315,10 @@ pub(crate) fn sign_authorized_inner(
     };
 
     if let Some(dec) = decision {
-        enforce_chain_gates(&chain, dec)?;
+        enforce_chain_gates_structural(&chain, dec)?;
+    }
+    if let Some(gates) = gates {
+        enforce_chain_gates_local(&chain, decision, gates)?;
     }
 
     // Extract from chain BEFORE moving it
@@ -311,7 +397,7 @@ mod tests {
             targets: vec!["mcp://github".to_string()],
             max_depth: 1,
             expires: None,
-            budget: None,
+            constraints: None,
         }
     }
 
@@ -371,14 +457,14 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 2,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let child_scope = Scope {
             tools: vec!["Write".to_string()], // not in parent
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: None,
-            budget: None,
+            constraints: None,
         };
 
         let err = sign_delegation(
@@ -403,7 +489,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 10,
             expires: None,
-            budget: None,
+            constraints: None,
         };
 
         // No parent scope — should succeed for any scope
@@ -474,7 +560,7 @@ mod tests {
             targets: vec!["mcp://test".to_string()],
             max_depth: 1,
             expires: None,
-            budget: None,
+            constraints: None,
         };
 
         let err = sign_delegation(
@@ -498,7 +584,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: Some("not-a-date".to_string()),
-            budget: None,
+            constraints: None,
         };
 
         let err = sign_delegation(
@@ -546,7 +632,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: None,
-            budget: None,
+            constraints: None,
         };
 
         let err = sign_delegation(
@@ -738,7 +824,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -779,7 +865,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -828,7 +914,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -872,7 +958,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,

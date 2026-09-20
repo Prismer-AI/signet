@@ -144,16 +144,14 @@ pub fn sign(args: SignArgs) -> Result<()> {
         None => None,
     };
 
-    // Fail-closed revocation gate: local records are consulted before signing.
+    // Fail-closed local gates (revocation + call-count budgets + decision
+    // replay counting) — enforced inside the core sign paths when supplied.
+    let gates_usage = crate::cmd_revoke::budget_usage_from_audit(&dir);
     let local_revocations = crate::cmd_revoke::load_local_revocations();
-    if let Some(ref cj) = chain_json {
-        let chain_tokens: Vec<signet_core::DelegationToken> =
-            serde_json::from_str(cj).map_err(|e| anyhow::anyhow!("invalid chain JSON: {e}"))?;
-        crate::cmd_revoke::ensure_not_revoked(
-            signet_core::check_revocation(&chain_tokens, &[], &local_revocations)?,
-            "delegation chain",
-        )?;
-    }
+    let gates = signet_core::SignGates {
+        usage: &gates_usage,
+        revocations: &local_revocations,
+    };
 
     let receipt = if let Some(ref decision_path) = args.decision {
         // Two-step flow: consume a pre-made authority decision.
@@ -166,14 +164,6 @@ pub fn sign(args: SignArgs) -> Result<()> {
         let decision_str = fs::read_to_string(decision_path)
             .map_err(|e| anyhow::anyhow!("failed to read decision file '{decision_path}': {e}"))?;
         let decision: signet_core::AuthorizationDecision = serde_json::from_str(&decision_str)?;
-        crate::cmd_revoke::ensure_not_revoked(
-            signet_core::check_revocation(
-                &[],
-                std::slice::from_ref(&decision),
-                &local_revocations,
-            )?,
-            "authorization decision",
-        )?;
         let principal = principal.ok_or_else(|| {
             anyhow::anyhow!(
                 "--principal (or key metadata principal) is required with --decision: the decision subject must be corroborated"
@@ -187,6 +177,7 @@ pub fn sign(args: SignArgs) -> Result<()> {
             Some(principal),
             &decision,
             chain_json.as_deref(),
+            Some(&gates),
         )?
     } else if let Some(ref policy_path) = args.policy {
         let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
@@ -240,6 +231,7 @@ pub fn sign(args: SignArgs) -> Result<()> {
                         &policy,
                         None,
                         chain_json.as_deref(),
+                        Some(&gates),
                     )?
                     .0
                 } else {
@@ -275,12 +267,14 @@ pub fn sign(args: SignArgs) -> Result<()> {
         // v4 receipt without a decision: delegation proof only.
         let chain: Vec<signet_core::DelegationToken> =
             serde_json::from_str(chain_json.as_deref().unwrap())?;
-        signet_core::sign_authorized_with_principal(
+        signet_core::sign_authorized_full(
             &sk,
             &action,
             &info.name,
             principal,
             args.acting_for.as_deref(),
+            None,
+            Some(&gates),
             chain,
         )?
     } else {

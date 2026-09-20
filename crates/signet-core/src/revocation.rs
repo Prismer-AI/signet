@@ -244,7 +244,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             None,
         )

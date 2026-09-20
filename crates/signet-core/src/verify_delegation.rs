@@ -267,7 +267,7 @@ mod tests {
             targets: vec!["mcp://test".to_string()],
             max_depth: 1,
             expires: None,
-            budget: None,
+            constraints: None,
         }
     }
 
@@ -365,7 +365,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: Some("2020-01-01T00:00:00Z".to_string()), // long past
-            budget: None,
+            constraints: None,
         };
 
         let token = sign_delegation(
@@ -393,7 +393,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: Some(future),
-            budget: None,
+            constraints: None,
         };
 
         let token = sign_delegation(
@@ -468,7 +468,6 @@ mod tests {
 
         // Tamper unsigned fields — should NOT affect verification
         token.correlation_id = Some("tampered".to_string());
-        token.scope.budget = Some(serde_json::json!({"amount": 999}));
         assert!(verify_delegation(&token, None).is_ok());
     }
 
@@ -483,7 +482,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: 1,
             expires: Some("2026-06-01T00:00:00Z".to_string()),
-            budget: None,
+            constraints: None,
         };
 
         let token = sign_delegation(
@@ -521,7 +520,7 @@ mod tests {
             targets: vec!["*".to_string()],
             max_depth: depth as u32,
             expires: None,
-            budget: None,
+            constraints: None,
         };
 
         // root -> keys[0]
@@ -547,7 +546,7 @@ mod tests {
                 targets: vec!["*".to_string()],
                 max_depth: parent_scope.max_depth - 1,
                 expires: None,
-                budget: None,
+                constraints: None,
             };
             let token = sign_delegation(
                 &keys[i - 1],
@@ -580,7 +579,7 @@ mod tests {
             targets: vec!["mcp://test".to_string()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -622,7 +621,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 1,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             None,
         )
@@ -637,7 +636,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             Some(&t1.scope),
         )
@@ -652,7 +651,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             None, // bypass narrowing to force the chain
         )
@@ -679,7 +678,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 1,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             None,
         )
@@ -695,7 +694,7 @@ mod tests {
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             },
             None,
         )
@@ -715,7 +714,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -744,7 +743,7 @@ mod tests {
             targets: vec!["mcp://test".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -794,7 +793,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -837,7 +836,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -881,7 +880,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -924,7 +923,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -995,7 +994,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -1036,7 +1035,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -1090,7 +1089,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: None,
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,
@@ -1145,7 +1144,7 @@ mod tests {
             targets: vec!["*".into()],
             max_depth: 0,
             expires: Some(expired_at),
-            budget: None,
+            constraints: None,
         };
         let token = sign_delegation(
             &root_key,

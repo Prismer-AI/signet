@@ -29,8 +29,11 @@ pub struct Scope {
     pub max_depth: u32,       // 0 = cannot re-delegate
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>, // RFC 3339 with UTC (Z)
+    /// Typed limits attached to the grant (spec §6.1). Replaces the dead
+    /// `budget` field, which was "reserved", never produced, and is ignored
+    /// on parse (serde drops unknown fields) — old token JSON still loads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget: Option<serde_json::Value>, // reserved for future use
+    pub constraints: Option<Vec<crate::constraint::Constraint>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,7 +283,7 @@ mod tests {
             targets: targets.iter().map(|s| s.to_string()).collect(),
             max_depth,
             expires: expires.map(|s| s.to_string()),
-            budget: None,
+            constraints: None,
         }
     }
 

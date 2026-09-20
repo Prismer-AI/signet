@@ -10,6 +10,7 @@ pyo3::create_exception!(signet_auth, InvalidPrincipalError, SignetError);
 pyo3::create_exception!(signet_auth, InvalidObligationError, SignetError);
 pyo3::create_exception!(signet_auth, AuthorityMismatchError, SignetError);
 pyo3::create_exception!(signet_auth, DelegationRevokedError, SignetError);
+pyo3::create_exception!(signet_auth, BudgetExhaustedError, SignetError);
 pyo3::create_exception!(signet_auth, DecisionInvalidError, SignetError);
 pyo3::create_exception!(signet_auth, InvalidConstraintError, SignetError);
 pyo3::create_exception!(signet_auth, CanonicalizeError, SignetError);
@@ -125,6 +126,11 @@ pub fn to_py_err(err: signet_core::SignetError) -> PyErr {
         signet_core::SignetError::InvalidPrincipal(msg) => InvalidPrincipalError::new_err(msg),
         signet_core::SignetError::InvalidObligation(msg) => InvalidObligationError::new_err(msg),
         signet_core::SignetError::AuthorityMismatch(msg) => AuthorityMismatchError::new_err(msg),
+        signet_core::SignetError::BudgetExhausted { key, limit, usage } => {
+            BudgetExhaustedError::new_err(format!(
+                "budget exhausted for {key}: limit {limit}, already used {usage}"
+            ))
+        }
         signet_core::SignetError::DelegationRevoked { artifact_id, at } => {
             DelegationRevokedError::new_err(format!(
                 "revoked artifact {artifact_id} (revoked at {at})"

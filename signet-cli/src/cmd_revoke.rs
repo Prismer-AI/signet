@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use clap::Args;
-use signet_core::{ArtifactType, RevocationRecord, RevocationStatus};
+use signet_core::{ArtifactType, RevocationRecord};
 
 /// `signet revoke` — issuer-signed revocation of a delegation token or an
 /// authorization decision (spec §4.2). Only the artifact's issuer key can
@@ -216,14 +216,29 @@ pub fn load_local_revocations() -> Vec<RevocationRecord> {
         }
     }
 }
-
-/// Sign-time gate: refuse to sign under revoked tokens or with revoked
-/// decisions. Unknown is NOT blocking (offline verification stays usable).
-pub fn ensure_not_revoked(status: RevocationStatus, context: &str) -> Result<()> {
-    match status {
-        RevocationStatus::Revoked { at, by } => {
-            bail!("{context} revoked at {at} by {by} — refusing to sign (fail closed)")
+/// Build usage counts from the local audit log (single-host honesty).
+/// Read failures surface as a warning; budget checks then run against an
+/// empty usage (never silently blocking all signing).
+pub fn budget_usage_from_audit(dir: &std::path::Path) -> signet_core::BudgetUsage {
+    // audit::query takes the SIGNET_HOME base and joins "audit" itself.
+    if !dir.join("audit").exists() {
+        return signet_core::BudgetUsage::default();
+    }
+    let records = match signet_core::audit::query(dir, &Default::default()) {
+        Ok(records) => records,
+        Err(e) => {
+            eprintln!("Warning: failed to read audit log for budget usage ({e})");
+            return signet_core::BudgetUsage::default();
         }
-        RevocationStatus::Unknown => Ok(()),
+    };
+    let values: Vec<serde_json::Value> = records.into_iter().map(|r| r.receipt).collect();
+    match signet_core::BudgetUsage::from_receipt_values(&values) {
+        Ok(usage) => usage,
+        Err(e) => {
+            eprintln!(
+                "Warning: audit log contains unparseable receipts ({e}); budget usage may undercount"
+            );
+            signet_core::BudgetUsage::default()
+        }
     }
 }

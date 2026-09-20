@@ -24,6 +24,9 @@ pub enum SignetError {
     #[error("revoked artifact {artifact_id} (revoked at {at})")]
     DelegationRevoked { artifact_id: String, at: String },
 
+    #[error("budget exhausted for {key}: limit {limit}, already used {usage}")]
+    BudgetExhausted { key: String, limit: u64, usage: u64 },
+
     #[error("authorization decision invalid: {0}")]
     DecisionInvalid(String),
 

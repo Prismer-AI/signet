@@ -1705,7 +1705,7 @@ fn test_revoke_then_sign_and_verify_fail_closed() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("refusing to sign"));
+        .stderr(predicate::str::contains("revoked artifact"));
 
     // verify-auth reports REVOKED and exits nonzero
     let receipt_path = dir.path().join("v4.json");
@@ -1901,7 +1901,159 @@ fn test_revoke_decision_and_sign_refusal() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("refusing to sign"));
+        .stderr(predicate::str::contains("revoked artifact"));
+}
+
+#[test]
+fn test_delegate_max_calls_budget_exhaustion() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--max-calls",
+            "2",
+            "--output",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let token: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&token_path).unwrap()).unwrap();
+    assert_eq!(token["scope"]["constraints"][0]["type"], "call_count");
+    assert_eq!(token["scope"]["constraints"][0]["max_calls"], 2);
+
+    let chain_path = dir.path().join("chain.json");
+    fs::write(
+        &chain_path,
+        format!("[{}]", fs::read_to_string(&token_path).unwrap()),
+    )
+    .unwrap();
+
+    // Two signs land in the audit log (no --no-log)…
+    for i in 1..=2 {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "delegate",
+                "sign",
+                "--key",
+                "bot",
+                "--tool",
+                "Bash",
+                "--params",
+                &format!(r#"{{"i":{i}}}"#),
+                "--target",
+                "mcp://local",
+                "--chain",
+                chain_path.to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    // …the third exhausts the budget.
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--params",
+            r#"{"i":3}"#,
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("budget exhausted"));
+}
+
+#[test]
+fn test_delegate_spend_limit_sugar() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--spend-limit",
+            "500.00,USD",
+            "--output",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let token: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&token_path).unwrap()).unwrap();
+    assert_eq!(token["scope"]["constraints"][0]["type"], "monetary");
+    assert_eq!(token["scope"]["constraints"][0]["amount"], "500.00");
+    assert_eq!(token["scope"]["constraints"][0]["currency"], "USD");
+
+    // Malformed spec fails at creation.
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot2",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--spend-limit",
+            "500",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("spend-limit expects"));
 }
 
 #[test]

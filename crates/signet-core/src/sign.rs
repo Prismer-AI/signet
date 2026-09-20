@@ -290,6 +290,7 @@ fn sign_with_policy_inner(
 /// signer principal — all checked before the receipt exists. `chain = Some`
 /// produces a v4 receipt (delegation proof + decision in one artifact) and
 /// runs the chain gates.
+#[allow(clippy::too_many_arguments)]
 pub fn sign_with_decision(
     key: &SigningKey,
     action: &Action,
@@ -298,8 +299,10 @@ pub fn sign_with_decision(
     signer_principal: Option<&str>,
     decision: &crate::authorization::AuthorizationDecision,
     chain: Option<&str>,
+    gates: Option<&crate::sign_delegation::SignGates<'_>>,
 ) -> Result<Receipt, SignetError> {
     use crate::authorization::{verify_decision, verify_decision_for_action, DecisionType};
+    use crate::constraint::{check_call_count, Constraint};
 
     // Q11: sign flows accept only allow decisions. Deny evidence comes from
     // the proxy's policy_violation path; a deny decision cannot back a receipt.
@@ -312,6 +315,21 @@ pub fn sign_with_decision(
     verify_decision(decision)?;
     verify_decision_for_action(decision, action, signer_principal)?;
 
+    // Decision replay gate (spec §3.6): a decision's own call_count counts
+    // its consumptions by decision_id. Without a gate (no usage data) the
+    // check is skipped — multi-use within TTL is the default semantics.
+    if let Some(gates) = gates {
+        for c in &decision.constraints {
+            if let Constraint::CallCount { max_calls } = c {
+                check_call_count(
+                    &format!("dec:{}", decision.decision_id),
+                    *max_calls,
+                    gates.usage,
+                )?;
+            }
+        }
+    }
+
     match chain {
         Some(chain_json) => {
             let tokens: Vec<crate::delegation::DelegationToken> = serde_json::from_str(chain_json)
@@ -323,22 +341,40 @@ pub fn sign_with_decision(
                 signer_principal,
                 None,
                 Some(decision),
+                gates,
                 tokens,
             )
         }
-        None => sign_inner(
-            key,
-            action,
-            signer_name,
-            signer_owner,
-            SignOptions {
-                exp: None,
-                policy: None,
-                principal: signer_principal.map(|s| s.to_string()),
-                acting_for: None,
-                authz_decision: Some(decision.clone()),
-            },
-        ),
+        None => {
+            // Chainless decisions still pass the local revocation gate.
+            if let Some(gates) = gates {
+                if let crate::revocation::RevocationStatus::Revoked { at, .. } =
+                    crate::revocation::check_revocation(
+                        &[],
+                        std::slice::from_ref(decision),
+                        gates.revocations,
+                    )?
+                {
+                    return Err(SignetError::DelegationRevoked {
+                        artifact_id: decision.decision_id.clone(),
+                        at,
+                    });
+                }
+            }
+            sign_inner(
+                key,
+                action,
+                signer_name,
+                signer_owner,
+                SignOptions {
+                    exp: None,
+                    policy: None,
+                    principal: signer_principal.map(|s| s.to_string()),
+                    acting_for: None,
+                    authz_decision: Some(decision.clone()),
+                },
+            )
+        }
     }
 }
 
@@ -358,6 +394,7 @@ pub fn sign_with_policy_authority(
     policy: &crate::policy::Policy,
     rate_state: Option<&mut crate::policy_eval::RateLimitState>,
     chain: Option<&str>,
+    gates: Option<&crate::sign_delegation::SignGates<'_>>,
 ) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
     use crate::authorization::{authorize, CanonicalIntent, DecisionBasis, DecisionType};
 
@@ -400,6 +437,7 @@ pub fn sign_with_policy_authority(
         Some(agent_principal),
         &decision,
         chain,
+        gates,
     )?;
 
     Ok((receipt, eval))
@@ -1161,7 +1199,7 @@ rules: []
         };
         use crate::constraint::Constraint;
 
-        fn action() -> Action {
+        pub(super) fn action() -> Action {
             Action {
                 tool: "github_merge_pr".into(),
                 params: json!({"pr": 123}),
@@ -1176,7 +1214,7 @@ rules: []
             }
         }
 
-        fn make_decision(
+        pub(super) fn make_decision(
             key: &ed25519_dalek::SigningKey,
             action: &Action,
         ) -> crate::authorization::AuthorizationDecision {
@@ -1215,6 +1253,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 None,
+                None,
             )
             .unwrap();
 
@@ -1239,6 +1278,7 @@ rules: []
                 "alice",
                 Some("agent://prismer/deploy-bot"),
                 &dec,
+                None,
                 None,
             )
             .unwrap();
@@ -1272,6 +1312,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 None,
+                None,
             )
             .unwrap_err();
             assert!(err.to_string().contains("does not authorize this action"));
@@ -1292,6 +1333,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 None,
+                None,
             )
             .unwrap_err();
             assert!(err.to_string().contains("refusing to sign"));
@@ -1306,6 +1348,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 None,
+                None,
             )
             .is_err());
         }
@@ -1317,8 +1360,17 @@ rules: []
             let a = action();
             let dec = make_decision(&authority_key, &a);
 
-            let err = sign_with_decision(&agent_key, &a, "deploy-bot", "alice", None, &dec, None)
-                .unwrap_err();
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                None,
+                &dec,
+                None,
+                None,
+            )
+            .unwrap_err();
             assert!(err.to_string().contains("cannot be corroborated"));
         }
 
@@ -1342,6 +1394,7 @@ rules: []
                 "deploy-bot",
                 "alice",
                 &policy,
+                None,
                 None,
                 None,
             )
@@ -1385,6 +1438,7 @@ rules: []
                 &policy,
                 None,
                 None,
+                None,
             )
             .unwrap_err();
             assert!(matches!(err, SignetError::PolicyViolation(_)));
@@ -1402,7 +1456,7 @@ rules: []
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             };
             let token = crate::sign_delegation::sign_delegation_with_principals(
                 &root_key,
@@ -1426,6 +1480,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 Some(&chain_json),
+                None,
             )
             .unwrap();
 
@@ -1459,7 +1514,7 @@ rules: []
                 targets: vec!["*".into()],
                 max_depth: 0,
                 expires: None,
-                budget: None,
+                constraints: None,
             };
             let token = crate::sign_delegation::sign_delegation_with_principals(
                 &root_key,
@@ -1483,6 +1538,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 Some(&chain_json),
+                None,
             )
             .unwrap_err();
             assert!(err
@@ -1528,6 +1584,7 @@ rules: []
                 "alice",
                 Some("agent://prismer/deploy-bot"),
                 &dec,
+                None,
                 None,
             )
             .unwrap();
@@ -1575,6 +1632,7 @@ rules: []
                 Some("agent://prismer/deploy-bot"),
                 &dec,
                 None,
+                None,
             )
             .is_err());
             // …and the binding check reports the source by name.
@@ -1582,6 +1640,204 @@ rules: []
                 .unwrap_err();
             assert!(err.to_string().contains("decision expired"));
             let _ = (agent_vk, make_decision);
+        }
+    }
+
+    // ─── constraint gate tests (v0.11 S5) ────────────────────────────────
+
+    mod constraint_gate_tests {
+        use super::authz_tests::{action, make_decision};
+        use super::*;
+        use crate::constraint::{BudgetUsage, Constraint};
+        use crate::sign_delegation::SignGates;
+
+        fn chain_with(constraints: Vec<Constraint>) -> (ed25519_dalek::SigningKey, String) {
+            let (root_key, _) = generate_keypair();
+            let (agent_key, _) = generate_keypair();
+            let scope = crate::delegation::Scope {
+                tools: vec!["*".into()],
+                targets: vec!["*".into()],
+                max_depth: 0,
+                expires: None,
+                constraints: Some(constraints),
+            };
+            let token = crate::sign_delegation::sign_delegation_with_principals(
+                &root_key,
+                "alice",
+                Some("user://prismer/alice"),
+                &agent_key.verifying_key(),
+                "deploy-bot",
+                Some("agent://prismer/deploy-bot"),
+                &scope,
+                None,
+            )
+            .unwrap();
+            let key = root_key;
+            let _ = &key;
+            (agent_key, serde_json::to_string(&vec![token]).unwrap())
+        }
+
+        #[test]
+        fn test_token_budget_gate_exhaustion() {
+            let (agent_key, chain_json) = chain_with(vec![Constraint::CallCount { max_calls: 2 }]);
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let dec = make_decision(&authority_key, &a);
+
+            let empty = BudgetUsage::default();
+            let gates = SignGates {
+                usage: &empty,
+                revocations: &[],
+            };
+            // 0 prior uses → ok; 2 prior uses → exhausted (N+1th refuses).
+            let receipt = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                Some(&chain_json),
+                Some(&gates),
+            )
+            .unwrap();
+            assert_eq!(receipt.v, 4);
+
+            let token_id = receipt.authorization.as_ref().unwrap().chain[0].id.clone();
+            let usage = BudgetUsage::from_pairs(vec![(format!("del:{token_id}"), 2)]);
+            let gates = SignGates {
+                usage: &usage,
+                revocations: &[],
+            };
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                Some(&chain_json),
+                Some(&gates),
+            )
+            .unwrap_err();
+            assert!(matches!(err, SignetError::BudgetExhausted { .. }));
+        }
+
+        #[test]
+        fn test_decision_replay_gate_and_multi_use_default() {
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let intent = crate::authorization::CanonicalIntent::from_action(&a).unwrap();
+            let dec = crate::authorization::authorize(
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &intent,
+                crate::authorization::DecisionType::Allow,
+                crate::authorization::DecisionBasis::Policy {
+                    policy_hash: "sha256:abc".into(),
+                    policy_name: "p".into(),
+                    matched_rules: vec![],
+                    reason: String::new(),
+                },
+                vec![Constraint::CallCount { max_calls: 1 }],
+                vec![],
+                None,
+                None,
+            )
+            .unwrap();
+            let dec_key = format!("dec:{}", dec.decision_id);
+
+            // No gates → multi-use within TTL is the default semantics.
+            sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+                None,
+            )
+            .unwrap();
+
+            // Gate with 1 prior use → the second consumption refuses.
+            let usage = BudgetUsage::from_pairs(vec![(dec_key.clone(), 1)]);
+            let gates = SignGates {
+                usage: &usage,
+                revocations: &[],
+            };
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+                Some(&gates),
+            )
+            .unwrap_err();
+            assert!(matches!(err, SignetError::BudgetExhausted { .. }));
+
+            // 0 prior uses → fine.
+            let empty = BudgetUsage::default();
+            let gates = SignGates {
+                usage: &empty,
+                revocations: &[],
+            };
+            sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+                Some(&gates),
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn test_narrowing_widening_refused() {
+            // Token allows 5 calls; the decision grants 10 → widening, refused.
+            let (agent_key, chain_json) = chain_with(vec![Constraint::CallCount { max_calls: 5 }]);
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let intent = crate::authorization::CanonicalIntent::from_action(&a).unwrap();
+            let dec = crate::authorization::authorize(
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &intent,
+                crate::authorization::DecisionType::Allow,
+                crate::authorization::DecisionBasis::Policy {
+                    policy_hash: "sha256:abc".into(),
+                    policy_name: "p".into(),
+                    matched_rules: vec![],
+                    reason: String::new(),
+                },
+                vec![Constraint::CallCount { max_calls: 10 }],
+                vec![],
+                None,
+                None,
+            )
+            .unwrap();
+            // Narrowing is structural — enforced even without gates.
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                Some(&chain_json),
+                None,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("widens the delegated scope"));
         }
     }
 

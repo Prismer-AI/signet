@@ -733,6 +733,7 @@ fn sign_with_decision(
                 signer_principal.as_deref(),
                 &decision,
                 chain_json.as_deref(),
+                None,
             )
         })
         .map_err(to_py_err)?;

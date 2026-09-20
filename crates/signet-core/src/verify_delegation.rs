@@ -271,6 +271,7 @@ pub(crate) fn verify_v4_signature_only(receipt: &Receipt) -> Result<(), SignetEr
         &auth.root_pubkey,
         &receipt.ts,
         &receipt.nonce,
+        receipt.authz_decision.as_ref(),
     );
     let canonical_bytes = canonical::canonicalize(&signable)?;
 
@@ -1251,6 +1252,7 @@ mod tests {
             &root_pubkey,
             &backdated_ts,
             &nonce,
+            None,
         );
         let canonical_bytes = canonical::canonicalize(&signable).unwrap();
         use ed25519_dalek::Signer as _;
@@ -1272,6 +1274,7 @@ mod tests {
                 root_pubkey,
             }),
             policy: None,
+            authz_decision: None,
             ts: backdated_ts,
             exp: None,
             nonce,

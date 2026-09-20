@@ -613,6 +613,147 @@ fn compute_policy_hash(_py: Python<'_>, policy_json: &str) -> PyResult<String> {
     signet_core::compute_policy_hash(&policy).map_err(to_py_err)
 }
 
+// ─── Authorization decisions (v0.11 S2) ──────────────────────────────────────
+
+/// Compute the canonical intent hash for an action (spec §3.2).
+#[pyfunction]
+fn intent_hash(_py: Python<'_>, action: crate::types::PyAction) -> PyResult<String> {
+    let intent = signet_core::CanonicalIntent::from_action(&action.inner).map_err(to_py_err)?;
+    signet_core::intent_hash(&intent).map_err(to_py_err)
+}
+
+/// Authority-side: evaluate a policy for one action and authority-sign an
+/// allow decision (basis = policy). Returns the decision as JSON.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn authorize_with_policy(
+    py: Python<'_>,
+    authority_key: &str,
+    authority: String,
+    subject: String,
+    action: crate::types::PyAction,
+    policy_json: &str,
+    expires_at: Option<String>,
+    max_calls: Option<u64>,
+    credential_ref: Option<String>,
+) -> PyResult<String> {
+    let authority_key = parse_signing_key(authority_key)?;
+    let policy: signet_core::Policy =
+        serde_json::from_str(policy_json).map_err(|e| to_py_err(e.into()))?;
+    let inner_action = action.inner.clone();
+
+    let eval = py
+        .allow_threads(|| signet_core::evaluate_policy(&inner_action, &subject, &policy, None))
+        .map_err(to_py_err)?;
+    match eval.decision {
+        signet_core::RuleAction::Allow => {}
+        _ => {
+            return Err(to_py_err(signet_core::SignetError::PolicyViolation(
+                format!("policy did not allow: {} ({})", eval.decision, eval.reason),
+            )))
+        }
+    }
+
+    let intent = signet_core::CanonicalIntent::from_action(&inner_action).map_err(to_py_err)?;
+    let mut constraints = Vec::new();
+    if let Some(max_calls) = max_calls {
+        constraints.push(signet_core::Constraint::CallCount { max_calls });
+    }
+
+    let decision = py
+        .allow_threads(|| {
+            signet_core::authorize(
+                &authority_key,
+                &authority,
+                &subject,
+                &intent,
+                signet_core::DecisionType::Allow,
+                signet_core::DecisionBasis::Policy {
+                    policy_hash: eval.policy_hash.clone(),
+                    policy_name: eval.policy_name.clone(),
+                    matched_rules: eval.matched_rules.clone(),
+                    reason: eval.reason.clone(),
+                },
+                constraints,
+                eval.obligations.clone(),
+                expires_at.as_deref(),
+                credential_ref.as_deref(),
+            )
+        })
+        .map_err(to_py_err)?;
+
+    serde_json::to_string(&decision).map_err(|e| to_py_err(e.into()))
+}
+
+/// Verify an authorization decision's authority signature. Returns False on
+/// signature mismatch; raises on structural problems.
+#[pyfunction]
+fn verify_decision(_py: Python<'_>, decision_json: &str) -> PyResult<bool> {
+    let decision: signet_core::AuthorizationDecision =
+        serde_json::from_str(decision_json).map_err(|e| to_py_err(e.into()))?;
+    match signet_core::verify_decision(&decision) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
+/// Binding + expiry + subject corroboration check against a concrete action.
+#[pyfunction]
+fn verify_decision_for_action(
+    _py: Python<'_>,
+    decision_json: &str,
+    action: crate::types::PyAction,
+    signer_principal: Option<String>,
+) -> PyResult<bool> {
+    let decision: signet_core::AuthorizationDecision =
+        serde_json::from_str(decision_json).map_err(|e| to_py_err(e.into()))?;
+    match signet_core::verify_decision_for_action(
+        &decision,
+        &action.inner,
+        signer_principal.as_deref(),
+    ) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(to_py_err(e)),
+    }
+}
+
+/// Agent-side: sign a receipt carrying an authority decision (spec §3.5).
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn sign_with_decision(
+    py: Python<'_>,
+    secret_key: &str,
+    action: crate::types::PyAction,
+    signer_name: String,
+    signer_owner: String,
+    signer_principal: Option<String>,
+    decision_json: &str,
+    chain_json: Option<String>,
+) -> PyResult<crate::types::PyReceipt> {
+    let signing_key = parse_signing_key(secret_key)?;
+    let decision: signet_core::AuthorizationDecision =
+        serde_json::from_str(decision_json).map_err(|e| to_py_err(e.into()))?;
+    let inner_action = action.inner.clone();
+
+    let receipt = py
+        .allow_threads(|| {
+            signet_core::sign_with_decision(
+                &signing_key,
+                &inner_action,
+                &signer_name,
+                &signer_owner,
+                signer_principal.as_deref(),
+                &decision,
+                chain_json.as_deref(),
+            )
+        })
+        .map_err(to_py_err)?;
+
+    Ok(crate::types::PyReceipt { inner: receipt })
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign, m)?)?;
@@ -637,5 +778,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_policy, m)?)?;
     m.add_function(wrap_pyfunction!(sign_with_policy, m)?)?;
     m.add_function(wrap_pyfunction!(compute_policy_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(intent_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(authorize_with_policy, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_decision, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_decision_for_action, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_with_decision, m)?)?;
     Ok(())
 }

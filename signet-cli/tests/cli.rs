@@ -1238,6 +1238,396 @@ fn test_sign_invalid_principal_fails() {
         .stderr(predicate::str::contains("principal"));
 }
 
+// ─── authorization decisions (v0.11 S2) ─────────────────────────────────────
+
+fn setup_authority_identities(dir: &std::path::Path) {
+    for (name, principal) in [
+        ("deploy-bot", "agent://prismer/deploy-bot"),
+        ("security-team", "agent://prismer/security"),
+    ] {
+        signet()
+            .env("SIGNET_HOME", dir)
+            .args([
+                "identity",
+                "generate",
+                "--name",
+                name,
+                "--principal",
+                principal,
+                "--unencrypted",
+            ])
+            .assert()
+            .success();
+    }
+}
+
+fn allow_policy(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("allow-policy.yaml");
+    fs::write(
+        &path,
+        "version: 1\nname: allow-merge\nrules:\n  - id: allow-merge\n    match:\n      tool: github_merge_pr\n    action: allow\n",
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn test_authorize_two_step_flow_e2e() {
+    let dir = tempdir().unwrap();
+    setup_authority_identities(dir.path());
+    let policy = allow_policy(dir.path());
+
+    // Authority side: pre-authorize one intent
+    let decision_path = dir.path().join("decision.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "authorize",
+            "--key",
+            "security-team",
+            "--authority",
+            "agent://prismer/security",
+            "--subject",
+            "agent://prismer/deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            r#"{"pr":123}"#,
+            "--target",
+            "mcp://github",
+            "--policy",
+            policy.to_str().unwrap(),
+            "--max-calls",
+            "1",
+            "--ttl",
+            "1h",
+            "--output",
+            decision_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("authorized"));
+
+    let dec: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&decision_path).unwrap()).unwrap();
+    assert_eq!(dec["subject"], "agent://prismer/deploy-bot");
+    assert_eq!(dec["authority"], "agent://prismer/security");
+    assert_eq!(dec["decision"], "allow");
+    assert_eq!(dec["basis"]["type"], "policy");
+    assert_eq!(dec["constraints"][0]["type"], "call_count");
+    assert!(dec["expires_at"].as_str().is_some());
+
+    // Agent side: sign with the decision
+    let receipt_path = dir.path().join("receipt.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            r#"{"pr":123}"#,
+            "--target",
+            "mcp://github",
+            "--decision",
+            decision_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    assert!(receipt.get("authz_decision").is_some());
+    // Q4: no separate policy attestation
+    assert!(receipt.get("policy").is_none());
+
+    // Verify with strict authority
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--pubkey",
+            "deploy-bot",
+            "--authority",
+            "security-team",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Authority verified"));
+
+    // Different authority → mismatch
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--pubkey",
+            "deploy-bot",
+            "--authority",
+            "deploy-bot",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("authority"));
+}
+
+#[test]
+fn test_sign_decision_intent_mismatch_fails() {
+    let dir = tempdir().unwrap();
+    setup_authority_identities(dir.path());
+    let policy = allow_policy(dir.path());
+
+    let decision_path = dir.path().join("decision.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "authorize",
+            "--key",
+            "security-team",
+            "--authority",
+            "agent://prismer/security",
+            "--subject",
+            "agent://prismer/deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            r#"{"pr":123}"#,
+            "--target",
+            "mcp://github",
+            "--policy",
+            policy.to_str().unwrap(),
+            "--output",
+            decision_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Sign a DIFFERENT action with the decision → intent mismatch
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            r#"{"pr":999}"#,
+            "--target",
+            "mcp://github",
+            "--decision",
+            decision_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("does not authorize this action"));
+}
+
+#[test]
+fn test_sign_one_step_authority_flow() {
+    let dir = tempdir().unwrap();
+    setup_authority_identities(dir.path());
+    let policy = allow_policy(dir.path());
+
+    let receipt_path = dir.path().join("one-step.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            r#"{"pr":7}"#,
+            "--target",
+            "mcp://github",
+            "--policy",
+            policy.to_str().unwrap(),
+            "--authority-key",
+            "security-team",
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Authority-signed decision"));
+
+    let receipt: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    assert!(receipt.get("authz_decision").is_some());
+    // Authority principal came from key metadata
+    assert_eq!(
+        receipt["authz_decision"]["authority"],
+        "agent://prismer/security"
+    );
+
+    // verify --authority resolves the same key by name
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--pubkey",
+            "deploy-bot",
+            "--authority",
+            "security-team",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_verify_authority_requires_decision() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "a", "--unencrypted"])
+        .assert()
+        .success();
+
+    let receipt_path = dir.path().join("plain.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "a",
+            "--tool",
+            "Read",
+            "--params",
+            "{}",
+            "--target",
+            "mcp://x",
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--pubkey",
+            "a",
+            "--authority",
+            "a",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no authorization decision"));
+}
+
+#[test]
+fn test_authorize_denied_policy_fails() {
+    let dir = tempdir().unwrap();
+    setup_authority_identities(dir.path());
+    let policy = dir.path().join("deny.yaml");
+    fs::write(
+        &policy,
+        "version: 1\nname: deny\ndefault_action: deny\nrules: []\n",
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "authorize",
+            "--key",
+            "security-team",
+            "--authority",
+            "agent://prismer/security",
+            "--subject",
+            "agent://prismer/deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--target",
+            "mcp://github",
+            "--policy",
+            policy.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("policy violation"));
+}
+
+#[test]
+fn test_sign_chain_without_decision_produces_v4() {
+    let dir = tempdir().unwrap();
+    for name in ["root", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--output",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let chain_path = dir.path().join("chain.json");
+    fs::write(
+        &chain_path,
+        format!("[{}]", fs::read_to_string(&token_path).unwrap()),
+    )
+    .unwrap();
+
+    let receipt_path = dir.path().join("v4.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    assert_eq!(v["v"], 4);
+    assert!(v.get("authorization").is_some());
+}
+
 #[test]
 fn test_delegate_principal_e2e_corroboration() {
     let dir = tempdir().unwrap();

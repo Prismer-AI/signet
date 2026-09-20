@@ -18,6 +18,12 @@ pub enum SignetError {
     #[error("invalid constraint: {0}")]
     InvalidConstraint(String),
 
+    #[error("authority key mismatch: {0}")]
+    AuthorityMismatch(String),
+
+    #[error("authorization decision invalid: {0}")]
+    DecisionInvalid(String),
+
     #[error("invalid receipt: {0}")]
     InvalidReceipt(String),
 

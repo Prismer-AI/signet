@@ -587,3 +587,135 @@ pub fn wasm_compute_policy_hash(policy_json: &str) -> Result<String, JsError> {
         .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
     signet_core::compute_policy_hash(&policy).map_err(|e| JsError::new(&e.to_string()))
 }
+
+// ─── Authorization decisions (v0.11 S2) ────────────────────────────────────
+
+#[wasm_bindgen]
+pub fn wasm_intent_hash(action_json: &str) -> Result<String, JsError> {
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    let intent = signet_core::CanonicalIntent::from_action(&action)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    signet_core::intent_hash(&intent).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Authority-side: evaluate a policy for one action and authority-sign an
+/// allow decision (basis = policy). JSON-string API, mirrors `signet authorize`.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn wasm_authorize_with_policy(
+    authority_key_b64: &str,
+    authority: &str,
+    subject: &str,
+    action_json: &str,
+    policy_json: &str,
+    expires_at: Option<String>,
+    max_calls: Option<u64>,
+    credential_ref: Option<String>,
+) -> Result<String, JsError> {
+    let authority_key = parse_signing_key(authority_key_b64)?;
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    let policy: signet_core::Policy = serde_json::from_str(policy_json)
+        .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
+
+    let eval = signet_core::evaluate_policy(&action, subject, &policy, None)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    match eval.decision {
+        signet_core::RuleAction::Allow => {}
+        _ => {
+            return Err(JsError::new(&format!(
+                "policy did not allow: {} ({})",
+                eval.decision, eval.reason
+            )))
+        }
+    }
+
+    let intent = signet_core::CanonicalIntent::from_action(&action)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let mut constraints = Vec::new();
+    if let Some(max_calls) = max_calls {
+        constraints.push(signet_core::Constraint::CallCount { max_calls });
+    }
+
+    let decision = signet_core::authorize(
+        &authority_key,
+        authority,
+        subject,
+        &intent,
+        signet_core::DecisionType::Allow,
+        signet_core::DecisionBasis::Policy {
+            policy_hash: eval.policy_hash.clone(),
+            policy_name: eval.policy_name.clone(),
+            matched_rules: eval.matched_rules.clone(),
+            reason: eval.reason.clone(),
+        },
+        constraints,
+        eval.obligations.clone(),
+        expires_at.as_deref(),
+        credential_ref.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&decision).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_verify_decision(decision_json: &str) -> Result<bool, JsError> {
+    let decision: signet_core::AuthorizationDecision = serde_json::from_str(decision_json)
+        .map_err(|e| JsError::new(&format!("invalid decision JSON: {e}")))?;
+    match signet_core::verify_decision(&decision) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
+}
+
+/// Binding + expiry + subject corroboration check against a concrete action.
+#[wasm_bindgen]
+pub fn wasm_verify_decision_for_action(
+    decision_json: &str,
+    action_json: &str,
+    signer_principal: Option<String>,
+) -> Result<bool, JsError> {
+    let decision: signet_core::AuthorizationDecision = serde_json::from_str(decision_json)
+        .map_err(|e| JsError::new(&format!("invalid decision JSON: {e}")))?;
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    match signet_core::verify_decision_for_action(&decision, &action, signer_principal.as_deref()) {
+        Ok(()) => Ok(true),
+        Err(signet_core::SignetError::SignatureMismatch) => Ok(false),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
+}
+
+/// Agent-side: sign a receipt carrying an authority decision (spec §3.5).
+#[wasm_bindgen]
+pub fn wasm_sign_with_decision(
+    secret_key_b64: &str,
+    action_json: &str,
+    signer_name: &str,
+    signer_owner: &str,
+    signer_principal: Option<String>,
+    decision_json: &str,
+    chain_json: Option<String>,
+) -> Result<String, JsError> {
+    let signing_key = parse_signing_key(secret_key_b64)?;
+    let action: Action = serde_json::from_str(action_json)
+        .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
+    let decision: signet_core::AuthorizationDecision = serde_json::from_str(decision_json)
+        .map_err(|e| JsError::new(&format!("invalid decision JSON: {e}")))?;
+
+    let receipt = signet_core::sign_with_decision(
+        &signing_key,
+        &action,
+        signer_name,
+        signer_owner,
+        signer_principal.as_deref(),
+        &decision,
+        chain_json.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+}

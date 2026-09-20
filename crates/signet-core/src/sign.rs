@@ -48,6 +48,7 @@ struct SignOptions {
     policy: Option<crate::policy::PolicyAttestation>,
     principal: Option<String>,
     acting_for: Option<String>,
+    authz_decision: Option<crate::authorization::AuthorizationDecision>,
 }
 
 /// Core signing logic shared by sign(), sign_with_expiration(), and sign_with_policy().
@@ -111,6 +112,14 @@ fn sign_inner(
     if let Some(ref exp) = opts.exp {
         obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
     }
+    if let Some(ref decision) = opts.authz_decision {
+        obj.insert(
+            "authz_decision".to_string(),
+            serde_json::to_value(decision).map_err(|e| {
+                SignetError::InvalidReceipt(format!("authz_decision serialize: {e}"))
+            })?,
+        );
+    }
 
     let canonical_bytes = canonical::canonicalize(&signable)?;
     let signature = key.sign(canonical_bytes.as_bytes());
@@ -124,6 +133,7 @@ fn sign_inner(
         signer,
         authorization: None,
         policy: opts.policy,
+        authz_decision: opts.authz_decision,
         ts,
         exp: opts.exp,
         nonce,
@@ -147,6 +157,7 @@ pub fn sign(
             policy: None,
             principal: None,
             acting_for: None,
+            authz_decision: None,
         },
     )
 }
@@ -176,6 +187,7 @@ pub fn sign_with_principal(
             policy: None,
             principal: principal.map(|s| s.to_string()),
             acting_for: acting_for.map(|s| s.to_string()),
+            authz_decision: None,
         },
     )
 }
@@ -199,6 +211,7 @@ pub fn sign_with_expiration(
             policy: None,
             principal: None,
             acting_for: None,
+            authz_decision: None,
         },
     )
 }
@@ -293,7 +306,130 @@ fn sign_with_policy_inner(
             policy: Some(attestation),
             principal: principal.map(|s| s.to_string()),
             acting_for: acting_for.map(|s| s.to_string()),
+            authz_decision: None,
         },
+    )?;
+
+    Ok((receipt, eval))
+}
+
+/// Two-step agent signing: carry a pre-made authority decision (spec §3.3).
+///
+/// The decision must be `allow`, verify against its authority key, bind to
+/// this action's intent hash, be unexpired, and have its subject match the
+/// signer principal — all checked before the receipt exists. `chain = Some`
+/// produces a v4 receipt (delegation proof + decision in one artifact) and
+/// runs the chain gates.
+pub fn sign_with_decision(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    signer_principal: Option<&str>,
+    decision: &crate::authorization::AuthorizationDecision,
+    chain: Option<&str>,
+) -> Result<Receipt, SignetError> {
+    use crate::authorization::{verify_decision, verify_decision_for_action, DecisionType};
+
+    // Q11: sign flows accept only allow decisions. Deny evidence comes from
+    // the proxy's policy_violation path; a deny decision cannot back a receipt.
+    if decision.decision != DecisionType::Allow {
+        return Err(SignetError::DecisionInvalid(format!(
+            "refusing to sign a receipt backed by a {:?} decision",
+            decision.decision
+        )));
+    }
+    verify_decision(decision)?;
+    verify_decision_for_action(decision, action, signer_principal)?;
+
+    match chain {
+        Some(chain_json) => {
+            let tokens: Vec<crate::delegation::DelegationToken> = serde_json::from_str(chain_json)
+                .map_err(|e| SignetError::ChainError(format!("invalid chain JSON: {e}")))?;
+            crate::sign_delegation::sign_authorized_inner(
+                key,
+                action,
+                signer_name,
+                signer_principal,
+                None,
+                Some(decision),
+                tokens,
+            )
+        }
+        None => sign_inner(
+            key,
+            action,
+            signer_name,
+            signer_owner,
+            SignOptions {
+                exp: None,
+                policy: None,
+                principal: signer_principal.map(|s| s.to_string()),
+                acting_for: None,
+                authz_decision: Some(decision.clone()),
+            },
+        ),
+    }
+}
+
+/// One-step: evaluate policy, authority-sign a decision, then sign the
+/// receipt carrying it (spec §3.3). `receipt.policy` is omitted — the
+/// decision's Policy basis subsumes the attestation (Q4). Requires an agent
+/// principal: the decision's subject must be corroboratable.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_with_policy_authority(
+    agent_key: &SigningKey,
+    authority_key: &SigningKey,
+    authority_principal: &str,
+    agent_principal: &str,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    policy: &crate::policy::Policy,
+    rate_state: Option<&mut crate::policy_eval::RateLimitState>,
+    chain: Option<&str>,
+) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
+    use crate::authorization::{authorize, CanonicalIntent, DecisionBasis, DecisionType};
+
+    let eval = crate::policy_eval::evaluate_policy(action, signer_name, policy, rate_state)?;
+    match eval.decision {
+        crate::policy::RuleAction::Deny => {
+            return Err(SignetError::PolicyViolation(eval.reason.clone()));
+        }
+        crate::policy::RuleAction::RequireApproval => {
+            return Err(SignetError::RequiresApproval(eval.reason.clone()));
+        }
+        crate::policy::RuleAction::Allow => {}
+    }
+
+    let intent = CanonicalIntent::from_action(action)?;
+    let basis = DecisionBasis::Policy {
+        policy_hash: eval.policy_hash.clone(),
+        policy_name: eval.policy_name.clone(),
+        matched_rules: eval.matched_rules.clone(),
+        reason: eval.reason.clone(),
+    };
+    let decision = authorize(
+        authority_key,
+        authority_principal,
+        agent_principal,
+        &intent,
+        DecisionType::Allow,
+        basis,
+        vec![],
+        eval.obligations.clone(),
+        None,
+        None,
+    )?;
+
+    let receipt = sign_with_decision(
+        agent_key,
+        action,
+        signer_name,
+        signer_owner,
+        Some(agent_principal),
+        &decision,
+        chain,
     )?;
 
     Ok((receipt, eval))
@@ -1057,6 +1193,439 @@ rules: []
         let receipt = sign_with_expiration(&key, &action, "agent", "owner", future).unwrap();
         let json = serde_json::to_string(&receipt).unwrap();
         assert!(json.contains("2027-01-01T00:00:00.000Z"));
+    }
+
+    // ─── authorization decision tests ──────────────────────────────────
+
+    mod authz_tests {
+        use super::*;
+        use crate::authorization::{
+            authorize, verify_decision_for_action, CanonicalIntent, DecisionBasis, DecisionType,
+        };
+        use crate::constraint::Constraint;
+
+        fn action() -> Action {
+            Action {
+                tool: "github_merge_pr".into(),
+                params: json!({"pr": 123}),
+                params_hash: String::new(),
+                target: "mcp://github".into(),
+                transport: "stdio".into(),
+                session: None,
+                call_id: None,
+                response_hash: None,
+                trace_id: None,
+                parent_receipt_id: None,
+            }
+        }
+
+        fn make_decision(
+            key: &ed25519_dalek::SigningKey,
+            action: &Action,
+        ) -> crate::authorization::AuthorizationDecision {
+            authorize(
+                key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &CanonicalIntent::from_action(action).unwrap(),
+                DecisionType::Allow,
+                DecisionBasis::Policy {
+                    policy_hash: "sha256:abc".into(),
+                    policy_name: "prod".into(),
+                    matched_rules: vec!["allow".into()],
+                    reason: "ok".into(),
+                },
+                vec![],
+                vec![],
+                None,
+                None,
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn test_sign_with_decision_roundtrip() {
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let dec = make_decision(&authority_key, &a);
+
+            let receipt = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(receipt.v, 1);
+            assert!(receipt.authz_decision.is_some());
+            // Q4: the attestation is subsumed by the decision's basis.
+            assert!(receipt.policy.is_none());
+            // Decision-aware verify() passes.
+            assert!(crate::verify::verify(&receipt, &agent_vk).is_ok());
+        }
+
+        #[test]
+        fn test_decision_tamper_and_strip_break_agent_sig() {
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let dec = make_decision(&authority_key, &a);
+            let receipt = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .unwrap();
+
+            // Tamper the embedded decision → agent signature breaks.
+            let mut tampered = receipt.clone();
+            tampered.authz_decision.as_mut().unwrap().authority = "agent://evil/root".into();
+            assert!(crate::verify::verify(&tampered, &agent_vk).is_err());
+
+            // Strip the decision entirely → agent signature breaks.
+            let mut stripped = receipt.clone();
+            stripped.authz_decision = None;
+            assert!(crate::verify::verify(&stripped, &agent_vk).is_err());
+        }
+
+        #[test]
+        fn test_decision_replay_onto_other_action_rejected() {
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let dec = make_decision(&authority_key, &a);
+
+            let mut other = action();
+            other.params = json!({"pr": 999});
+
+            let err = sign_with_decision(
+                &agent_key,
+                &other,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("does not authorize this action"));
+        }
+
+        #[test]
+        fn test_deny_and_require_approval_decisions_refused() {
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let mut dec = make_decision(&authority_key, &a);
+            dec.decision = DecisionType::Deny;
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .unwrap_err();
+            assert!(err.to_string().contains("refusing to sign"));
+
+            let mut dec = make_decision(&authority_key, &a);
+            dec.decision = DecisionType::RequireApproval;
+            assert!(sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .is_err());
+        }
+
+        #[test]
+        fn test_sign_with_decision_requires_signer_principal() {
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let dec = make_decision(&authority_key, &a);
+
+            let err = sign_with_decision(&agent_key, &a, "deploy-bot", "alice", None, &dec, None)
+                .unwrap_err();
+            assert!(err.to_string().contains("cannot be corroborated"));
+        }
+
+        #[test]
+        fn test_sign_with_policy_authority_one_step() {
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, authority_vk) = generate_keypair();
+            let a = action();
+
+            let policy = crate::policy_load::parse_policy_yaml(
+                "version: 1\nname: prod\nrules:\n  - id: allow-merge\n    match:\n      tool: github_merge_pr\n    action: allow\n",
+            )
+            .unwrap();
+
+            let (receipt, eval) = sign_with_policy_authority(
+                &agent_key,
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &a,
+                "deploy-bot",
+                "alice",
+                &policy,
+                None,
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(eval.decision, crate::policy::RuleAction::Allow);
+            let dec = receipt.authz_decision.as_ref().unwrap();
+            assert_eq!(dec.subject, "agent://prismer/deploy-bot");
+            assert_eq!(dec.authority, "agent://prismer/security");
+            assert!(
+                receipt.policy.is_none(),
+                "Q4: attestation subsumed by basis"
+            );
+            assert!(crate::verify::verify(&receipt, &agent_vk).is_ok());
+            // Trusted authority verification passes; a different key fails.
+            crate::authorization::verify_decision_trusted(dec, &[authority_vk]).unwrap();
+            let (_, other_vk) = generate_keypair();
+            assert!(matches!(
+                crate::authorization::verify_decision_trusted(dec, &[other_vk]),
+                Err(SignetError::AuthorityMismatch(_))
+            ));
+        }
+
+        #[test]
+        fn test_sign_with_policy_authority_denies() {
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let policy = crate::policy_load::parse_policy_yaml(
+                "version: 1\nname: deny-all\ndefault_action: deny\nrules: []\n",
+            )
+            .unwrap();
+            let err = sign_with_policy_authority(
+                &agent_key,
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &a,
+                "deploy-bot",
+                "alice",
+                &policy,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(matches!(err, SignetError::PolicyViolation(_)));
+        }
+
+        #[test]
+        fn test_v4_plus_decision_flagship() {
+            let (root_key, _) = generate_keypair();
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+
+            let scope = crate::delegation::Scope {
+                tools: vec!["*".into()],
+                targets: vec!["*".into()],
+                max_depth: 0,
+                expires: None,
+                budget: None,
+            };
+            let token = crate::sign_delegation::sign_delegation_with_principals(
+                &root_key,
+                "alice",
+                Some("user://prismer/alice"),
+                &agent_key.verifying_key(),
+                "deploy-bot",
+                Some("agent://prismer/deploy-bot"),
+                &scope,
+                None,
+            )
+            .unwrap();
+            let chain_json = serde_json::to_string(&vec![token]).unwrap();
+
+            let dec = make_decision(&authority_key, &a);
+            let receipt = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                Some(&chain_json),
+            )
+            .unwrap();
+
+            assert_eq!(receipt.v, 4);
+            assert!(receipt.authorization.is_some());
+            assert!(receipt.authz_decision.is_some());
+            assert_eq!(
+                receipt.signer.acting_for.as_deref(),
+                Some("user://prismer/alice")
+            );
+            assert!(crate::verify::verify(&receipt, &agent_vk).is_ok());
+
+            let opts = crate::verify_delegation::AuthorizedVerifyOptions {
+                trusted_roots: vec![root_key.verifying_key()],
+                clock_skew_secs: 60,
+                max_chain_depth: 16,
+            };
+            crate::verify_delegation::verify_authorized(&receipt, &opts).unwrap();
+        }
+
+        #[test]
+        fn test_chain_gate_subject_mismatch_rejected() {
+            let (root_key, _) = generate_keypair();
+            let (agent_key, _) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+
+            // Chain delegates to worker-A, but the decision grants worker-B.
+            let scope = crate::delegation::Scope {
+                tools: vec!["*".into()],
+                targets: vec!["*".into()],
+                max_depth: 0,
+                expires: None,
+                budget: None,
+            };
+            let token = crate::sign_delegation::sign_delegation_with_principals(
+                &root_key,
+                "alice",
+                Some("user://prismer/alice"),
+                &agent_key.verifying_key(),
+                "deploy-bot",
+                Some("agent://prismer/worker-a"),
+                &scope,
+                None,
+            )
+            .unwrap();
+            let chain_json = serde_json::to_string(&vec![token]).unwrap();
+
+            let dec = make_decision(&authority_key, &a); // subject = deploy-bot
+            let err = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                Some(&chain_json),
+            )
+            .unwrap_err();
+            assert!(err
+                .to_string()
+                .contains("does not match chain delegate principal"));
+        }
+
+        #[test]
+        fn test_decision_with_constraints_signs_and_carries() {
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let intent = CanonicalIntent::from_action(&a).unwrap();
+            let dec = authorize(
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &intent,
+                DecisionType::Allow,
+                DecisionBasis::Policy {
+                    policy_hash: "sha256:abc".into(),
+                    policy_name: "prod".into(),
+                    matched_rules: vec![],
+                    reason: String::new(),
+                },
+                vec![
+                    Constraint::CallCount { max_calls: 5 },
+                    Constraint::Monetary {
+                        amount: "500.00".into(),
+                        currency: "USD".into(),
+                    },
+                ],
+                vec![],
+                None,
+                None,
+            )
+            .unwrap();
+
+            let receipt = sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                receipt.authz_decision.as_ref().unwrap().constraints.len(),
+                2
+            );
+            assert!(crate::verify::verify(&receipt, &agent_vk).is_ok());
+        }
+
+        #[test]
+        fn test_verify_decision_for_action_expiry_via_receipt() {
+            // Earliest-wins through verify(): decision expired while the
+            // receipt itself has no exp.
+            let (agent_key, agent_vk) = generate_keypair();
+            let (authority_key, _) = generate_keypair();
+            let a = action();
+            let past = (chrono::Utc::now() - chrono::Duration::hours(1))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let intent = CanonicalIntent::from_action(&a).unwrap();
+            let dec = authorize(
+                &authority_key,
+                "agent://prismer/security",
+                "agent://prismer/deploy-bot",
+                &intent,
+                DecisionType::Allow,
+                DecisionBasis::Policy {
+                    policy_hash: "sha256:abc".into(),
+                    policy_name: "prod".into(),
+                    matched_rules: vec![],
+                    reason: String::new(),
+                },
+                vec![],
+                vec![],
+                Some(&past),
+                None,
+            )
+            .unwrap();
+            // Signing with an already-expired decision is itself refused…
+            assert!(sign_with_decision(
+                &agent_key,
+                &a,
+                "deploy-bot",
+                "alice",
+                Some("agent://prismer/deploy-bot"),
+                &dec,
+                None,
+            )
+            .is_err());
+            // …and the binding check reports the source by name.
+            let err = verify_decision_for_action(&dec, &a, Some("agent://prismer/deploy-bot"))
+                .unwrap_err();
+            assert!(err.to_string().contains("decision expired"));
+            let _ = (agent_vk, make_decision);
+        }
     }
 
     // ─── principal tests ─────────────────────────────────────────────

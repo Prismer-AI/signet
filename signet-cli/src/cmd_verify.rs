@@ -29,6 +29,12 @@ pub struct VerifyArgs {
     /// lifetime only).
     #[arg(long, value_name = "PATH")]
     pub nonce_store: Option<String>,
+
+    /// Authority key name (or raw ed25519:<base64>/base64 pubkey) that must
+    /// have signed the receipt's authorization decision. Fails when the
+    /// receipt carries no decision.
+    #[arg(long)]
+    pub authority: Option<String>,
 }
 
 pub fn verify(args: VerifyArgs) -> Result<()> {
@@ -80,6 +86,7 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
 
     match signet_core::verify_any(&receipt_str, &vk) {
         Ok(()) => {
+            check_authority(&args, &receipt_str, version)?;
             print_valid_message(&raw, version);
         }
         Err(signet_core::SignetError::SignatureMismatch) => {
@@ -89,6 +96,46 @@ pub fn verify(args: VerifyArgs) -> Result<()> {
             bail!("verification error: {e}");
         }
     }
+    Ok(())
+}
+
+/// `--authority` strict check: the receipt's embedded decision must exist
+/// and its authority key must be the named one. (The decision's signature,
+/// intent binding, and expiry were already verified by verify_any.)
+fn check_authority(args: &VerifyArgs, receipt_str: &str, version: u64) -> Result<()> {
+    let Some(authority) = args.authority.as_deref() else {
+        return Ok(());
+    };
+    if version == 3 {
+        bail!("--authority applies to receipts carrying authorization decisions (v1/v4), not bilateral v3");
+    }
+    let receipt: signet_core::Receipt = serde_json::from_str(receipt_str)?;
+    let decision = receipt.authz_decision.ok_or_else(|| {
+        anyhow::anyhow!("receipt carries no authorization decision; --authority requires one")
+    })?;
+
+    let authority_vk = {
+        let dir = signet_core::default_signet_dir();
+        if let Some(b64) = authority.strip_prefix("ed25519:") {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| anyhow::anyhow!("invalid authority pubkey base64: {e}"))?;
+            let arr: [u8; 32] = bytes
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("authority pubkey must be 32 bytes"))?;
+            ed25519_dalek::VerifyingKey::from_bytes(&arr)
+                .map_err(|e| anyhow::anyhow!("invalid authority pubkey: {e}"))?
+        } else {
+            resolve_pubkey(&dir, authority)?
+        }
+    };
+
+    signet_core::verify_decision_trusted(&decision, &[authority_vk])?;
+    eprintln!(
+        "Authority verified: {} (decision {})",
+        decision.authority, decision.decision_id
+    );
     Ok(())
 }
 

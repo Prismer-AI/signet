@@ -303,6 +303,35 @@ def sign_with_policy(
 ) -> tuple[str, str]: ...
 def compute_policy_hash(policy_json: str) -> str: ...
 
+# ─── Authorization decisions (v0.11) ───────────────────────────────────────────
+
+def intent_hash(action: Action) -> str: ...
+def authorize_with_policy(
+    authority_key_b64: str,
+    authority: str,
+    subject: str,
+    action: Action,
+    policy_json: str,
+    expires_at: str | None = None,
+    max_calls: int | None = None,
+    credential_ref: str | None = None,
+) -> str: ...
+def verify_decision(decision_json: str) -> bool: ...
+def verify_decision_for_action(
+    decision_json: str,
+    action: Action,
+    signer_principal: str | None = None,
+) -> bool: ...
+def sign_with_decision(
+    key_b64: str,
+    action: Action,
+    signer_name: str,
+    signer_owner: str,
+    signer_principal: str | None = None,
+    decision_json: str = "",
+    chain_json: str | None = None,
+) -> Receipt: ...
+
 # ─── Identity functions ───────────────────────────────────────────────────────
 
 def validate_key_name(name: str) -> None: ...

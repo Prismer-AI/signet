@@ -223,8 +223,9 @@ pub(crate) fn build_v4_receipt_signable(
     root_pubkey: &str,
     ts: &str,
     nonce: &str,
+    authz_decision: Option<&crate::authorization::AuthorizationDecision>,
 ) -> serde_json::Value {
-    serde_json::json!({
+    let mut signable = serde_json::json!({
         "v": 4u8,
         "action": action,
         "signer": signer,
@@ -234,7 +235,11 @@ pub(crate) fn build_v4_receipt_signable(
         },
         "ts": ts,
         "nonce": nonce,
-    })
+    });
+    if let Some(dec) = authz_decision {
+        signable["authz_decision"] = serde_json::to_value(dec).unwrap_or(serde_json::Value::Null);
+    }
+    signable
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

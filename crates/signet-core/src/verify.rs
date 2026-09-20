@@ -54,6 +54,15 @@ fn verify_receipt_signature(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<
             }),
         );
     }
+    // Authority decisions ride inside the agent's signature scope.
+    if let Some(ref decision) = receipt.authz_decision {
+        obj.insert(
+            "authz_decision".to_string(),
+            serde_json::to_value(decision).map_err(|e| {
+                SignetError::InvalidReceipt(format!("failed to serialize authz_decision: {e}"))
+            })?,
+        );
+    }
     let canonical_bytes = canonical::canonicalize(&signable)?;
 
     pubkey
@@ -64,7 +73,23 @@ fn verify_receipt_signature(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<
 pub fn verify(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
     verify_receipt_signature(receipt, pubkey)?;
 
-    // Check expiration if present — default verify() is strict.
+    // Decision-aware verification (spec §3.4): tamper defense must not
+    // depend on which binding the caller used. The authority signature,
+    // the intent binding, and the subject corroboration are all checked
+    // whenever a decision is present.
+    if let Some(ref decision) = receipt.authz_decision {
+        crate::authorization::verify_decision(decision)?;
+        crate::authorization::verify_decision_for_action(
+            decision,
+            &receipt.action,
+            receipt.signer.principal.as_deref(),
+        )?;
+    }
+
+    // Expiry, earliest-wins (Q12): the receipt's own exp and the decision's
+    // expires_at are independent clocks; the earliest breach fails, and the
+    // error names the source. (The decision's expiry is checked inside
+    // verify_decision_for_action above — "decision expired at …".)
     if let Some(ref exp) = receipt.exp {
         let exp_dt = chrono::DateTime::parse_from_rfc3339(exp)
             .map_err(|e| SignetError::InvalidReceipt(format!("invalid exp timestamp: {e}")))?;
@@ -222,15 +247,11 @@ pub fn verify_any(receipt_json: &str, pubkey: &VerifyingKey) -> Result<(), Signe
         4 => {
             let receipt: Receipt = serde_json::from_value(raw)
                 .map_err(|e| SignetError::InvalidReceipt(format!("v4 parse: {e}")))?;
-            // Check provided pubkey matches receipt's signer
-            let expected_pubkey = format!(
-                "ed25519:{}",
-                base64::engine::general_purpose::STANDARD.encode(pubkey.to_bytes())
-            );
-            if receipt.signer.pubkey != expected_pubkey {
-                return Err(SignetError::SignatureMismatch);
-            }
-            crate::verify_delegation::verify_v4_signature_only(&receipt)
+            // Same strict semantics as the v1 branch: full verify(),
+            // which covers the authorization binding, any embedded
+            // authority decision, and receipt expiry. (Chain/trusted-root
+            // verification remains verify_authorized's job.)
+            verify(&receipt, pubkey)
         }
         _ => Err(SignetError::InvalidReceipt(format!(
             "unsupported version: {version}"

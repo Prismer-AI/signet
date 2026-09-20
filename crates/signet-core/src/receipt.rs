@@ -1,3 +1,4 @@
+use crate::authorization::AuthorizationDecision;
 use crate::delegation::Authorization;
 use crate::policy::PolicyAttestation;
 use serde::{Deserialize, Serialize};
@@ -48,8 +49,14 @@ pub struct Receipt {
     pub signer: Signer,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authorization: Option<Authorization>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub policy: Option<PolicyAttestation>,
+    /// Authority-signed grant for this specific action. Inside the agent's
+    /// signature scope — stripping or altering it breaks the agent's own
+    /// signature. When present with a Policy basis, `policy` is omitted
+    /// (the decision's basis subsumes the attestation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authz_decision: Option<AuthorizationDecision>,
     pub ts: String,
     /// Optional expiration time (RFC 3339). Inside the signature scope.
     /// Absent = no expiration declared (backward compatible with pre-exp receipts).

@@ -52,6 +52,22 @@ pub struct SignArgs {
     /// Principal the signer acts for (e.g. user://prismer/alice) — a signed claim
     #[arg(long)]
     pub acting_for: Option<String>,
+    /// Authority decision file (two-step flow from `signet authorize`)
+    #[arg(long)]
+    pub decision: Option<String>,
+    /// Delegation chain JSON file — produces a v4 receipt
+    #[arg(long)]
+    pub chain: Option<String>,
+    /// Authority key name (one-step flow): evaluate --policy, authority-sign the decision, sign
+    #[arg(long)]
+    pub authority_key: Option<String>,
+    /// Authority principal URI; defaults to the authority key's stored principal
+    #[arg(long)]
+    pub authority_principal: Option<String>,
+}
+
+fn load_chain_json(path: &str) -> Result<String> {
+    fs::read_to_string(path).map_err(|e| anyhow::anyhow!("failed to read chain file '{path}': {e}"))
 }
 
 pub fn sign(args: SignArgs) -> Result<()> {
@@ -129,7 +145,37 @@ pub fn sign(args: SignArgs) -> Result<()> {
     let owner = info.owner.as_deref().unwrap_or("");
     let principal = args.principal.as_deref().or(info.principal.as_deref());
 
-    let receipt = if let Some(ref policy_path) = args.policy {
+    let chain_json = match args.chain {
+        Some(ref path) => Some(load_chain_json(path)?),
+        None => None,
+    };
+
+    let receipt = if let Some(ref decision_path) = args.decision {
+        // Two-step flow: consume a pre-made authority decision.
+        if args.policy.is_some() {
+            anyhow::bail!("--decision cannot be combined with --policy");
+        }
+        if args.authority_key.is_some() {
+            anyhow::bail!("--decision cannot be combined with --authority-key (the decision is already signed)");
+        }
+        let decision_str = fs::read_to_string(decision_path)
+            .map_err(|e| anyhow::anyhow!("failed to read decision file '{decision_path}': {e}"))?;
+        let decision: signet_core::AuthorizationDecision = serde_json::from_str(&decision_str)?;
+        let principal = principal.ok_or_else(|| {
+            anyhow::anyhow!(
+                "--principal (or key metadata principal) is required with --decision: the decision subject must be corroborated"
+            )
+        })?;
+        signet_core::sign_with_decision(
+            &sk,
+            &action,
+            &info.name,
+            owner,
+            Some(principal),
+            &decision,
+            chain_json.as_deref(),
+        )?
+    } else if let Some(ref policy_path) = args.policy {
         let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
         // Evaluate once, then branch — avoids double load and TOCTOU issues
         let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None)?;
@@ -145,17 +191,64 @@ pub fn sign(args: SignArgs) -> Result<()> {
 
         match eval.decision {
             signet_core::RuleAction::Allow => {
-                signet_core::sign_with_policy_with_principal(
-                    &sk,
-                    &action,
-                    &info.name,
-                    owner,
-                    principal,
-                    args.acting_for.as_deref(),
-                    &policy,
-                    None,
-                )?
-                .0
+                if let Some(ref authority_key_name) = args.authority_key {
+                    // One-step flow: the decision is authority-signed here.
+                    let authority_info = signet_core::load_key_info(&dir, authority_key_name)?;
+                    let authority_principal = args
+                        .authority_principal
+                        .as_deref()
+                        .or(authority_info.principal.as_deref())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "--authority-principal (or authority key metadata principal) is required with --authority-key"
+                            )
+                        })?;
+                    let authority_sk =
+                        match signet_core::load_signing_key(&dir, authority_key_name, None) {
+                            Ok(k) => k,
+                            Err(_) => {
+                                let pass = super::get_passphrase("Authority key passphrase: ")?;
+                                signet_core::load_signing_key(
+                                    &dir,
+                                    authority_key_name,
+                                    Some(&pass),
+                                )?
+                            }
+                        };
+                    let agent_principal = principal.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "--principal (or key metadata principal) is required with --authority-key: the decision subject must be corroborated"
+                        )
+                    })?;
+                    eprintln!(
+                        "Authority-signed decision by {authority_principal} for {agent_principal}"
+                    );
+                    signet_core::sign_with_policy_authority(
+                        &sk,
+                        &authority_sk,
+                        authority_principal,
+                        agent_principal,
+                        &action,
+                        &info.name,
+                        owner,
+                        &policy,
+                        None,
+                        chain_json.as_deref(),
+                    )?
+                    .0
+                } else {
+                    signet_core::sign_with_policy_with_principal(
+                        &sk,
+                        &action,
+                        &info.name,
+                        owner,
+                        principal,
+                        args.acting_for.as_deref(),
+                        &policy,
+                        None,
+                    )?
+                    .0
+                }
             }
             signet_core::RuleAction::Deny | signet_core::RuleAction::RequireApproval => {
                 if !args.no_log {
@@ -172,6 +265,18 @@ pub fn sign(args: SignArgs) -> Result<()> {
                 }
             }
         }
+    } else if chain_json.is_some() {
+        // v4 receipt without a decision: delegation proof only.
+        let chain: Vec<signet_core::DelegationToken> =
+            serde_json::from_str(chain_json.as_deref().unwrap())?;
+        signet_core::sign_authorized_with_principal(
+            &sk,
+            &action,
+            &info.name,
+            principal,
+            args.acting_for.as_deref(),
+            chain,
+        )?
     } else {
         signet_core::sign_with_principal(
             &sk,

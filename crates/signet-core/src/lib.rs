@@ -1,3 +1,4 @@
+pub mod authorization;
 pub mod canonical;
 pub mod constraint;
 pub mod delegation;
@@ -21,6 +22,10 @@ pub mod keystore;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audit;
 
+pub use authorization::{
+    authorize, intent_hash, verify_decision, verify_decision_for_action, verify_decision_trusted,
+    AuthorizationDecision, CanonicalIntent, DecisionBasis, DecisionType,
+};
 pub use constraint::{decimal_lte, Constraint, Decimal};
 pub use delegation::{
     validate_scope_narrowing, Authorization, DelegationIdentity, DelegationToken, Scope,
@@ -40,8 +45,9 @@ pub use receipt::{
     ServerInfo, Signer,
 };
 pub use sign::{
-    sign, sign_bilateral, sign_bilateral_with_outcome, sign_compound, sign_with_expiration,
-    sign_with_policy, sign_with_policy_with_principal, sign_with_principal,
+    sign, sign_bilateral, sign_bilateral_with_outcome, sign_compound, sign_with_decision,
+    sign_with_expiration, sign_with_policy, sign_with_policy_authority,
+    sign_with_policy_with_principal, sign_with_principal,
 };
 pub use sign_delegation::{
     sign_authorized, sign_authorized_with_principal, sign_delegation,

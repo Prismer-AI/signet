@@ -134,6 +134,27 @@ pub fn sign_delegation_with_principals(
     })
 }
 
+/// Chain gates for the combined v4+decision path (spec §3.3).
+///
+/// Phase 3 scope: the decision's subject must match the chain's final
+/// delegate principal when the chain carries one — the grant and the
+/// delegation must point at the same agent. Revocation (fail-closed) and
+/// call-count budget gates join here in their phases.
+pub(crate) fn enforce_chain_gates(
+    chain: &[DelegationToken],
+    decision: &crate::authorization::AuthorizationDecision,
+) -> Result<(), SignetError> {
+    if let Some(final_principal) = chain.last().and_then(|t| t.delegate.principal.as_deref()) {
+        if decision.subject != final_principal {
+            return Err(SignetError::DecisionInvalid(format!(
+                "decision subject '{}' does not match chain delegate principal '{final_principal}'",
+                decision.subject
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Sign a tool call with authorization proof (v4 receipt).
 pub fn sign_authorized(
     key: &SigningKey,
@@ -154,6 +175,29 @@ pub fn sign_authorized_with_principal(
     signer_name: &str,
     signer_principal: Option<&str>,
     acting_for: Option<&str>,
+    chain: Vec<DelegationToken>,
+) -> Result<Receipt, SignetError> {
+    sign_authorized_inner(
+        key,
+        action,
+        signer_name,
+        signer_principal,
+        acting_for,
+        None,
+        chain,
+    )
+}
+
+/// The v4 + decision combined path. The chain gates run whenever a decision
+/// rides a chain (subject consistency today; revocation and budget gates
+/// land with their phases).
+pub(crate) fn sign_authorized_inner(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_principal: Option<&str>,
+    acting_for: Option<&str>,
+    decision: Option<&crate::authorization::AuthorizationDecision>,
     chain: Vec<DelegationToken>,
 ) -> Result<Receipt, SignetError> {
     if chain.is_empty() {
@@ -186,6 +230,10 @@ pub fn sign_authorized_with_principal(
             None => None,
         },
     };
+
+    if let Some(dec) = decision {
+        enforce_chain_gates(&chain, dec)?;
+    }
 
     // Extract from chain BEFORE moving it
     let root_pubkey = chain[0].delegator.pubkey.clone();
@@ -239,6 +287,7 @@ pub fn sign_authorized_with_principal(
         &root_pubkey,
         &ts,
         &nonce,
+        decision,
     );
     let canonical_bytes = canonical::canonicalize(&signable)?;
     let signature = key.sign(canonical_bytes.as_bytes());
@@ -253,6 +302,7 @@ pub fn sign_authorized_with_principal(
         signer,
         authorization: Some(authorization),
         policy: None,
+        authz_decision: decision.cloned(),
         ts,
         exp: None,
         nonce,

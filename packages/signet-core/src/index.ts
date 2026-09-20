@@ -1,5 +1,5 @@
 // @signet-auth/core — TypeScript wrapper for signet WASM
-import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_sign_bilateral_with_outcome, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired, wasm_verify_bilateral_with_options } from '../wasm/signet_wasm.js';
+import { wasm_generate_keypair, wasm_sign, wasm_verify, wasm_sign_compound, wasm_verify_any, wasm_sign_bilateral, wasm_sign_bilateral_with_outcome, wasm_verify_bilateral, wasm_content_hash, wasm_sign_delegation, wasm_verify_delegation, wasm_sign_authorized, wasm_verify_authorized, wasm_parse_policy_yaml, wasm_evaluate_policy, wasm_sign_with_policy, wasm_compute_policy_hash, wasm_sign_with_expiration, wasm_verify_allow_expired, wasm_verify_bilateral_with_options, wasm_intent_hash, wasm_authorize_with_policy, wasm_verify_decision, wasm_verify_decision_for_action, wasm_sign_with_decision } from '../wasm/signet_wasm.js';
 
 export interface SignetKeypair {
   secretKey: string;
@@ -449,6 +449,94 @@ export interface Policy {
     /** Conditions under which the rule's action is granted (conjunctive). */
     obligations?: Obligation[];
   }>;
+}
+
+// ─── Authorization decisions (v0.11) ────────────────────────────────────────
+
+export type DecisionType = 'allow' | 'require_approval' | 'deny';
+
+export interface AuthorizationDecision {
+  v: number;
+  decision_id: string;
+  authority: string;
+  authority_pubkey: string;
+  subject: string;
+  intent_hash: string;
+  decision: DecisionType;
+  basis: Record<string, unknown>;
+  constraints: Array<Record<string, unknown>>;
+  obligations: Obligation[];
+  issued_at: string;
+  expires_at?: string;
+  nonce: string;
+  credential_ref?: string;
+  sig: string;
+}
+
+export interface DecisionReceipt extends SignetReceipt {
+  authz_decision: AuthorizationDecision;
+}
+
+export function intentHash(action: SignetAction): string {
+  return wasm_intent_hash(JSON.stringify(action));
+}
+
+export function authorizeWithPolicy(
+  authoritySecretKey: string,
+  authority: string,
+  subject: string,
+  action: SignetAction,
+  policy: Policy,
+  options?: { expiresAt?: string; maxCalls?: bigint; credentialRef?: string },
+): AuthorizationDecision {
+  const json = wasm_authorize_with_policy(
+    authoritySecretKey,
+    authority,
+    subject,
+    JSON.stringify(action),
+    JSON.stringify(policy),
+    options?.expiresAt ?? null,
+    options?.maxCalls ?? null,
+    options?.credentialRef ?? null,
+  );
+  return JSON.parse(json) as AuthorizationDecision;
+}
+
+export function verifyDecision(decision: AuthorizationDecision): boolean {
+  return wasm_verify_decision(JSON.stringify(decision));
+}
+
+export function verifyDecisionForAction(
+  decision: AuthorizationDecision,
+  action: SignetAction,
+  signerPrincipal?: string,
+): boolean {
+  return wasm_verify_decision_for_action(
+    JSON.stringify(decision),
+    JSON.stringify(action),
+    signerPrincipal ?? null,
+  );
+}
+
+export function signWithDecision(
+  secretKey: string,
+  action: SignetAction,
+  signerName: string,
+  signerOwner: string,
+  signerPrincipal: string,
+  decision: AuthorizationDecision,
+  chainJson?: string,
+): DecisionReceipt {
+  const json = wasm_sign_with_decision(
+    secretKey,
+    JSON.stringify(action),
+    signerName,
+    signerOwner,
+    signerPrincipal,
+    JSON.stringify(decision),
+    chainJson ?? null,
+  );
+  return JSON.parse(json) as DecisionReceipt;
 }
 
 export interface PolicyReceipt extends SignetReceipt {

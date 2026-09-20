@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 
 mod audit_helpers;
 mod cmd_audit;
+mod cmd_authorize;
 mod cmd_claude;
 mod cmd_dashboard;
 mod cmd_delegate;
@@ -40,6 +41,8 @@ enum Commands {
     },
     /// Sign an action and produce a receipt
     Sign(cmd_sign::SignArgs),
+    /// Authority-side pre-authorization: produce a signed decision for one intent
+    Authorize(cmd_authorize::AuthorizeArgs),
     /// Verify an action receipt
     Verify(cmd_verify::VerifyArgs),
     /// Query and verify the audit log
@@ -119,6 +122,7 @@ fn run() -> Result<()> {
             IdentityAction::Export(args) => cmd_identity::export(args)?,
         },
         Commands::Sign(args) => cmd_sign::sign(args)?,
+        Commands::Authorize(args) => cmd_authorize::authorize(args)?,
         Commands::Verify(args) => cmd_verify::verify(args)?,
         Commands::Audit(args) => cmd_audit::audit(args)?,
         Commands::Claude { action } => cmd_claude::run(action)?,

@@ -1,6 +1,7 @@
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use chrono::DateTime;
+use ed25519_dalek::VerifyingKey;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,34 @@ pub(crate) fn format_pubkey(bytes: &[u8]) -> String {
 /// Format an Ed25519 signature as "ed25519:<base64>".
 pub(crate) fn format_sig(sig_bytes: &[u8]) -> String {
     format!("ed25519:{}", BASE64.encode(sig_bytes))
+}
+
+/// Parse an "ed25519:<base64>" public key into a VerifyingKey.
+/// The single implementation — every prefixed-pubkey parse in the crate
+/// goes through here (previously 7 hand-rolled copies that drifted).
+pub(crate) fn parse_verifying_key(prefixed: &str) -> Result<VerifyingKey, SignetError> {
+    let b64 = prefixed
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| SignetError::InvalidKey("missing ed25519: prefix".to_string()))?;
+    let bytes = BASE64
+        .decode(b64)
+        .map_err(|e| SignetError::InvalidKey(format!("invalid pubkey base64: {e}")))?;
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| SignetError::InvalidKey("pubkey must be 32 bytes".to_string()))?;
+    VerifyingKey::from_bytes(&arr).map_err(|e| SignetError::InvalidKey(e.to_string()))
+}
+
+/// Parse an "ed25519:<base64>" signature. Single implementation.
+pub(crate) fn parse_signature(prefixed: &str) -> Result<ed25519_dalek::Signature, SignetError> {
+    let b64 = prefixed
+        .strip_prefix("ed25519:")
+        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
+    let bytes = BASE64
+        .decode(b64)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
+    ed25519_dalek::Signature::from_slice(&bytes)
+        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))
 }
 
 /// Check if a scope list is a wildcard.
@@ -216,6 +245,7 @@ pub(crate) fn build_delegation_signable(
 /// Build the signable JSON for a v4 receipt.
 /// Signs chain_hash and root_pubkey, NOT the full chain.
 /// Used by sign_authorized() and verify_v4_signature_only().
+/// Thin wrapper over the shared receipt builder (single source of truth).
 pub(crate) fn build_v4_receipt_signable(
     action: &Action,
     signer: &Signer,
@@ -224,22 +254,18 @@ pub(crate) fn build_v4_receipt_signable(
     ts: &str,
     nonce: &str,
     authz_decision: Option<&crate::authorization::AuthorizationDecision>,
-) -> serde_json::Value {
-    let mut signable = serde_json::json!({
-        "v": 4u8,
-        "action": action,
-        "signer": signer,
-        "authorization": {
-            "chain_hash": chain_hash,
-            "root_pubkey": root_pubkey,
-        },
-        "ts": ts,
-        "nonce": nonce,
-    });
-    if let Some(dec) = authz_decision {
-        signable["authz_decision"] = serde_json::to_value(dec).unwrap_or(serde_json::Value::Null);
-    }
-    signable
+) -> Result<serde_json::Value, SignetError> {
+    crate::receipt::build_receipt_signable(
+        4,
+        action,
+        signer,
+        ts,
+        nonce,
+        None,
+        None,
+        Some((chain_hash, root_pubkey)),
+        authz_decision,
+    )
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

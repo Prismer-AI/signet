@@ -9,8 +9,6 @@
 //! agent's receipt signature — stripping or altering it breaks the agent's
 //! own signature.
 
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use ed25519_dalek::{Signer as _, SigningKey, Verifier as _, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -185,16 +183,7 @@ fn build_decision_signable(dec: &AuthorizationDecision) -> serde_json::Value {
 }
 
 fn parse_pubkey(prefixed: &str) -> Result<VerifyingKey, SignetError> {
-    let b64 = prefixed
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidKey("pubkey missing ed25519: prefix".to_string()))?;
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid pubkey base64: {e}")))?;
-    let arr: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| SignetError::InvalidKey("pubkey must be 32 bytes".to_string()))?;
-    VerifyingKey::from_bytes(&arr).map_err(|e| SignetError::InvalidKey(e.to_string()))
+    crate::delegation::parse_verifying_key(prefixed)
 }
 
 // ─── authorize ──────────────────────────────────────────────────────────────
@@ -281,14 +270,9 @@ pub fn verify_decision(dec: &AuthorizationDecision) -> Result<(), SignetError> {
         ));
     }
     // ID derivation check: catches a sig/ID swap.
-    let sig_b64 = dec
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::DecisionInvalid("sig missing ed25519: prefix".into()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::DecisionInvalid(format!("invalid sig base64: {e}")))?;
-    let expected_id = derive_id("dec", &sig_bytes);
+    let signature = crate::delegation::parse_signature(&dec.sig)
+        .map_err(|e| SignetError::DecisionInvalid(e.to_string()))?;
+    let expected_id = derive_id("dec", &signature.to_bytes());
     if dec.decision_id != expected_id {
         return Err(SignetError::DecisionInvalid(
             "decision_id does not match sig".to_string(),
@@ -297,8 +281,6 @@ pub fn verify_decision(dec: &AuthorizationDecision) -> Result<(), SignetError> {
 
     let authority_vk = parse_pubkey(&dec.authority_pubkey)?;
     let canonical_bytes = canonical::canonicalize(&build_decision_signable(dec))?;
-    let signature = ed25519_dalek::Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::DecisionInvalid(format!("invalid sig bytes: {e}")))?;
     authority_vk
         .verify(canonical_bytes.as_bytes(), &signature)
         .map_err(|_| SignetError::SignatureMismatch)

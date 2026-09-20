@@ -79,13 +79,7 @@ pub fn sign(args: SignArgs) -> Result<()> {
     let info = signet_core::load_key_info(&dir, &args.key)?;
 
     // Load signing key: try unencrypted first, then prompt
-    let sk = match signet_core::load_signing_key(&dir, &args.key, None) {
-        Ok(sk) => sk,
-        Err(_) => {
-            let pass = super::get_passphrase("Enter passphrase: ")?;
-            signet_core::load_signing_key(&dir, &args.key, Some(&pass))?
-        }
-    };
+    let sk = crate::load_signing_key_with_prompt(&dir, &args.key, "Enter passphrase: ")?;
 
     // Resolve tool name: --tool or --tool-from-env
     let tool = match (&args.tool, &args.tool_from_env) {
@@ -203,18 +197,11 @@ pub fn sign(args: SignArgs) -> Result<()> {
                                 "--authority-principal (or authority key metadata principal) is required with --authority-key"
                             )
                         })?;
-                    let authority_sk =
-                        match signet_core::load_signing_key(&dir, authority_key_name, None) {
-                            Ok(k) => k,
-                            Err(_) => {
-                                let pass = super::get_passphrase("Authority key passphrase: ")?;
-                                signet_core::load_signing_key(
-                                    &dir,
-                                    authority_key_name,
-                                    Some(&pass),
-                                )?
-                            }
-                        };
+                    let authority_sk = crate::load_signing_key_with_prompt(
+                        &dir,
+                        authority_key_name,
+                        "Authority key passphrase: ",
+                    )?;
                     let agent_principal = principal.ok_or_else(|| {
                         anyhow::anyhow!(
                             "--principal (or key metadata principal) is required with --authority-key: the decision subject must be corroborated"

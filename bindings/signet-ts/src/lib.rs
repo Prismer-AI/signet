@@ -532,14 +532,7 @@ pub fn wasm_evaluate_policy(
     let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    let result = serde_json::json!({
-        "decision": eval.decision.to_string(),
-        "matched_rules": eval.matched_rules,
-        "winning_rule": eval.winning_rule,
-        "reason": eval.reason,
-        "policy_name": eval.policy_name,
-        "policy_hash": eval.policy_hash,
-    });
+    let result = serde_json::to_value(&eval).map_err(|e| JsError::new(&e.to_string()))?;
     serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -569,14 +562,7 @@ pub fn wasm_sign_with_policy(
 
     let result = serde_json::json!({
         "receipt": receipt,
-        "eval": {
-            "decision": eval.decision.to_string(),
-            "matched_rules": eval.matched_rules,
-            "winning_rule": eval.winning_rule,
-            "reason": eval.reason,
-            "policy_name": eval.policy_name,
-            "policy_hash": eval.policy_hash,
-        }
+        "eval": serde_json::to_value(&eval).map_err(|e| JsError::new(&e.to_string()))?,
     });
     serde_json::to_string(&result).map_err(|e| JsError::new(&e.to_string()))
 }

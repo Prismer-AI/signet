@@ -1,6 +1,5 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Verifier, VerifyingKey};
 use std::sync::OnceLock;
 
 use crate::canonical;
@@ -9,60 +8,26 @@ use crate::receipt::{BilateralReceipt, CompoundReceipt, Receipt};
 
 /// Verify the Ed25519 signature on a v1/v4 receipt. Does NOT check expiration.
 fn verify_receipt_signature(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<(), SignetError> {
-    let sig_b64 = receipt
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+    let signature = crate::delegation::parse_signature(&receipt.sig)?;
 
-    let mut signable = serde_json::json!({
-        "v": receipt.v,
-        "action": receipt.action,
-        "signer": receipt.signer,
-        "ts": receipt.ts,
-        "nonce": receipt.nonce,
-    });
-    // Include optional fields in signable when present.
-    // JCS canonicalization guarantees key-order independence, so insertion order is irrelevant.
-    let obj = signable
-        .as_object_mut()
-        .ok_or_else(|| SignetError::InvalidReceipt("signable is not a JSON object".into()))?;
-    if let Some(ref policy) = receipt.policy {
-        obj.insert(
-            "policy".to_string(),
-            serde_json::to_value(policy).map_err(|e| {
-                SignetError::InvalidReceipt(format!("failed to serialize policy: {e}"))
-            })?,
-        );
-    }
-    if let Some(ref exp) = receipt.exp {
-        obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
-    }
+    // Single shared construction with the sign paths (receipt.rs).
     // v4 receipts sign the authorization binding (chain_hash + root_pubkey),
-    // not the full chain. Without this block every legitimate v4 receipt
-    // failed signature verification here (build_v4_receipt_signable).
-    if let Some(ref authz) = receipt.authorization {
-        obj.insert(
-            "authorization".to_string(),
-            serde_json::json!({
-                "chain_hash": authz.chain_hash,
-                "root_pubkey": authz.root_pubkey,
-            }),
-        );
-    }
-    // Authority decisions ride inside the agent's signature scope.
-    if let Some(ref decision) = receipt.authz_decision {
-        obj.insert(
-            "authz_decision".to_string(),
-            serde_json::to_value(decision).map_err(|e| {
-                SignetError::InvalidReceipt(format!("failed to serialize authz_decision: {e}"))
-            })?,
-        );
-    }
+    // not the full chain; authority decisions ride in the agent's scope.
+    let authorization = receipt
+        .authorization
+        .as_ref()
+        .map(|a| (a.chain_hash.as_str(), a.root_pubkey.as_str()));
+    let signable = crate::receipt::build_receipt_signable(
+        receipt.v,
+        &receipt.action,
+        &receipt.signer,
+        &receipt.ts,
+        &receipt.nonce,
+        receipt.policy.as_ref(),
+        receipt.exp.as_deref(),
+        authorization,
+        receipt.authz_decision.as_ref(),
+    )?;
     let canonical_bytes = canonical::canonicalize(&signable)?;
 
     pubkey
@@ -112,15 +77,7 @@ pub fn verify_compound(
     receipt: &CompoundReceipt,
     pubkey: &VerifyingKey,
 ) -> Result<(), SignetError> {
-    let sig_b64 = receipt
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+    let signature = crate::delegation::parse_signature(&receipt.sig)?;
 
     let signable = serde_json::json!({
         "v": receipt.v,
@@ -726,30 +683,15 @@ pub fn verify_bilateral_with_options_detailed(
     options: &BilateralVerifyOptions,
 ) -> Result<BilateralVerifyOutcome, SignetError> {
     // 0. Cross-check: caller's key must match receipt.server.pubkey
-    let receipt_server_b64 = receipt
-        .server
-        .pubkey
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("server.pubkey missing prefix".to_string()))?;
-    let receipt_server_bytes = BASE64
-        .decode(receipt_server_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("server.pubkey base64: {e}")))?;
-    if receipt_server_bytes.as_slice() != server_pubkey.as_bytes() {
+    let receipt_server = crate::delegation::parse_verifying_key(&receipt.server.pubkey)?;
+    if receipt_server.as_bytes() != server_pubkey.as_bytes() {
         return Err(SignetError::InvalidReceipt(
             "caller-supplied server key does not match receipt.server.pubkey".to_string(),
         ));
     }
 
     // 1. Verify server signature over v3 body
-    let sig_b64 = receipt
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+    let signature = crate::delegation::parse_signature(&receipt.sig)?;
 
     let signable = serde_json::json!({
         "v": receipt.v,
@@ -766,20 +708,7 @@ pub fn verify_bilateral_with_options_detailed(
         .map_err(|_| SignetError::SignatureMismatch)?;
 
     // 2. Verify embedded agent receipt using its own pubkey
-    let agent_pubkey_b64 = receipt
-        .agent_receipt
-        .signer
-        .pubkey
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("agent pubkey missing prefix".to_string()))?;
-    let agent_pubkey_bytes = BASE64
-        .decode(agent_pubkey_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
-    let agent_pubkey_arr: [u8; 32] = agent_pubkey_bytes
-        .try_into()
-        .map_err(|_| SignetError::InvalidReceipt("agent pubkey not 32 bytes".to_string()))?;
-    let agent_vk = VerifyingKey::from_bytes(&agent_pubkey_arr)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid agent pubkey: {e}")))?;
+    let agent_vk = crate::delegation::parse_verifying_key(&receipt.agent_receipt.signer.pubkey)?;
 
     // 2a. If a trusted agent key was supplied, ensure the receipt's agent key matches
     if let Some(ref trusted) = options.trusted_agent_pubkey {

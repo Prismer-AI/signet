@@ -116,36 +116,6 @@ pub struct VerifyAuthArgs {
     pub clock_skew: u64,
 }
 
-fn parse_ttl(s: &str) -> Result<String> {
-    let s = s.trim();
-    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
-        (n, "d")
-    } else if let Some(n) = s.strip_suffix('h') {
-        (n, "h")
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, "m")
-    } else {
-        bail!("invalid TTL format '{}': expected e.g. 30m, 1h, 24h, 7d", s);
-    };
-
-    let num: u64 = num_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid TTL number: '{}'", num_str))?;
-    if num == 0 {
-        bail!("TTL must be > 0");
-    }
-
-    let secs = match unit {
-        "m" => num * 60,
-        "h" => num * 3600,
-        "d" => num * 86400,
-        _ => unreachable!(),
-    };
-
-    let expires = chrono::Utc::now() + chrono::Duration::seconds(secs as i64);
-    Ok(expires.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-}
-
 fn parse_tools_targets(s: &str) -> Result<Vec<String>> {
     if s == "*" {
         return Ok(vec!["*".to_string()]);
@@ -174,19 +144,13 @@ fn create(args: CreateArgs) -> Result<()> {
     let dir = signet_core::default_signet_dir();
     let info = signet_core::load_key_info(&dir, &args.from)?;
 
-    let sk = match signet_core::load_signing_key(&dir, &args.from, None) {
-        Ok(sk) => sk,
-        Err(_) => {
-            let pass = super::get_passphrase("Enter passphrase: ")?;
-            signet_core::load_signing_key(&dir, &args.from, Some(&pass))?
-        }
-    };
+    let sk = crate::load_signing_key_with_prompt(&dir, &args.from, "Enter passphrase: ")?;
 
     let delegate_vk = resolve_pubkey(&dir, &args.to)?;
 
     let expires = match (&args.expires, &args.ttl) {
         (Some(exp), _) => Some(exp.clone()),
-        (_, Some(ttl)) => Some(parse_ttl(ttl)?),
+        (_, Some(ttl)) => Some(crate::parse_ttl(ttl)?),
         _ => None,
     };
 
@@ -279,13 +243,7 @@ fn sign(args: DelegateSignArgs) -> Result<()> {
     let dir = signet_core::default_signet_dir();
     let info = signet_core::load_key_info(&dir, &args.key)?;
 
-    let sk = match signet_core::load_signing_key(&dir, &args.key, None) {
-        Ok(sk) => sk,
-        Err(_) => {
-            let pass = super::get_passphrase("Enter passphrase: ")?;
-            signet_core::load_signing_key(&dir, &args.key, Some(&pass))?
-        }
-    };
+    let sk = crate::load_signing_key_with_prompt(&dir, &args.key, "Enter passphrase: ")?;
 
     let chain_json = fs::read_to_string(&args.chain)?;
     let chain: Vec<signet_core::DelegationToken> = serde_json::from_str(&chain_json)?;

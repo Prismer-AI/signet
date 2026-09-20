@@ -551,14 +551,7 @@ fn evaluate_policy(
     let eval =
         signet_core::evaluate_policy(&action, agent_name, &policy, None).map_err(to_py_err)?;
 
-    let result = serde_json::json!({
-        "decision": eval.decision.to_string(),
-        "matched_rules": eval.matched_rules,
-        "winning_rule": eval.winning_rule,
-        "reason": eval.reason,
-        "policy_name": eval.policy_name,
-        "policy_hash": eval.policy_hash,
-    });
+    let result = serde_json::to_value(&eval).map_err(|e| to_py_err(e.into()))?;
     serde_json::to_string(&result).map_err(|e| to_py_err(e.into()))
 }
 
@@ -593,14 +586,7 @@ fn sign_with_policy(
         .map_err(to_py_err)?;
 
     let receipt_json = serde_json::to_string(&receipt).map_err(|e| to_py_err(e.into()))?;
-    let eval_result = serde_json::json!({
-        "decision": eval.decision.to_string(),
-        "matched_rules": eval.matched_rules,
-        "winning_rule": eval.winning_rule,
-        "reason": eval.reason,
-        "policy_name": eval.policy_name,
-        "policy_hash": eval.policy_hash,
-    });
+    let eval_result = serde_json::to_value(&eval).map_err(|e| to_py_err(e.into()))?;
     let eval_json = serde_json::to_string(&eval_result).map_err(|e| to_py_err(e.into()))?;
     Ok((receipt_json, eval_json))
 }

@@ -25,6 +25,26 @@ pub struct Action {
     pub parent_receipt_id: Option<String>,
 }
 
+impl Action {
+    /// Clone with a computed params_hash — the signed form of an action.
+    /// Single source of truth so new Action fields cannot be dropped by a
+    /// hand-copied reconstruction.
+    pub(crate) fn with_params_hash(&self, params_hash: String) -> Action {
+        Action {
+            tool: self.tool.clone(),
+            params: self.params.clone(),
+            params_hash,
+            target: self.target.clone(),
+            transport: self.transport.clone(),
+            session: self.session.clone(),
+            call_id: self.call_id.clone(),
+            response_hash: self.response_hash.clone(),
+            trace_id: self.trace_id.clone(),
+            parent_receipt_id: self.parent_receipt_id.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signer {
     pub pubkey: String,
@@ -181,4 +201,73 @@ pub struct BilateralReceipt {
     pub sig: String, // server signs entire v3 body
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<serde_json::Value>, // unsigned, outside sig scope
+}
+
+// ─── Shared signable construction ───────────────────────────────────────────
+
+/// Build the receipt signable JSON — the single source of truth shared by
+/// the sign paths (sign.rs, sign_delegation.rs) and the verify paths
+/// (verify.rs, verify_delegation.rs). Every optional field is included
+/// exactly when present, so a new in-scope field cannot be added to one
+/// side and forgotten on the other (that asymmetry silently breaks every
+/// new receipt's verification).
+///
+/// `authorization` carries `(chain_hash, root_pubkey)` for v4 receipts; the
+/// full chain is signed indirectly via chain_hash.
+// Field-by-field parameters mirror the receipt's own shape; a params struct
+// would just duplicate it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_receipt_signable(
+    v: u8,
+    action: &Action,
+    signer: &Signer,
+    ts: &str,
+    nonce: &str,
+    policy: Option<&PolicyAttestation>,
+    exp: Option<&str>,
+    authorization: Option<(&str, &str)>,
+    authz_decision: Option<&AuthorizationDecision>,
+) -> Result<serde_json::Value, crate::error::SignetError> {
+    let mut signable = serde_json::json!({
+        "v": v,
+        "action": action,
+        "signer": signer,
+        "ts": ts,
+        "nonce": nonce,
+    });
+    let obj = signable.as_object_mut().ok_or_else(|| {
+        crate::error::SignetError::InvalidReceipt("signable is not an object".into())
+    })?;
+    if let Some(policy) = policy {
+        obj.insert(
+            "policy".to_string(),
+            serde_json::to_value(policy).map_err(|e| {
+                crate::error::SignetError::InvalidReceipt(format!("policy serialize: {e}"))
+            })?,
+        );
+    }
+    if let Some(exp) = exp {
+        obj.insert(
+            "exp".to_string(),
+            serde_json::Value::String(exp.to_string()),
+        );
+    }
+    if let Some((chain_hash, root_pubkey)) = authorization {
+        obj.insert(
+            "authorization".to_string(),
+            serde_json::json!({
+                "chain_hash": chain_hash,
+                "root_pubkey": root_pubkey,
+            }),
+        );
+    }
+    if let Some(decision) = authz_decision {
+        obj.insert(
+            "authz_decision".to_string(),
+            serde_json::to_value(decision).map_err(|e| {
+                crate::error::SignetError::InvalidReceipt(format!("authz_decision serialize: {e}"))
+            })?,
+        );
+    }
+    Ok(signable)
 }

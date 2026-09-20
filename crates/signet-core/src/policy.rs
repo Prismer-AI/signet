@@ -172,7 +172,7 @@ pub struct PolicyAttestation {
 
 // ─── Evaluation Result ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PolicyEvalResult {
     pub decision: RuleAction,
     pub matched_rules: Vec<String>,

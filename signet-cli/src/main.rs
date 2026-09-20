@@ -87,6 +87,51 @@ enum IdentityAction {
     Export(cmd_identity::ExportArgs),
 }
 
+/// Parse a TTL like "30m"/"1h"/"24h" into an RFC 3339 UTC timestamp.
+/// Shared by `delegate create` and `authorize` (was duplicated).
+pub(crate) fn parse_ttl(s: &str) -> Result<String> {
+    let s = s.trim();
+    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
+        (n, "d")
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, "h")
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, "m")
+    } else {
+        bail!("invalid TTL format '{}': expected e.g. 30m, 1h, 24h", s);
+    };
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid TTL number: '{}'", num_str))?;
+    if num == 0 {
+        bail!("TTL must be > 0");
+    }
+    let secs = match unit {
+        "m" => num * 60,
+        "h" => num * 3600,
+        "d" => num * 86400,
+        _ => unreachable!(),
+    };
+    let expires = chrono::Utc::now() + chrono::Duration::seconds(secs as i64);
+    Ok(expires.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
+/// Load a signing key by name: try unencrypted first, then prompt for a
+/// passphrase. The pattern was copy-pasted in every key-using command.
+pub(crate) fn load_signing_key_with_prompt(
+    dir: &std::path::Path,
+    name: &str,
+    prompt: &str,
+) -> Result<ed25519_dalek::SigningKey> {
+    match signet_core::load_signing_key(dir, name, None) {
+        Ok(sk) => Ok(sk),
+        Err(_) => {
+            let pass = get_passphrase(prompt)?;
+            Ok(signet_core::load_signing_key(dir, name, Some(&pass))?)
+        }
+    }
+}
+
 pub fn get_passphrase(prompt: &str) -> Result<String> {
     if let Ok(p) = std::env::var("SIGNET_PASSPHRASE") {
         if p.is_empty() {

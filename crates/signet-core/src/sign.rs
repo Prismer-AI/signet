@@ -66,20 +66,7 @@ fn sign_inner(
         crate::principal::validate_principal(p)?;
     }
 
-    let params_hash = compute_params_hash(action)?;
-
-    let signed_action = Action {
-        tool: action.tool.clone(),
-        params: action.params.clone(),
-        params_hash,
-        target: action.target.clone(),
-        transport: action.transport.clone(),
-        session: action.session.clone(),
-        call_id: action.call_id.clone(),
-        response_hash: action.response_hash.clone(),
-        trace_id: action.trace_id.clone(),
-        parent_receipt_id: action.parent_receipt_id.clone(),
-    };
+    let signed_action = action.with_params_hash(compute_params_hash(action)?);
 
     let signer = Signer {
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
@@ -92,34 +79,17 @@ fn sign_inner(
     let nonce = generate_nonce();
     let ts = current_timestamp();
 
-    // Build signable with optional fields. JCS canonicalization makes
-    // key insertion order irrelevant.
-    let mut signable = serde_json::json!({
-        "v": 1u8,
-        "action": signed_action,
-        "signer": signer,
-        "ts": ts,
-        "nonce": nonce,
-    });
-    let obj = signable.as_object_mut().expect("just built as object");
-    if let Some(ref policy) = opts.policy {
-        obj.insert(
-            "policy".to_string(),
-            serde_json::to_value(policy)
-                .map_err(|e| SignetError::InvalidReceipt(format!("policy serialize: {e}")))?,
-        );
-    }
-    if let Some(ref exp) = opts.exp {
-        obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
-    }
-    if let Some(ref decision) = opts.authz_decision {
-        obj.insert(
-            "authz_decision".to_string(),
-            serde_json::to_value(decision).map_err(|e| {
-                SignetError::InvalidReceipt(format!("authz_decision serialize: {e}"))
-            })?,
-        );
-    }
+    let signable = crate::receipt::build_receipt_signable(
+        1,
+        &signed_action,
+        &signer,
+        &ts,
+        &nonce,
+        opts.policy.as_ref(),
+        opts.exp.as_deref(),
+        None,
+        opts.authz_decision.as_ref(),
+    )?;
 
     let canonical_bytes = canonical::canonicalize(&signable)?;
     let signature = key.sign(canonical_bytes.as_bytes());
@@ -445,20 +415,7 @@ pub fn sign_compound(
     ts_response: &str,
 ) -> Result<CompoundReceipt, SignetError> {
     // 1. Compute params_hash (same logic as sign())
-    let params_hash = compute_params_hash(action)?;
-
-    let signed_action = Action {
-        tool: action.tool.clone(),
-        params: action.params.clone(),
-        params_hash,
-        target: action.target.clone(),
-        transport: action.transport.clone(),
-        session: action.session.clone(),
-        call_id: action.call_id.clone(),
-        response_hash: action.response_hash.clone(),
-        trace_id: action.trace_id.clone(),
-        parent_receipt_id: action.parent_receipt_id.clone(),
-    };
+    let signed_action = action.with_params_hash(compute_params_hash(action)?);
 
     // 2. Hash response content
     let canonical_response = canonical::canonicalize(response_content)?;

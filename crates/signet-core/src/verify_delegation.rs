@@ -1,7 +1,5 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
 use chrono::{DateTime, Utc};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Verifier, VerifyingKey};
 
 use crate::canonical;
 use crate::delegation::{
@@ -26,32 +24,10 @@ pub fn verify_delegation(
     }
 
     // 1. Decode delegator pubkey
-    let pubkey_b64 = token
-        .delegator
-        .pubkey
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| {
-            SignetError::InvalidKey("delegator pubkey missing ed25519: prefix".to_string())
-        })?;
-    let pubkey_bytes = BASE64
-        .decode(pubkey_b64)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid delegator pubkey base64: {e}")))?;
-    let pubkey_arr: [u8; 32] = pubkey_bytes
-        .try_into()
-        .map_err(|_| SignetError::InvalidKey("delegator pubkey must be 32 bytes".to_string()))?;
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid delegator pubkey: {e}")))?;
+    let verifying_key = crate::delegation::parse_verifying_key(&token.delegator.pubkey)?;
 
     // 2. Decode signature
-    let sig_b64 = token
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".to_string()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+    let signature = crate::delegation::parse_signature(&token.sig)?;
 
     // 3. Reconstruct signable, canonicalize, verify
     let signable = build_delegation_signable(
@@ -105,19 +81,7 @@ pub fn verify_chain(
     let verification_time = at.unwrap_or_else(Utc::now);
 
     // Check root is trusted
-    let root_pubkey_b64 = chain[0]
-        .delegator
-        .pubkey
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidKey("root pubkey missing ed25519: prefix".into()))?;
-    let root_pubkey_bytes = BASE64
-        .decode(root_pubkey_b64)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid root pubkey base64: {e}")))?;
-    let root_pubkey_arr: [u8; 32] = root_pubkey_bytes
-        .try_into()
-        .map_err(|_| SignetError::InvalidKey("root pubkey must be 32 bytes".into()))?;
-    let root_vk = VerifyingKey::from_bytes(&root_pubkey_arr)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid root pubkey: {e}")))?;
+    let root_vk = crate::delegation::parse_verifying_key(&chain[0].delegator.pubkey)?;
 
     if !trusted_roots.contains(&root_vk) {
         return Err(SignetError::ChainError(format!(
@@ -273,33 +237,13 @@ pub(crate) fn verify_v4_signature_only(receipt: &Receipt) -> Result<(), SignetEr
         &receipt.nonce,
         receipt.authz_decision.as_ref(),
     );
-    let canonical_bytes = canonical::canonicalize(&signable)?;
+    let canonical_bytes = canonical::canonicalize(&signable?)?;
 
     // Decode signer pubkey
-    let pubkey_b64 = receipt
-        .signer
-        .pubkey
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidKey("signer pubkey missing ed25519: prefix".into()))?;
-    let pubkey_bytes = BASE64
-        .decode(pubkey_b64)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid signer pubkey base64: {e}")))?;
-    let pubkey_arr: [u8; 32] = pubkey_bytes
-        .try_into()
-        .map_err(|_| SignetError::InvalidKey("signer pubkey must be 32 bytes".into()))?;
-    let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
-        .map_err(|e| SignetError::InvalidKey(format!("invalid signer pubkey: {e}")))?;
+    let verifying_key = crate::delegation::parse_verifying_key(&receipt.signer.pubkey)?;
 
     // Decode signature
-    let sig_b64 = receipt
-        .sig
-        .strip_prefix("ed25519:")
-        .ok_or_else(|| SignetError::InvalidReceipt("sig missing ed25519: prefix".into()))?;
-    let sig_bytes = BASE64
-        .decode(sig_b64)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig base64: {e}")))?;
-    let signature = Signature::from_slice(&sig_bytes)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid sig bytes: {e}")))?;
+    let signature = crate::delegation::parse_signature(&receipt.sig)?;
 
     verifying_key
         .verify(canonical_bytes.as_bytes(), &signature)
@@ -362,10 +306,8 @@ mod tests {
         .unwrap();
 
         // Tamper: replace delegator pubkey with wrong key
-        token.delegator.pubkey = format!(
-            "ed25519:{}",
-            base64::engine::general_purpose::STANDARD.encode(wrong_key.verifying_key().to_bytes())
-        );
+        token.delegator.pubkey =
+            crate::delegation::format_pubkey(&wrong_key.verifying_key().to_bytes());
 
         let err = verify_delegation(&token, None).unwrap_err();
         assert!(matches!(err, SignetError::SignatureMismatch));
@@ -1236,7 +1178,7 @@ mod tests {
         );
         let root_pubkey = token.delegator.pubkey.clone();
         let signer = crate::receipt::Signer {
-            pubkey: format!("ed25519:{}", BASE64.encode(agent_vk.as_bytes())),
+            pubkey: crate::delegation::format_pubkey(agent_vk.as_bytes()),
             name: "bot".into(),
             owner: "alice".into(),
             principal: None,
@@ -1254,10 +1196,10 @@ mod tests {
             &nonce,
             None,
         );
-        let canonical_bytes = canonical::canonicalize(&signable).unwrap();
+        let canonical_bytes = canonical::canonicalize(&signable.unwrap()).unwrap();
         use ed25519_dalek::Signer as _;
         let signature = agent_key.sign(canonical_bytes.as_bytes());
-        let sig = format!("ed25519:{}", BASE64.encode(signature.to_bytes()));
+        let sig = crate::delegation::format_sig(&signature.to_bytes());
         let id = {
             let h = Sha256::digest(signature.to_bytes());
             format!("rec_{}", hex::encode(&h[..16]))

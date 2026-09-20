@@ -240,19 +240,7 @@ pub(crate) fn sign_authorized_inner(
     let signer_owner = chain[0].delegator.name.clone();
 
     // Compute params_hash
-    let params_hash = compute_params_hash(action)?;
-    let signed_action = Action {
-        tool: action.tool.clone(),
-        params: action.params.clone(),
-        params_hash,
-        target: action.target.clone(),
-        transport: action.transport.clone(),
-        session: action.session.clone(),
-        call_id: action.call_id.clone(),
-        response_hash: action.response_hash.clone(),
-        trace_id: action.trace_id.clone(),
-        parent_receipt_id: action.parent_receipt_id.clone(),
-    };
+    let signed_action = action.with_params_hash(compute_params_hash(action)?);
 
     let signer = Signer {
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
@@ -289,7 +277,7 @@ pub(crate) fn sign_authorized_inner(
         &nonce,
         decision,
     );
-    let canonical_bytes = canonical::canonicalize(&signable)?;
+    let canonical_bytes = canonical::canonicalize(&signable?)?;
     let signature = key.sign(canonical_bytes.as_bytes());
 
     let id = derive_id("rec", &signature.to_bytes());

@@ -53,13 +53,7 @@ pub fn authorize(args: AuthorizeArgs) -> Result<()> {
     let dir = signet_core::default_signet_dir();
     let info = signet_core::load_key_info(&dir, &args.key)?;
 
-    let sk = match signet_core::load_signing_key(&dir, &args.key, None) {
-        Ok(sk) => sk,
-        Err(_) => {
-            let pass = super::get_passphrase("Enter passphrase: ")?;
-            signet_core::load_signing_key(&dir, &args.key, Some(&pass))?
-        }
-    };
+    let sk = crate::load_signing_key_with_prompt(&dir, &args.key, "Enter passphrase: ")?;
 
     let params_str = if let Some(path) = args.params.strip_prefix('@') {
         fs::read_to_string(path)
@@ -95,7 +89,7 @@ pub fn authorize(args: AuthorizeArgs) -> Result<()> {
         }
     }
 
-    let expires_at = args.ttl.as_deref().map(parse_ttl).transpose()?;
+    let expires_at = args.ttl.as_deref().map(crate::parse_ttl).transpose()?;
 
     let mut constraints = Vec::new();
     if let Some(max_calls) = args.max_calls {
@@ -144,31 +138,4 @@ pub fn authorize(args: AuthorizeArgs) -> Result<()> {
         None => println!("{json}"),
     }
     Ok(())
-}
-
-fn parse_ttl(s: &str) -> Result<String> {
-    let s = s.trim();
-    let (num_str, unit) = if let Some(n) = s.strip_suffix('d') {
-        (n, "d")
-    } else if let Some(n) = s.strip_suffix('h') {
-        (n, "h")
-    } else if let Some(n) = s.strip_suffix('m') {
-        (n, "m")
-    } else {
-        bail!("invalid TTL format '{}': expected e.g. 30m, 1h, 24h", s);
-    };
-    let num: u64 = num_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid TTL number: '{}'", num_str))?;
-    if num == 0 {
-        bail!("TTL must be > 0");
-    }
-    let secs = match unit {
-        "m" => num * 60,
-        "h" => num * 3600,
-        "d" => num * 86400,
-        _ => unreachable!(),
-    };
-    let expires = chrono::Utc::now() + chrono::Duration::seconds(secs as i64);
-    Ok(expires.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }

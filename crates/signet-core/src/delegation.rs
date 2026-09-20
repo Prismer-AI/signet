@@ -15,6 +15,10 @@ use crate::receipt::{Action, Signer};
 pub struct DelegationIdentity {
     pub pubkey: String, // "ed25519:<base64>"
     pub name: String,
+    /// Canonical principal URI (e.g. "user://prismer/alice"). Validated at
+    /// sign_delegation time; part of the token's signature scope when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,10 +186,27 @@ pub(crate) fn build_delegation_signable(
         signable_scope["expires"] = serde_json::json!(expires);
     }
 
+    // Identities serialize with their optional principal only when present,
+    // so tokens without principals canonicalize identically to v0.10.
+    let mut signable_delegator = serde_json::json!({
+        "pubkey": delegator.pubkey,
+        "name": delegator.name,
+    });
+    if let Some(ref principal) = delegator.principal {
+        signable_delegator["principal"] = serde_json::json!(principal);
+    }
+    let mut signable_delegate = serde_json::json!({
+        "pubkey": delegate.pubkey,
+        "name": delegate.name,
+    });
+    if let Some(ref principal) = delegate.principal {
+        signable_delegate["principal"] = serde_json::json!(principal);
+    }
+
     serde_json::json!({
         "v": 1u8,
-        "delegator": { "pubkey": delegator.pubkey, "name": delegator.name },
-        "delegate": { "pubkey": delegate.pubkey, "name": delegate.name },
+        "delegator": signable_delegator,
+        "delegate": signable_delegate,
         "scope": signable_scope,
         "issued_at": issued_at,
         "nonce": nonce,

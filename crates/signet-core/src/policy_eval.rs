@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 
+use crate::error::SignetError;
 use crate::policy::{
     compute_policy_hash, MatchSpec, ParamMatchOp, ParamMatcher, Policy, PolicyEvalResult,
     RateLimitScope, Rule, RuleAction, StringMatchOp, StringMatcher,
@@ -198,13 +199,17 @@ fn rate_limit_scope_key(rule: &Rule, action: &Action, agent_name: &str) -> Strin
 
 /// Evaluate all rules against an action. Returns the max-severity decision.
 /// deny > require_approval > allow.
+///
+/// Fails (rather than attesting) if the policy cannot be canonicalized — the
+/// policy hash enters the signed attestation, so a sentinel value is not an
+/// acceptable fallback.
 pub fn evaluate_policy(
     action: &Action,
     agent_name: &str,
     policy: &Policy,
     mut rate_state: Option<&mut RateLimitState>,
-) -> PolicyEvalResult {
-    let policy_hash = compute_policy_hash(policy).unwrap_or_else(|_| "sha256:error".to_string());
+) -> Result<PolicyEvalResult, SignetError> {
+    let policy_hash = compute_policy_hash(policy)?;
     let evaluated_at = crate::delegation::current_timestamp();
 
     let mut matched_rules: Vec<String> = Vec::new();
@@ -217,21 +222,38 @@ pub fn evaluate_policy(
             continue;
         }
 
-        // Rate limit check (if present and state provided)
-        if let (Some(ref rl), Some(ref mut state)) = (&rule.rate_limit, rate_state.as_deref_mut()) {
-            let key = rate_limit_scope_key(rule, action, agent_name);
-            let window = Duration::from_secs(rl.window_seconds);
-            let within_limit = state.check_and_record(&key, rl.max_calls, window);
-            if within_limit {
-                // Rate limit not exceeded — this rule's action does not trigger
-                // (the rule matches structurally but the rate limit condition isn't met)
-                continue;
+        if let Some(ref rl) = rule.rate_limit {
+            match rate_state.as_deref_mut() {
+                Some(ref mut state) => {
+                    // Rate limit check with state: the rule triggers only
+                    // when the threshold is exceeded.
+                    let key = rate_limit_scope_key(rule, action, agent_name);
+                    let window = Duration::from_secs(rl.window_seconds);
+                    let within_limit = state.check_and_record(&key, rl.max_calls, window);
+                    if within_limit {
+                        // Threshold not exceeded — rule does not trigger.
+                        continue;
+                    }
+                    // Exceeded — rule triggers with its action.
+                }
+                None => {
+                    // Rate-limited rule but no state provided. We cannot prove
+                    // the threshold is respected, so fail closed: the rule
+                    // contributes require_approval instead of being silently
+                    // skipped (the v0.10 behavior turned "deny after N calls"
+                    // into "always allow" for stateless callers).
+                    matched_rules.push(rule.id.clone());
+                    if RuleAction::RequireApproval > max_action {
+                        max_action = RuleAction::RequireApproval;
+                        winning_rule = Some(rule.id.clone());
+                        max_reason = format!(
+                            "rule '{}' has a rate limit but no rate state was provided; failing closed to require_approval",
+                            rule.id
+                        );
+                    }
+                    continue;
+                }
             }
-            // Rate limit exceeded — rule triggers with its action
-        } else if rule.rate_limit.is_some() {
-            // Rate limit rule but no state provided — skip rate check, match structurally
-            // (treat as if rate limit is not exceeded)
-            continue;
         }
 
         matched_rules.push(rule.id.clone());
@@ -251,7 +273,7 @@ pub fn evaluate_policy(
         (max_action, max_reason)
     };
 
-    PolicyEvalResult {
+    Ok(PolicyEvalResult {
         decision,
         matched_rules,
         winning_rule,
@@ -259,7 +281,7 @@ pub fn evaluate_policy(
         evaluated_at,
         policy_name: policy.name.clone(),
         policy_hash,
-    }
+    })
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -575,7 +597,8 @@ mod tests {
     #[test]
     fn test_eval_allow_default() {
         let policy = simple_policy(vec![]);
-        let result = evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.decision, RuleAction::Allow);
         assert!(result.matched_rules.is_empty());
     }
@@ -586,14 +609,16 @@ mod tests {
             default_action: RuleAction::Deny,
             ..simple_policy(vec![])
         };
-        let result = evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.decision, RuleAction::Deny);
     }
 
     #[test]
     fn test_eval_single_deny_rule() {
         let policy = simple_policy(vec![rule("r1", "Bash", RuleAction::Deny)]);
-        let result = evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.decision, RuleAction::Deny);
         assert_eq!(result.matched_rules, vec!["r1"]);
     }
@@ -604,7 +629,8 @@ mod tests {
             rule("allow-rule", "Bash", RuleAction::Allow),
             rule("deny-rule", "Bash", RuleAction::Deny),
         ]);
-        let result = evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.decision, RuleAction::Deny);
         assert_eq!(result.matched_rules.len(), 2);
         assert_eq!(result.winning_rule, Some("deny-rule".into()));
@@ -616,7 +642,8 @@ mod tests {
             rule("allow", "Bash", RuleAction::Allow),
             rule("approval", "Bash", RuleAction::RequireApproval),
         ]);
-        let result = evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.decision, RuleAction::RequireApproval);
     }
 
@@ -627,19 +654,114 @@ mod tests {
             rule("r2", "Bash", RuleAction::Deny),
             rule("r3", "Read", RuleAction::Deny), // doesn't match
         ]);
-        let result = evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
         assert_eq!(result.matched_rules, vec!["r1", "r2"]);
     }
 
     #[test]
     fn test_eval_policy_hash_populated() {
         let policy = simple_policy(vec![]);
-        let result = evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None);
+        let result =
+            evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None).unwrap();
         assert!(result.policy_hash.starts_with("sha256:"));
         assert_eq!(result.policy_name, "test");
     }
 
     // ── Rate limiting ──
+
+    fn rate_limited_rule(id: &str, tool: &str, action: RuleAction, max_calls: u32) -> Rule {
+        Rule {
+            rate_limit: Some(crate::policy::RateLimit {
+                max_calls,
+                window_seconds: 60,
+                scope: RateLimitScope::PerTool,
+            }),
+            ..rule(id, tool, action)
+        }
+    }
+
+    #[test]
+    fn test_rate_limit_no_state_fails_closed() {
+        // v0.10 skipped rate-limited rules entirely when no state was
+        // provided — turning "deny after N calls" into "always allow".
+        // Now the rule contributes require_approval instead.
+        let policy = simple_policy(vec![rate_limited_rule(
+            "deny-after-3",
+            "Bash",
+            RuleAction::Deny,
+            3,
+        )]);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
+        assert_eq!(result.decision, RuleAction::RequireApproval);
+        assert_eq!(result.matched_rules, vec!["deny-after-3"]);
+        assert!(result.reason.contains("failing closed"));
+    }
+
+    #[test]
+    fn test_rate_limit_no_state_does_not_mask_deny() {
+        // An explicit deny from another rule still wins over the
+        // fail-closed require_approval.
+        let policy = simple_policy(vec![
+            rate_limited_rule("deny-after-3", "Bash", RuleAction::Deny, 3),
+            rule("always-deny", "Bash", RuleAction::Deny),
+        ]);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
+        assert_eq!(result.decision, RuleAction::Deny);
+        assert_eq!(result.winning_rule, Some("always-deny".into()));
+    }
+
+    #[test]
+    fn test_rate_limit_with_state_under_threshold_not_triggered() {
+        let policy = simple_policy(vec![rate_limited_rule(
+            "deny-after-1",
+            "Bash",
+            RuleAction::Deny,
+            1,
+        )]);
+        let mut state = RateLimitState::new();
+        let result = evaluate_policy(
+            &test_action("Bash", json!({}), ""),
+            "agent",
+            &policy,
+            Some(&mut state),
+        )
+        .unwrap();
+        // First call is within the limit — rule does not trigger, default allows.
+        assert_eq!(result.decision, RuleAction::Allow);
+        assert!(result.matched_rules.is_empty());
+    }
+
+    #[test]
+    fn test_rate_limit_with_state_exceeded_triggers_action() {
+        let policy = simple_policy(vec![rate_limited_rule(
+            "deny-after-1",
+            "Bash",
+            RuleAction::Deny,
+            1,
+        )]);
+        let mut state = RateLimitState::new();
+        // First call consumes the budget.
+        evaluate_policy(
+            &test_action("Bash", json!({}), ""),
+            "agent",
+            &policy,
+            Some(&mut state),
+        )
+        .unwrap();
+        // Second call exceeds it — rule triggers.
+        let result = evaluate_policy(
+            &test_action("Bash", json!({}), ""),
+            "agent",
+            &policy,
+            Some(&mut state),
+        )
+        .unwrap();
+        assert_eq!(result.decision, RuleAction::Deny);
+        assert_eq!(result.matched_rules, vec!["deny-after-1"]);
+    }
 
     #[test]
     fn test_rate_limit_under_threshold() {

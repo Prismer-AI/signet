@@ -5,6 +5,7 @@ pub mod identity;
 pub mod policy;
 pub mod policy_eval;
 pub mod policy_load;
+pub mod principal;
 pub mod receipt;
 pub mod sign;
 pub mod sign_delegation;
@@ -29,27 +30,31 @@ pub use policy_load::{parse_policy_json, parse_policy_yaml, validate_policy};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use policy_load::load_policy;
+pub use principal::{parse_principal, validate_principal, Principal};
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Outcome, OutcomeStatus, Receipt, Response,
     ServerInfo, Signer,
 };
 pub use sign::{
     sign, sign_bilateral, sign_bilateral_with_outcome, sign_compound, sign_with_expiration,
-    sign_with_policy,
+    sign_with_policy, sign_with_policy_with_principal, sign_with_principal,
 };
-pub use sign_delegation::{sign_authorized, sign_delegation};
+pub use sign_delegation::{
+    sign_authorized, sign_authorized_with_principal, sign_delegation,
+    sign_delegation_with_principals,
+};
 pub use trust::{
     parse_trust_bundle_json, parse_trust_bundle_yaml, validate_trust_bundle, TrustBundle,
     TrustKeyEntry, TrustKeyStatus,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use verify::FileNonceChecker;
 pub use verify::{
     verify, verify_allow_expired, verify_any, verify_any_allow_expired, verify_bilateral,
     verify_bilateral_detailed, verify_bilateral_with_options,
     verify_bilateral_with_options_detailed, verify_compound, BilateralVerifyOptions,
     BilateralVerifyOutcome, InMemoryNonceChecker, NonceChecker,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use verify::FileNonceChecker;
 pub use verify_delegation::{
     verify_authorized, verify_chain as verify_delegation_chain, verify_delegation,
     AuthorizedVerifyOptions,
@@ -57,8 +62,8 @@ pub use verify_delegation::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use identity::fs_ops::{
-    default_signet_dir, export_public_key, generate_and_save, list_keys, load_key_info,
-    load_signing_key, load_verifying_key, validate_key_name, KeyInfo,
+    default_signet_dir, export_public_key, generate_and_save, generate_and_save_with_principal,
+    list_keys, load_key_info, load_signing_key, load_verifying_key, validate_key_name, KeyInfo,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use trust::{load_trust_bundle, save_trust_bundle};

@@ -548,7 +548,8 @@ fn evaluate_policy(
     let policy: signet_core::Policy =
         serde_json::from_str(policy_json).map_err(|e| to_py_err(e.into()))?;
 
-    let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None);
+    let eval =
+        signet_core::evaluate_policy(&action, agent_name, &policy, None).map_err(to_py_err)?;
 
     let result = serde_json::json!({
         "decision": eval.decision.to_string(),

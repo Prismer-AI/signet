@@ -46,6 +46,8 @@ pub(crate) fn compute_params_hash(action: &Action) -> Result<String, SignetError
 struct SignOptions {
     exp: Option<String>,
     policy: Option<crate::policy::PolicyAttestation>,
+    principal: Option<String>,
+    acting_for: Option<String>,
 }
 
 /// Core signing logic shared by sign(), sign_with_expiration(), and sign_with_policy().
@@ -56,6 +58,13 @@ fn sign_inner(
     signer_owner: &str,
     opts: SignOptions,
 ) -> Result<Receipt, SignetError> {
+    if let Some(ref p) = opts.principal {
+        crate::principal::validate_principal(p)?;
+    }
+    if let Some(ref p) = opts.acting_for {
+        crate::principal::validate_principal(p)?;
+    }
+
     let params_hash = compute_params_hash(action)?;
 
     let signed_action = Action {
@@ -75,6 +84,8 @@ fn sign_inner(
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner.to_string(),
+        principal: opts.principal.clone(),
+        acting_for: opts.acting_for.clone(),
     };
 
     let nonce = generate_nonce();
@@ -134,6 +145,37 @@ pub fn sign(
         SignOptions {
             exp: None,
             policy: None,
+            principal: None,
+            acting_for: None,
+        },
+    )
+}
+
+/// Sign an action with canonical principal URIs on the signer.
+///
+/// `principal` identifies the acting agent (e.g. "agent://prismer/deploy-bot");
+/// `acting_for` names the delegating principal it claims to represent
+/// (e.g. "user://prismer/alice") — a claim, corroborated only when the receipt
+/// also carries a v4 authorization chain rooted at the same principal.
+/// Both are validated against the principal grammar and signed.
+pub fn sign_with_principal(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    principal: Option<&str>,
+    acting_for: Option<&str>,
+) -> Result<Receipt, SignetError> {
+    sign_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        SignOptions {
+            exp: None,
+            policy: None,
+            principal: principal.map(|s| s.to_string()),
+            acting_for: acting_for.map(|s| s.to_string()),
         },
     )
 }
@@ -155,6 +197,8 @@ pub fn sign_with_expiration(
         SignOptions {
             exp: Some(expires_at.to_string()),
             policy: None,
+            principal: None,
+            acting_for: None,
         },
     )
 }
@@ -171,7 +215,55 @@ pub fn sign_with_policy(
     policy: &crate::policy::Policy,
     rate_state: Option<&mut crate::policy_eval::RateLimitState>,
 ) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
-    let eval = crate::policy_eval::evaluate_policy(action, signer_name, policy, rate_state);
+    sign_with_policy_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        policy,
+        rate_state,
+        None,
+        None,
+    )
+}
+
+/// `sign_with_policy` with canonical principal URIs on the signer.
+/// Same policy semantics; both principals are validated and signed.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_with_policy_with_principal(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    principal: Option<&str>,
+    acting_for: Option<&str>,
+    policy: &crate::policy::Policy,
+    rate_state: Option<&mut crate::policy_eval::RateLimitState>,
+) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
+    sign_with_policy_inner(
+        key,
+        action,
+        signer_name,
+        signer_owner,
+        policy,
+        rate_state,
+        principal,
+        acting_for,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sign_with_policy_inner(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_owner: &str,
+    policy: &crate::policy::Policy,
+    rate_state: Option<&mut crate::policy_eval::RateLimitState>,
+    principal: Option<&str>,
+    acting_for: Option<&str>,
+) -> Result<(Receipt, crate::policy::PolicyEvalResult), SignetError> {
+    let eval = crate::policy_eval::evaluate_policy(action, signer_name, policy, rate_state)?;
 
     match eval.decision {
         crate::policy::RuleAction::Deny => {
@@ -199,6 +291,8 @@ pub fn sign_with_policy(
         SignOptions {
             exp: None,
             policy: Some(attestation),
+            principal: principal.map(|s| s.to_string()),
+            acting_for: acting_for.map(|s| s.to_string()),
         },
     )?;
 
@@ -243,6 +337,8 @@ pub fn sign_compound(
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner.to_string(),
+        principal: None,
+        acting_for: None,
     };
 
     // 4. Generate nonce, build signable, canonicalize, sign
@@ -961,6 +1057,82 @@ rules: []
         let receipt = sign_with_expiration(&key, &action, "agent", "owner", future).unwrap();
         let json = serde_json::to_string(&receipt).unwrap();
         assert!(json.contains("2027-01-01T00:00:00.000Z"));
+    }
+
+    // ─── principal tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_sign_with_principal_roundtrip() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let receipt = sign_with_principal(
+            &key,
+            &action,
+            "deploy-bot",
+            "alice",
+            Some("agent://prismer/deploy-bot"),
+            Some("user://prismer/alice"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            receipt.signer.principal.as_deref(),
+            Some("agent://prismer/deploy-bot")
+        );
+        assert_eq!(
+            receipt.signer.acting_for.as_deref(),
+            Some("user://prismer/alice")
+        );
+        assert!(crate::verify::verify(&receipt, &vk).is_ok());
+    }
+
+    #[test]
+    fn test_principal_in_signature_scope() {
+        let (key, vk) = generate_keypair();
+        let action = test_action();
+        let mut receipt = sign_with_principal(
+            &key,
+            &action,
+            "deploy-bot",
+            "alice",
+            Some("agent://prismer/deploy-bot"),
+            None,
+        )
+        .unwrap();
+        // Tamper: forge the principal claim
+        receipt.signer.principal = Some("agent://evil/imposter".to_string());
+        assert!(crate::verify::verify(&receipt, &vk).is_err());
+    }
+
+    #[test]
+    fn test_sign_with_invalid_principal_rejected() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        // No trust domain — the flat v1 form is invalid
+        let err = sign_with_principal(
+            &key,
+            &action,
+            "bot",
+            "owner",
+            Some("agent://deploy-bot"),
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, SignetError::InvalidPrincipal(_)));
+
+        let err = sign_with_principal(&key, &action, "bot", "owner", None, Some("not a principal"))
+            .unwrap_err();
+        assert!(matches!(err, SignetError::InvalidPrincipal(_)));
+    }
+
+    #[test]
+    fn test_principal_absent_in_json_when_none() {
+        let (key, _) = generate_keypair();
+        let action = test_action();
+        let receipt = sign(&key, &action, "agent", "owner").unwrap();
+        let json = serde_json::to_string(&receipt).unwrap();
+        assert!(!json.contains("\"principal\""));
+        assert!(!json.contains("\"acting_for\""));
     }
 
     #[test]

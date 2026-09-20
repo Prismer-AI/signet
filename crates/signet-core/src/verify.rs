@@ -42,6 +42,18 @@ fn verify_receipt_signature(receipt: &Receipt, pubkey: &VerifyingKey) -> Result<
     if let Some(ref exp) = receipt.exp {
         obj.insert("exp".to_string(), serde_json::Value::String(exp.clone()));
     }
+    // v4 receipts sign the authorization binding (chain_hash + root_pubkey),
+    // not the full chain. Without this block every legitimate v4 receipt
+    // failed signature verification here (build_v4_receipt_signable).
+    if let Some(ref authz) = receipt.authorization {
+        obj.insert(
+            "authorization".to_string(),
+            serde_json::json!({
+                "chain_hash": authz.chain_hash,
+                "root_pubkey": authz.root_pubkey,
+            }),
+        );
+    }
     let canonical_bytes = canonical::canonicalize(&signable)?;
 
     pubkey
@@ -376,11 +388,7 @@ pub struct FileNonceChecker {
 impl FileNonceChecker {
     /// Create a file-backed nonce checker. The path is created on first
     /// `record()` if it doesn't exist.
-    pub fn new(
-        path: impl Into<std::path::PathBuf>,
-        max_entries: usize,
-        ttl_secs: u64,
-    ) -> Self {
+    pub fn new(path: impl Into<std::path::PathBuf>, max_entries: usize, ttl_secs: u64) -> Self {
         Self {
             path: path.into(),
             max_entries,
@@ -434,10 +442,7 @@ impl FileNonceChecker {
         // truncated/corrupt file.
         let tmp_path = {
             let mut p = self.path.clone();
-            let mut name = p
-                .file_name()
-                .map(|n| n.to_os_string())
-                .unwrap_or_default();
+            let mut name = p.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             name.push(".tmp");
             p.set_file_name(name);
             p
@@ -471,10 +476,7 @@ impl FileNonceChecker {
         }
         let lock_path = {
             let mut p = self.path.clone();
-            let mut name = p
-                .file_name()
-                .map(|n| n.to_os_string())
-                .unwrap_or_default();
+            let mut name = p.file_name().map(|n| n.to_os_string()).unwrap_or_default();
             name.push(".lock");
             p.set_file_name(name);
             p

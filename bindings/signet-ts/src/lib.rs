@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 
 use signet_core::delegation::{DelegationToken, Scope};
 use signet_core::receipt::Action;
-use signet_core::{generate_keypair, sign, verify};
+use signet_core::{generate_keypair, sign_with_principal, verify};
 
 /// Parse a secret key from base64: accepts both 32-byte seed and 64-byte keypair.
 fn parse_signing_key(key_b64: &str) -> Result<ed25519_dalek::SigningKey, JsError> {
@@ -50,15 +50,60 @@ pub fn wasm_sign(
     signer_name: &str,
     signer_owner: &str,
 ) -> Result<String, JsError> {
+    wasm_sign_with_principal(
+        secret_key_b64,
+        action_json,
+        signer_name,
+        signer_owner,
+        None,
+        None,
+    )
+}
+
+#[wasm_bindgen]
+pub fn wasm_sign_with_principal(
+    secret_key_b64: &str,
+    action_json: &str,
+    signer_name: &str,
+    signer_owner: &str,
+    principal: Option<String>,
+    acting_for: Option<String>,
+) -> Result<String, JsError> {
     let signing_key = parse_signing_key(secret_key_b64)?;
 
     let action: Action = serde_json::from_str(action_json)
         .map_err(|e| JsError::new(&format!("invalid action JSON: {e}")))?;
 
-    let receipt = sign(&signing_key, &action, signer_name, signer_owner)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let receipt = sign_with_principal(
+        &signing_key,
+        &action,
+        signer_name,
+        signer_owner,
+        principal.as_deref(),
+        acting_for.as_deref(),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     serde_json::to_string(&receipt).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn wasm_parse_principal(uri: &str) -> Result<String, JsError> {
+    let principal = signet_core::parse_principal(uri).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_json::json!({
+        "scheme": principal.scheme,
+        "trust_domain": principal.trust_domain,
+        "path": principal.path,
+    })
+    .to_string())
+}
+
+#[wasm_bindgen]
+pub fn wasm_validate_principal(uri: &str) -> Result<bool, JsError> {
+    match signet_core::validate_principal(uri) {
+        Ok(()) => Ok(true),
+        Err(e) => Err(JsError::new(&e.to_string())),
+    }
 }
 
 #[wasm_bindgen]
@@ -187,11 +232,14 @@ pub fn wasm_sign_bilateral_with_outcome(
     let response_content: serde_json::Value = serde_json::from_str(response_content_json)
         .map_err(|e| JsError::new(&format!("invalid response content JSON: {e}")))?;
 
-    let outcome: Option<signet_core::Outcome> = if outcome_json.is_empty() || outcome_json == "null" {
+    let outcome: Option<signet_core::Outcome> = if outcome_json.is_empty() || outcome_json == "null"
+    {
         None
     } else {
         Some(serde_json::from_str(outcome_json).map_err(|e| {
-            JsError::new(&format!("invalid outcome JSON (expected {{status, reason?, error?}}): {e}"))
+            JsError::new(&format!(
+                "invalid outcome JSON (expected {{status, reason?, error?}}): {e}"
+            ))
         })?)
     };
 
@@ -481,7 +529,8 @@ pub fn wasm_evaluate_policy(
     let policy: signet_core::Policy = serde_json::from_str(policy_json)
         .map_err(|e| JsError::new(&format!("invalid policy JSON: {e}")))?;
 
-    let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None);
+    let eval = signet_core::evaluate_policy(&action, agent_name, &policy, None)
+        .map_err(|e| JsError::new(&e.to_string()))?;
 
     let result = serde_json::json!({
         "decision": eval.decision.to_string(),

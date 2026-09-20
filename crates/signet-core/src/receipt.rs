@@ -29,6 +29,15 @@ pub struct Signer {
     pub pubkey: String,
     pub name: String,
     pub owner: String,
+    /// Canonical principal URI of the signer (e.g. "agent://prismer/deploy-bot").
+    /// A claim, not proof of key control. Inside the signature scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
+    /// Principal the signer claims to act for (e.g. "user://prismer/alice").
+    /// Corroborated when a v4 authorization chain roots at the same principal.
+    /// Inside the signature scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_for: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,6 +9,9 @@ pub enum SignetError {
     #[error("failed to canonicalize JSON: {0}")]
     CanonicalizeError(String),
 
+    #[error("invalid principal URI: {0}")]
+    InvalidPrincipal(String),
+
     #[error("invalid receipt: {0}")]
     InvalidReceipt(String),
 

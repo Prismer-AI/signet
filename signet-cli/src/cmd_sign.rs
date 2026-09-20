@@ -46,6 +46,12 @@ pub struct SignArgs {
     /// Parent receipt id for chained execution proofs.
     #[arg(long)]
     pub parent_receipt_id: Option<String>,
+    /// Signer principal URI (e.g. agent://prismer/deploy-bot); defaults to the key's stored principal
+    #[arg(long)]
+    pub principal: Option<String>,
+    /// Principal the signer acts for (e.g. user://prismer/alice) — a signed claim
+    #[arg(long)]
+    pub acting_for: Option<String>,
 }
 
 pub fn sign(args: SignArgs) -> Result<()> {
@@ -121,11 +127,12 @@ pub fn sign(args: SignArgs) -> Result<()> {
     };
 
     let owner = info.owner.as_deref().unwrap_or("");
+    let principal = args.principal.as_deref().or(info.principal.as_deref());
 
     let receipt = if let Some(ref policy_path) = args.policy {
         let policy = signet_core::load_policy(std::path::Path::new(policy_path))?;
         // Evaluate once, then branch — avoids double load and TOCTOU issues
-        let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None);
+        let eval = signet_core::evaluate_policy(&action, &info.name, &policy, None)?;
         let rules_str = if eval.matched_rules.is_empty() {
             "default action".to_string()
         } else {
@@ -138,7 +145,17 @@ pub fn sign(args: SignArgs) -> Result<()> {
 
         match eval.decision {
             signet_core::RuleAction::Allow => {
-                signet_core::sign_with_policy(&sk, &action, &info.name, owner, &policy, None)?.0
+                signet_core::sign_with_policy_with_principal(
+                    &sk,
+                    &action,
+                    &info.name,
+                    owner,
+                    principal,
+                    args.acting_for.as_deref(),
+                    &policy,
+                    None,
+                )?
+                .0
             }
             signet_core::RuleAction::Deny | signet_core::RuleAction::RequireApproval => {
                 if !args.no_log {
@@ -156,7 +173,14 @@ pub fn sign(args: SignArgs) -> Result<()> {
             }
         }
     } else {
-        signet_core::sign(&sk, &action, &info.name, owner)?
+        signet_core::sign_with_principal(
+            &sk,
+            &action,
+            &info.name,
+            owner,
+            principal,
+            args.acting_for.as_deref(),
+        )?
     };
 
     let json = serde_json::to_string(&receipt)?;

@@ -1065,6 +1065,280 @@ fn test_delegate_sign_v4_receipt() {
     assert!(v.get("authorization").is_some());
 }
 
+// ─── principal URIs (v0.11 S1) ──────────────────────────────────────────────
+
+#[test]
+fn test_identity_generate_with_principal() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "deploy-bot",
+            "--principal",
+            "agent://prismer/deploy-bot",
+            "--unencrypted",
+        ])
+        .assert()
+        .success();
+
+    // Stored in key metadata and shown by list
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agent://prismer/deploy-bot"));
+
+    let export = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "export", "--name", "deploy-bot"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(export).unwrap()).unwrap();
+    assert_eq!(v["principal"], "agent://prismer/deploy-bot");
+}
+
+#[test]
+fn test_identity_generate_invalid_principal_fails() {
+    let dir = tempdir().unwrap();
+    // Flat form without trust domain — rejected
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "bad",
+            "--principal",
+            "agent://deploy-bot",
+            "--unencrypted",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("principal"));
+}
+
+#[test]
+fn test_sign_principal_auto_attach_and_override() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "identity",
+            "generate",
+            "--name",
+            "deploy-bot",
+            "--principal",
+            "agent://prismer/deploy-bot",
+            "--unencrypted",
+        ])
+        .assert()
+        .success();
+
+    // No flag → principal auto-attached from key metadata
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "Read",
+            "--params",
+            r#"{"path":"README.md"}"#,
+            "--target",
+            "mcp://github.local",
+            "--no-log",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(out).unwrap()).unwrap();
+    assert_eq!(v["signer"]["principal"], "agent://prismer/deploy-bot");
+    assert!(v["signer"].get("acting_for").is_none());
+
+    // Explicit flag overrides metadata; acting_for is signed as a claim
+    let out = signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "Read",
+            "--params",
+            r#"{"path":"README.md"}"#,
+            "--target",
+            "mcp://github.local",
+            "--principal",
+            "agent://prismer/deploy-bot-2",
+            "--acting-for",
+            "user://prismer/alice",
+            "--no-log",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(out).unwrap()).unwrap();
+    assert_eq!(v["signer"]["principal"], "agent://prismer/deploy-bot-2");
+    assert_eq!(v["signer"]["acting_for"], "user://prismer/alice");
+
+    // Receipts verify (signature covers the new fields)
+    let receipt_path = dir.path().join("r.json");
+    fs::write(&receipt_path, serde_json::to_string(&v).unwrap()).unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "verify",
+            receipt_path.to_str().unwrap(),
+            "--pubkey",
+            "deploy-bot",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_sign_invalid_principal_fails() {
+    let dir = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["identity", "generate", "--name", "a", "--unencrypted"])
+        .assert()
+        .success();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "a",
+            "--tool",
+            "Read",
+            "--params",
+            "{}",
+            "--target",
+            "mcp://x",
+            "--principal",
+            "not-a-principal",
+            "--no-log",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("principal"));
+}
+
+#[test]
+fn test_delegate_principal_e2e_corroboration() {
+    let dir = tempdir().unwrap();
+    for (name, principal) in [
+        ("root", Some("user://prismer/alice")),
+        ("worker", Some("agent://prismer/worker")),
+    ] {
+        let mut args = vec!["identity", "generate", "--name", name, "--unencrypted"];
+        if let Some(p) = principal {
+            args.extend(["--principal", p]);
+        }
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(&args)
+            .assert()
+            .success();
+    }
+
+    // Delegation with principals on both identities
+    let token_path = dir.path().join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "worker",
+            "--to-name",
+            "worker",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--from-principal",
+            "user://prismer/alice",
+            "--to-principal",
+            "agent://prismer/worker",
+            "--output",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let token: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&token_path).unwrap()).unwrap();
+    assert_eq!(token["delegator"]["principal"], "user://prismer/alice");
+    assert_eq!(token["delegate"]["principal"], "agent://prismer/worker");
+
+    let chain_path = dir.path().join("chain.json");
+    fs::write(
+        &chain_path,
+        format!("[{}]", fs::read_to_string(&token_path).unwrap()),
+    )
+    .unwrap();
+
+    // Authorized sign — acting_for omitted → auto-filled from chain root
+    let receipt_path = dir.path().join("v4.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "sign",
+            "--key",
+            "worker",
+            "--tool",
+            "Bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    assert_eq!(v["signer"]["principal"], "agent://prismer/worker");
+    assert_eq!(v["signer"]["acting_for"], "user://prismer/alice");
+
+    // verify-auth reports the corroborated acting_for claim
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots",
+            "root",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("corroborated by chain root"));
+}
+
 // ─── delegate verify-auth (v4 receipt verification) ─────────────────────────
 
 #[test]

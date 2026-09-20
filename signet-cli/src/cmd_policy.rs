@@ -73,7 +73,7 @@ fn check(args: CheckArgs) -> Result<()> {
         parent_receipt_id: None,
     };
 
-    let eval = signet_core::evaluate_policy(&action, &args.agent, &policy, None);
+    let eval = signet_core::evaluate_policy(&action, &args.agent, &policy, None)?;
 
     let decision_str = eval.decision.to_string().to_uppercase();
     let rules_str = if eval.matched_rules.is_empty() {

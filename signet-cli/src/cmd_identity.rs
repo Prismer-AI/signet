@@ -10,6 +10,10 @@ pub struct GenerateArgs {
     #[arg(long, default_value = "")]
     pub owner: String,
 
+    /// Canonical principal URI (e.g. agent://prismer/deploy-bot); auto-attached to receipts signed with this key
+    #[arg(long)]
+    pub principal: Option<String>,
+
     #[arg(long)]
     pub unencrypted: bool,
 }
@@ -32,10 +36,11 @@ pub fn generate(args: GenerateArgs) -> Result<()> {
     } else {
         Some(args.owner.as_str())
     };
-    let info = signet_core::generate_and_save(
+    let info = signet_core::generate_and_save_with_principal(
         &dir,
         &args.name,
         owner,
+        args.principal.as_deref(),
         passphrase.as_deref(),
         Some(KdfParams::new()),
     )?;
@@ -44,6 +49,9 @@ pub fn generate(args: GenerateArgs) -> Result<()> {
         info.name,
         dir.display()
     );
+    if let Some(ref p) = info.principal {
+        eprintln!("Principal: {p}");
+    }
     println!("{}", info.pubkey);
     Ok(())
 }
@@ -55,13 +63,14 @@ pub fn list() -> Result<()> {
         println!("No keys found in {}/keys/", dir.display());
         return Ok(());
     }
-    println!("{:<20} {:<20} CREATED", "NAME", "OWNER");
-    println!("{}", "-".repeat(60));
+    println!("{:<20} {:<20} {:<40} CREATED", "NAME", "OWNER", "PRINCIPAL");
+    println!("{}", "-".repeat(100));
     for key in &keys {
         println!(
-            "{:<20} {:<20} {}",
+            "{:<20} {:<20} {:<40} {}",
             key.name,
             key.owner.as_deref().unwrap_or(""),
+            key.principal.as_deref().unwrap_or(""),
             key.created_at
         );
     }

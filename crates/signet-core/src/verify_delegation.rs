@@ -208,11 +208,12 @@ pub fn verify_authorized(
         )));
     }
 
-    // 4. Compute verification time from receipt.ts + clock_skew
-    let receipt_ts = DateTime::parse_from_rfc3339(&receipt.ts)
-        .map_err(|e| SignetError::InvalidReceipt(format!("invalid receipt timestamp: {e}")))?
-        .with_timezone(&Utc);
-    let at = receipt_ts + chrono::Duration::seconds(options.clock_skew_secs as i64);
+    // 4. Verify chain expiry at wall clock, NOT the receipt's self-declared
+    //    timestamp. receipt.ts is chosen by the delegate (it can be backdated
+    //    after a delegation expires to dodge the expiry check); Utc::now()
+    //    cannot be forged by the signer. clock_skew_secs stays a forward
+    //    tolerance window, same direction as before.
+    let at = Utc::now() + chrono::Duration::seconds(options.clock_skew_secs as i64);
 
     // 5. Verify chain
     let effective_scope = verify_chain(
@@ -310,7 +311,7 @@ pub(crate) fn verify_v4_signature_only(receipt: &Receipt) -> Result<(), SignetEr
 mod tests {
     use super::*;
     use crate::delegation::Scope;
-    use crate::sign_delegation::sign_delegation;
+    use crate::sign_delegation::{sign_authorized, sign_delegation};
     use chrono::Duration;
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
@@ -1131,5 +1132,164 @@ mod tests {
         let receipt: crate::receipt::Receipt = serde_json::from_str(v1_json).unwrap();
         assert_eq!(receipt.v, 1);
         assert!(receipt.authorization.is_none());
+    }
+
+    // ── regression: plain verify() must handle v4 receipts ───────────────
+
+    #[test]
+    fn test_verify_handles_v4_receipts() {
+        // v0.10's verify() rebuilt the signable without the authorization
+        // block, so every legitimate v4 receipt failed with SignatureMismatch.
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, agent_vk) = crate::identity::generate_keypair();
+        let scope = Scope {
+            tools: vec!["*".into()],
+            targets: vec!["*".into()],
+            max_depth: 0,
+            expires: None,
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
+        };
+        let receipt = sign_authorized(&agent_key, &action, "bot", vec![token]).unwrap();
+
+        // Plain verify() now succeeds on v4
+        assert!(crate::verify::verify(&receipt, &agent_vk).is_ok());
+        assert!(crate::verify::verify_allow_expired(&receipt, &agent_vk).is_ok());
+
+        // Tampering the authorization binding still breaks the signature
+        let mut tampered = receipt.clone();
+        tampered.authorization.as_mut().unwrap().chain_hash =
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into();
+        assert!(crate::verify::verify(&tampered, &agent_vk).is_err());
+    }
+
+    // ── regression: delegation expiry must bind to wall clock ────────────
+
+    #[test]
+    fn test_verify_authorized_rejects_backdated_ts_after_expiry() {
+        // A delegate holding its own key can hand-craft a v4 receipt with any
+        // ts it likes. v0.10 verified chain expiry at receipt.ts + skew, so a
+        // receipt "timestamped" before the delegation expired verified
+        // successfully forever after. Expiry must bind to wall clock.
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, agent_vk) = crate::identity::generate_keypair();
+
+        // Token expired one hour ago.
+        let expired_at =
+            (Utc::now() - Duration::hours(1)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let scope = Scope {
+            tools: vec!["*".into()],
+            targets: vec!["*".into()],
+            max_depth: 0,
+            expires: Some(expired_at),
+            budget: None,
+        };
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        // Hand-craft a receipt with ts backdated to before expiry — the
+        // delegate's key legitimately signs this signable.
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
+        };
+        let chain_json = canonical::canonicalize(&serde_json::to_value([&token]).unwrap()).unwrap();
+        let chain_hash = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(chain_json.as_bytes()))
+        );
+        let root_pubkey = token.delegator.pubkey.clone();
+        let signer = crate::receipt::Signer {
+            pubkey: format!("ed25519:{}", BASE64.encode(agent_vk.as_bytes())),
+            name: "bot".into(),
+            owner: "alice".into(),
+            principal: None,
+            acting_for: None,
+        };
+        let backdated_ts =
+            (Utc::now() - Duration::hours(2)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let nonce = crate::delegation::generate_nonce();
+        let signable = build_v4_receipt_signable(
+            &action,
+            &signer,
+            &chain_hash,
+            &root_pubkey,
+            &backdated_ts,
+            &nonce,
+        );
+        let canonical_bytes = canonical::canonicalize(&signable).unwrap();
+        use ed25519_dalek::Signer as _;
+        let signature = agent_key.sign(canonical_bytes.as_bytes());
+        let sig = format!("ed25519:{}", BASE64.encode(signature.to_bytes()));
+        let id = {
+            let h = Sha256::digest(signature.to_bytes());
+            format!("rec_{}", hex::encode(&h[..16]))
+        };
+
+        let receipt = crate::receipt::Receipt {
+            v: 4,
+            id,
+            action,
+            signer,
+            authorization: Some(crate::delegation::Authorization {
+                chain: vec![token],
+                chain_hash,
+                root_pubkey,
+            }),
+            policy: None,
+            ts: backdated_ts,
+            exp: None,
+            nonce,
+            sig,
+        };
+
+        // Signature itself is valid…
+        assert!(verify_v4_signature_only(&receipt).is_ok());
+        // …but the expired delegation must fail verification at wall clock.
+        let opts = AuthorizedVerifyOptions {
+            trusted_roots: vec![root_key.verifying_key()],
+            clock_skew_secs: 60,
+            max_chain_depth: 16,
+        };
+        let err = verify_authorized(&receipt, &opts).unwrap_err();
+        assert!(
+            matches!(err, SignetError::DelegationExpired(_)),
+            "got: {err}"
+        );
     }
 }

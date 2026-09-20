@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **signet-core**: Canonical principal URIs (`agent://prismer/deploy-bot`) with mandatory trust-domain scoping — `Signer.principal` / `Signer.acting_for`, `DelegationIdentity.principal`, all inside the signature scope. New APIs: `parse_principal`/`validate_principal`, `sign_with_principal`, `sign_with_policy_with_principal`, `sign_delegation_with_principals`, `sign_authorized_with_principal`, `generate_and_save_with_principal`. Receipts and tokens without principals are byte-identical to 0.10; receipts carrying the new fields verify only on signet-core ≥ 0.11 (same tradeoff as `exp` in 0.9.1).
+- **signet-core**: `sign_authorized_with_principal` auto-fills `acting_for` from the chain root principal when omitted — the one machine-corroborated claim.
+- **signet-cli**: `sign --principal/--acting-for`, `identity generate --principal` (stored in key metadata, auto-attached on sign), `delegate create --from-principal/--to-principal`, `delegate sign --principal/--acting-for`; `delegate verify-auth` prints principal corroboration status.
+- **signet-wasm**: `wasm_sign_with_principal`, `wasm_parse_principal`, `wasm_validate_principal`.
+- **signet-python**: `InvalidPrincipalError` exception mapping.
+
+### Fixed
+
+- **signet-core**: `verify()` rejected every legitimate v4 receipt — the reconstructed signable omitted the signed `authorization` block (`chain_hash`/`root_pubkey`). v4 receipts now verify through `verify()`/`verify_allow_expired()` like v1.
+- **signet-core**: rate-limited policy rules failed **open** when no `RateLimitState` was supplied — the rule was skipped entirely, turning "deny after N calls" into "always allow" for every binding and the proxy (they all pass `None`). Stateless evaluation now fails closed: the rule contributes `require_approval` with an explicit reason.
+- **signet-core**: `evaluate_policy` substituted the sentinel `"sha256:error"` into the signed `PolicyAttestation.policy_hash` when canonicalization failed. It now returns `Result` and propagates the error instead of attesting nonsense.
+- **signet-core**: delegation expiry in `verify_authorized` was checked at the receipt's self-declared `ts` (plus skew). A delegate holding its own key could backdate `receipt.ts` before the delegation expired and keep minting verifiable receipts forever. Chain expiry now binds to wall clock; `clock_skew_secs` remains a forward tolerance window.
+
 ## [0.10.0] - 2026-05-11
 
 > **Note:** This release consolidates changes accumulated since v0.9.0 that were not

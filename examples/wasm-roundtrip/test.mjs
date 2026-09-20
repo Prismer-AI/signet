@@ -1,5 +1,12 @@
 import assert from 'node:assert';
-import { wasm_generate_keypair, wasm_sign, wasm_verify } from '../../bindings/signet-ts/pkg/signet_wasm.js';
+import {
+    wasm_generate_keypair,
+    wasm_sign,
+    wasm_sign_with_principal,
+    wasm_verify,
+    wasm_parse_principal,
+    wasm_validate_principal
+} from '../../bindings/signet-ts/pkg/signet_wasm.js';
 
 // Test 1: Generate keypair
 console.log('Test 1: Generate keypair...');
@@ -69,4 +76,44 @@ try {
 }
 console.log('  PASS');
 
-console.log('\n=== All 8 tests passed. M0 validation complete. ===');
+// Test 9: Principal grammar — parse and validate
+console.log('Test 9: Principal grammar...');
+const parsed = JSON.parse(wasm_parse_principal('agent://prismer/deploy-bot'));
+assert.strictEqual(parsed.scheme, 'agent');
+assert.strictEqual(parsed.trust_domain, 'prismer');
+assert.deepStrictEqual(parsed.path, ['deploy-bot']);
+try {
+    wasm_validate_principal('agent://deploy-bot'); // missing trust domain
+    assert.fail('should have thrown');
+} catch (e) {
+    assert(e.message.includes('principal'), `expected principal error, got: ${e.message}`);
+}
+console.log('  PASS');
+
+// Test 10: Sign with principals — roundtrip, tamper, absent-by-default
+console.log('Test 10: Sign with principals...');
+const principal_receipt_json = wasm_sign_with_principal(
+    secret_key, action, 'deploy-bot', 'alice',
+    'agent://prismer/deploy-bot',
+    'user://prismer/alice'
+);
+const principal_receipt = JSON.parse(principal_receipt_json);
+assert.strictEqual(principal_receipt.signer.principal, 'agent://prismer/deploy-bot');
+assert.strictEqual(principal_receipt.signer.acting_for, 'user://prismer/alice');
+assert.strictEqual(wasm_verify(principal_receipt_json, public_key), true, 'principal receipt should verify');
+
+const tampered_principal = {
+    ...principal_receipt,
+    signer: { ...principal_receipt.signer, principal: 'agent://evil/imposter' }
+};
+assert.strictEqual(
+    wasm_verify(JSON.stringify(tampered_principal), public_key), false,
+    'tampered principal should fail'
+);
+
+const plain_receipt = JSON.parse(wasm_sign(secret_key, action, 'agent', 'owner'));
+assert.strictEqual(plain_receipt.signer.principal, undefined, 'no principal when none given');
+assert.strictEqual(plain_receipt.signer.acting_for, undefined, 'no acting_for when none given');
+console.log('  PASS');
+
+console.log('\n=== All 10 tests passed. M0 validation complete. ===');

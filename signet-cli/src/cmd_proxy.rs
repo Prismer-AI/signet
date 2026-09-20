@@ -796,7 +796,7 @@ fn sign_tools_call(
     };
 
     let receipt = if let Some(pol) = policy {
-        let eval = signet_core::evaluate_policy(&action, signer_name, pol, None);
+        let eval = signet_core::evaluate_policy(&action, signer_name, pol, None)?;
         match eval.decision {
             signet_core::RuleAction::Deny => {
                 eprintln!("[signet proxy] DENIED: {} ({})", tool_name, eval.reason);

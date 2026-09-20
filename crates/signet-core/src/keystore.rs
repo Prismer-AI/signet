@@ -74,6 +74,10 @@ pub struct PubKeyFile {
     pub pubkey: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Canonical principal URI (e.g. "agent://prismer/deploy-bot").
+    /// When set, `sign` attaches it to receipts automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub principal: Option<String>,
     pub created_at: String,
 }
 

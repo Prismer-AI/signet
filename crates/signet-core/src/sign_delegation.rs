@@ -21,6 +21,39 @@ pub fn sign_delegation(
     scope: &Scope,
     parent_scope: Option<&Scope>,
 ) -> Result<DelegationToken, SignetError> {
+    sign_delegation_with_principals(
+        delegator_key,
+        delegator_name,
+        None,
+        delegate_pubkey,
+        delegate_name,
+        None,
+        scope,
+        parent_scope,
+    )
+}
+
+/// `sign_delegation` with canonical principal URIs on both identities.
+/// Principals are validated against the grammar and enter the token's
+/// signature scope; tokens without them canonicalize exactly as before.
+#[allow(clippy::too_many_arguments)]
+pub fn sign_delegation_with_principals(
+    delegator_key: &SigningKey,
+    delegator_name: &str,
+    delegator_principal: Option<&str>,
+    delegate_pubkey: &VerifyingKey,
+    delegate_name: &str,
+    delegate_principal: Option<&str>,
+    scope: &Scope,
+    parent_scope: Option<&Scope>,
+) -> Result<DelegationToken, SignetError> {
+    if let Some(p) = delegator_principal {
+        crate::principal::validate_principal(p)?;
+    }
+    if let Some(p) = delegate_principal {
+        crate::principal::validate_principal(p)?;
+    }
+
     // 0. Validate inputs
     if delegator_name.is_empty() {
         return Err(SignetError::InvalidKey(
@@ -68,10 +101,12 @@ pub fn sign_delegation(
     let delegator = DelegationIdentity {
         pubkey: format_pubkey(&delegator_key.verifying_key().to_bytes()),
         name: delegator_name.to_string(),
+        principal: delegator_principal.map(|s| s.to_string()),
     };
     let delegate = DelegationIdentity {
         pubkey: format_pubkey(&delegate_pubkey.to_bytes()),
         name: delegate_name.to_string(),
+        principal: delegate_principal.map(|s| s.to_string()),
     };
 
     // 3. Generate nonce + timestamp
@@ -106,6 +141,21 @@ pub fn sign_authorized(
     signer_name: &str,
     chain: Vec<DelegationToken>,
 ) -> Result<Receipt, SignetError> {
+    sign_authorized_with_principal(key, action, signer_name, None, None, chain)
+}
+
+/// `sign_authorized` with canonical principals on the signer.
+///
+/// When `acting_for` is `None` and the chain root carries a principal, that
+/// principal is used — the one place the claim is machine-corroborated.
+pub fn sign_authorized_with_principal(
+    key: &SigningKey,
+    action: &Action,
+    signer_name: &str,
+    signer_principal: Option<&str>,
+    acting_for: Option<&str>,
+    chain: Vec<DelegationToken>,
+) -> Result<Receipt, SignetError> {
     if chain.is_empty() {
         return Err(SignetError::ChainError(
             "chain must contain at least one token".into(),
@@ -119,6 +169,23 @@ pub fn sign_authorized(
             "signing key does not match final delegate in chain".into(),
         ));
     }
+
+    if let Some(p) = signer_principal {
+        crate::principal::validate_principal(p)?;
+    }
+    let acting_for = match acting_for {
+        Some(p) => {
+            crate::principal::validate_principal(p)?;
+            Some(p.to_string())
+        }
+        None => match chain[0].delegator.principal.clone() {
+            Some(p) => {
+                crate::principal::validate_principal(&p)?;
+                Some(p)
+            }
+            None => None,
+        },
+    };
 
     // Extract from chain BEFORE moving it
     let root_pubkey = chain[0].delegator.pubkey.clone();
@@ -143,6 +210,8 @@ pub fn sign_authorized(
         pubkey: format_pubkey(&key.verifying_key().to_bytes()),
         name: signer_name.to_string(),
         owner: signer_owner,
+        principal: signer_principal.map(|s| s.to_string()),
+        acting_for,
     };
 
     // Compute chain_hash
@@ -452,6 +521,172 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("cannot mix wildcard"));
+    }
+
+    #[test]
+    fn test_sign_delegation_with_principals_roundtrip() {
+        let delegator_key = SigningKey::generate(&mut OsRng);
+        let delegate_key = SigningKey::generate(&mut OsRng);
+        let scope = test_scope();
+
+        let token = sign_delegation_with_principals(
+            &delegator_key,
+            "alice",
+            Some("user://prismer/alice"),
+            &delegate_key.verifying_key(),
+            "deploy-bot",
+            Some("agent://prismer/deploy-bot"),
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            token.delegator.principal.as_deref(),
+            Some("user://prismer/alice")
+        );
+        assert_eq!(
+            token.delegate.principal.as_deref(),
+            Some("agent://prismer/deploy-bot")
+        );
+        // Token signature verifies with principals in scope
+        crate::verify_delegation::verify_delegation(&token, None).unwrap();
+    }
+
+    #[test]
+    fn test_sign_delegation_invalid_principal_rejected() {
+        let delegator_key = SigningKey::generate(&mut OsRng);
+        let delegate_key = SigningKey::generate(&mut OsRng);
+        let scope = test_scope();
+
+        let err = sign_delegation_with_principals(
+            &delegator_key,
+            "alice",
+            Some("alice"), // no scheme
+            &delegate_key.verifying_key(),
+            "deploy-bot",
+            None,
+            &scope,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, SignetError::InvalidPrincipal(_)));
+    }
+
+    #[test]
+    fn test_delegation_token_without_principal_unchanged() {
+        // Tokens without principals must serialize exactly as v0.10 did.
+        let delegator_key = SigningKey::generate(&mut OsRng);
+        let delegate_key = SigningKey::generate(&mut OsRng);
+        let scope = test_scope();
+        let token = sign_delegation(
+            &delegator_key,
+            "alice",
+            &delegate_key.verifying_key(),
+            "deploy-bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+        let json = serde_json::to_string(&token).unwrap();
+        assert!(!json.contains("\"principal\""));
+    }
+
+    #[test]
+    fn test_sign_authorized_with_principal_and_auto_acting_for() {
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, _) = crate::identity::generate_keypair();
+
+        let scope = test_scope();
+        let token = sign_delegation_with_principals(
+            &root_key,
+            "alice",
+            Some("user://prismer/alice"),
+            &agent_key.verifying_key(),
+            "deploy-bot",
+            Some("agent://prismer/deploy-bot"),
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({"cmd": "ls"}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
+        };
+
+        // acting_for omitted → auto-filled from the chain root principal
+        let receipt = sign_authorized_with_principal(
+            &agent_key,
+            &action,
+            "deploy-bot",
+            Some("agent://prismer/deploy-bot"),
+            None,
+            vec![token],
+        )
+        .unwrap();
+
+        assert_eq!(
+            receipt.signer.principal.as_deref(),
+            Some("agent://prismer/deploy-bot")
+        );
+        assert_eq!(
+            receipt.signer.acting_for.as_deref(),
+            Some("user://prismer/alice")
+        );
+        // v4 signature (which covers signer incl. principals) verifies
+        assert!(crate::verify_delegation::verify_v4_signature_only(&receipt).is_ok());
+    }
+
+    #[test]
+    fn test_sign_authorized_principal_tamper_breaks_signature() {
+        let (root_key, _) = crate::identity::generate_keypair();
+        let (agent_key, _) = crate::identity::generate_keypair();
+
+        let scope = test_scope();
+        let token = sign_delegation(
+            &root_key,
+            "alice",
+            &agent_key.verifying_key(),
+            "deploy-bot",
+            &scope,
+            None,
+        )
+        .unwrap();
+
+        let action = crate::receipt::Action {
+            tool: "Bash".into(),
+            params: serde_json::json!({}),
+            params_hash: String::new(),
+            target: "mcp://test".into(),
+            transport: "stdio".into(),
+            session: None,
+            call_id: None,
+            response_hash: None,
+            trace_id: None,
+            parent_receipt_id: None,
+        };
+
+        let mut receipt = sign_authorized_with_principal(
+            &agent_key,
+            &action,
+            "deploy-bot",
+            Some("agent://prismer/deploy-bot"),
+            None,
+            vec![token],
+        )
+        .unwrap();
+
+        receipt.signer.principal = Some("agent://evil/imposter".to_string());
+        assert!(crate::verify_delegation::verify_v4_signature_only(&receipt).is_err());
     }
 
     #[test]

@@ -6,6 +6,7 @@ pyo3::create_exception!(signet_auth, SignetError, PyException);
 pyo3::create_exception!(signet_auth, InvalidKeyError, SignetError);
 pyo3::create_exception!(signet_auth, SignatureMismatchError, SignetError);
 pyo3::create_exception!(signet_auth, InvalidReceiptError, SignetError);
+pyo3::create_exception!(signet_auth, InvalidPrincipalError, SignetError);
 pyo3::create_exception!(signet_auth, CanonicalizeError, SignetError);
 pyo3::create_exception!(signet_auth, SerializeError, SignetError);
 pyo3::create_exception!(signet_auth, KeyNotFoundError, SignetError);
@@ -36,6 +37,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(
         "InvalidReceiptError",
         m.py().get_type::<InvalidReceiptError>(),
+    )?;
+    m.add(
+        "InvalidPrincipalError",
+        m.py().get_type::<InvalidPrincipalError>(),
     )?;
     m.add("CanonicalizeError", m.py().get_type::<CanonicalizeError>())?;
     m.add("SerializeError", m.py().get_type::<SerializeError>())?;
@@ -92,6 +97,7 @@ pub fn to_py_err(err: signet_core::SignetError) -> PyErr {
         }
         signet_core::SignetError::CanonicalizeError(msg) => CanonicalizeError::new_err(msg),
         signet_core::SignetError::InvalidReceipt(msg) => InvalidReceiptError::new_err(msg),
+        signet_core::SignetError::InvalidPrincipal(msg) => InvalidPrincipalError::new_err(msg),
         signet_core::SignetError::SerializeError(e) => SerializeError::new_err(e.to_string()),
         signet_core::SignetError::ScopeViolation(msg) => ScopeViolationError::new_err(msg),
         signet_core::SignetError::ChainError(msg) => ChainError::new_err(msg),

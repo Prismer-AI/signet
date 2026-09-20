@@ -32,6 +32,7 @@ pub mod fs_ops {
     pub struct KeyInfo {
         pub name: String,
         pub owner: Option<String>,
+        pub principal: Option<String>,
         pub pubkey: String,
         pub created_at: String,
     }
@@ -68,7 +69,25 @@ pub mod fs_ops {
         passphrase: Option<&str>,
         kdf_params: Option<KdfParams>,
     ) -> Result<KeyInfo, SignetError> {
+        generate_and_save_with_principal(dir, name, owner, None, passphrase, kdf_params)
+    }
+
+    /// `generate_and_save` with a canonical principal URI stored in key
+    /// metadata. The principal is validated and auto-attached to receipts
+    /// signed with this key (unless overridden per-call).
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_and_save_with_principal(
+        dir: &Path,
+        name: &str,
+        owner: Option<&str>,
+        principal: Option<&str>,
+        passphrase: Option<&str>,
+        kdf_params: Option<KdfParams>,
+    ) -> Result<KeyInfo, SignetError> {
         validate_key_name(name)?;
+        if let Some(p) = principal {
+            crate::principal::validate_principal(p)?;
+        }
 
         let keys_dir = dir.join("keys");
         fs::create_dir_all(&keys_dir)?;
@@ -91,6 +110,7 @@ pub mod fs_ops {
             name: name.to_string(),
             pubkey: B64.encode(verifying_key.as_bytes()),
             owner: owner.map(|s| s.to_string()),
+            principal: principal.map(|s| s.to_string()),
             created_at: created_at.clone(),
         };
         let pub_json = serde_json::to_string_pretty(&pub_file)?;
@@ -130,6 +150,7 @@ pub mod fs_ops {
         Ok(KeyInfo {
             name: name.to_string(),
             owner: owner.map(|s| s.to_string()),
+            principal: principal.map(|s| s.to_string()),
             pubkey: B64.encode(verifying_key.as_bytes()),
             created_at,
         })
@@ -153,6 +174,7 @@ pub mod fs_ops {
         Ok(KeyInfo {
             name: file.name,
             owner: file.owner,
+            principal: file.principal,
             pubkey: file.pubkey,
             created_at: file.created_at,
         })

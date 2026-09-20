@@ -47,6 +47,12 @@ pub struct CreateArgs {
     /// Parent scope JSON file (for scope narrowing validation)
     #[arg(long)]
     pub parent_scope: Option<String>,
+    /// Delegator principal URI (e.g. user://prismer/alice); defaults to the key's stored principal
+    #[arg(long)]
+    pub from_principal: Option<String>,
+    /// Delegate principal URI (e.g. agent://prismer/deploy-bot)
+    #[arg(long)]
+    pub to_principal: Option<String>,
     /// Output file (default: stdout)
     #[arg(long)]
     pub output: Option<String>,
@@ -81,6 +87,12 @@ pub struct DelegateSignArgs {
     /// Delegation chain JSON file
     #[arg(long)]
     pub chain: String,
+    /// Signer principal URI; defaults to the key's stored principal
+    #[arg(long)]
+    pub principal: Option<String>,
+    /// Principal the signer acts for; defaults to the chain root's principal when set
+    #[arg(long)]
+    pub acting_for: Option<String>,
     /// Output file (default: stdout)
     #[arg(long)]
     pub output: Option<String>,
@@ -193,11 +205,15 @@ fn create(args: CreateArgs) -> Result<()> {
         None
     };
 
-    let token = signet_core::sign_delegation(
+    let from_principal = args.from_principal.as_deref().or(info.principal.as_deref());
+
+    let token = signet_core::sign_delegation_with_principals(
         &sk,
         &info.name,
+        from_principal,
         &delegate_vk,
         &args.to_name,
+        args.to_principal.as_deref(),
         &scope,
         parent_scope.as_ref(),
     )?;
@@ -294,7 +310,16 @@ fn sign(args: DelegateSignArgs) -> Result<()> {
         parent_receipt_id: None,
     };
 
-    let receipt = signet_core::sign_authorized(&sk, &action, &info.name, chain)?;
+    let principal = args.principal.as_deref().or(info.principal.as_deref());
+
+    let receipt = signet_core::sign_authorized_with_principal(
+        &sk,
+        &action,
+        &info.name,
+        principal,
+        args.acting_for.as_deref(),
+        chain,
+    )?;
     let json = serde_json::to_string(&receipt)?;
 
     if !args.no_log {
@@ -357,6 +382,31 @@ fn verify_auth(args: VerifyAuthArgs) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("receipt has no authorization field (not a v4 receipt)"))?;
     eprintln!("Root: {}", auth.root_pubkey);
+    if let Some(ref signer_principal) = receipt.signer.principal {
+        eprintln!("Signer principal: {signer_principal}");
+    }
+    // acting_for corroboration: the one machine-checkable claim match.
+    if let Some(ref acting_for) = receipt.signer.acting_for {
+        let root_principal = auth
+            .chain
+            .first()
+            .and_then(|t| t.delegator.principal.as_deref());
+        match root_principal {
+            Some(root) if root == acting_for => {
+                eprintln!("Acting for: {acting_for} (corroborated by chain root)");
+            }
+            Some(root) => {
+                eprintln!(
+                    "Warning: acting_for '{acting_for}' does not match chain root principal '{root}' — claim NOT corroborated"
+                );
+            }
+            None => {
+                eprintln!(
+                    "Acting for: {acting_for} (chain root has no principal — uncorroborated claim)"
+                );
+            }
+        }
+    }
     eprintln!("Effective scope:");
     println!("{}", serde_json::to_string_pretty(&scope)?);
     Ok(())

@@ -371,15 +371,11 @@ fn build_bundle(
     let records_sha = sha256_hex(records_buf.as_bytes());
     let earliest_ts = records
         .iter()
-        .filter_map(|r| {
-            audit::extract_timestamp(&r.receipt).map(|s| s.to_string())
-        })
+        .filter_map(|r| audit::extract_timestamp(&r.receipt).map(|s| s.to_string()))
         .min();
     let latest_ts = records
         .iter()
-        .filter_map(|r| {
-            audit::extract_timestamp(&r.receipt).map(|s| s.to_string())
-        })
+        .filter_map(|r| audit::extract_timestamp(&r.receipt).map(|s| s.to_string()))
         .max();
     let summary = format!(
         "signet-evidence-bundle-summary\n\
@@ -414,8 +410,7 @@ fn build_bundle(
     let manifest = BundleManifest {
         format_version: 1,
         producer: format!("signet-cli {}", env!("CARGO_PKG_VERSION")),
-        generated_at: chrono::Utc::now()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        generated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         host,
         record_count: records.len(),
         chain_start_prev_hash: records[0].prev_hash.clone(),
@@ -518,10 +513,8 @@ fn restore_bundle(in_dir: &str, override_trust_bundle: Option<&str>) -> Result<(
         if line.trim().is_empty() {
             continue;
         }
-        let record: signet_core::audit::AuditRecord =
-            serde_json::from_str(line).map_err(|e| {
-                anyhow::anyhow!("records.jsonl line {} invalid JSON: {e}", lineno + 1)
-            })?;
+        let record: signet_core::audit::AuditRecord = serde_json::from_str(line)
+            .map_err(|e| anyhow::anyhow!("records.jsonl line {} invalid JSON: {e}", lineno + 1))?;
 
         // 1. Chain shape: prev_hash matches previous record_hash.
         if let Some(ref expected) = prev_hash {
@@ -537,11 +530,9 @@ fn restore_bundle(in_dir: &str, override_trust_bundle: Option<&str>) -> Result<(
 
         // 2. Re-derive record_hash from (prev_hash, receipt). Detects
         //    tampering with the receipt that didn't update record_hash.
-        let recomputed = signet_core::audit::compute_record_hash(
-            &record.receipt,
-            &record.prev_hash,
-        )
-        .map_err(|e| anyhow::anyhow!("line {}: hash compute failed: {e}", lineno + 1))?;
+        let recomputed =
+            signet_core::audit::compute_record_hash(&record.receipt, &record.prev_hash)
+                .map_err(|e| anyhow::anyhow!("line {}: hash compute failed: {e}", lineno + 1))?;
         if recomputed != record.record_hash {
             bail!(
                 "record_hash mismatch at line {}: stored={}, recomputed={} (receipt was tampered)",
@@ -631,15 +622,12 @@ fn verify_audit_receipt_against_bundle(
             let vk = bundle
                 .find_active_agent_key(signer_pubkey)?
                 .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "line {lineno}: untrusted signer pubkey: {signer_pubkey}"
-                    )
+                    anyhow::anyhow!("line {lineno}: untrusted signer pubkey: {signer_pubkey}")
                 })?;
             // Forensic: bundle re-verification tolerates expired `exp`
             // on historical v1/v4 receipts.
-            signet_core::verify_any_allow_expired(&receipt_str, &vk).map_err(|e| {
-                anyhow::anyhow!("line {lineno}: signature verification failed: {e}")
-            })
+            signet_core::verify_any_allow_expired(&receipt_str, &vk)
+                .map_err(|e| anyhow::anyhow!("line {lineno}: signature verification failed: {e}"))
         }
         3 => {
             // Bilateral: verify against the trust-bundle server pubkey.
@@ -651,21 +639,16 @@ fn verify_audit_receipt_against_bundle(
             let vk = bundle
                 .find_active_server_key(server_pubkey)?
                 .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "line {lineno}: untrusted server pubkey: {server_pubkey}"
-                    )
+                    anyhow::anyhow!("line {lineno}: untrusted server pubkey: {server_pubkey}")
                 })?;
             // Forensic re-verification: signature still required, but
             // disable time window, nonce replay, AND embedded-agent `exp`
             // checks (historical receipts may have expired).
             let opts = signet_core::BilateralVerifyOptions::forensic();
-            let bilateral: signet_core::BilateralReceipt =
-                serde_json::from_str(&receipt_str).map_err(|e| {
-                    anyhow::anyhow!("line {lineno}: parse v3: {e}")
-                })?;
-            signet_core::verify_bilateral_with_options(&bilateral, &vk, &opts).map_err(
-                |e| anyhow::anyhow!("line {lineno}: bilateral verify failed: {e}"),
-            )
+            let bilateral: signet_core::BilateralReceipt = serde_json::from_str(&receipt_str)
+                .map_err(|e| anyhow::anyhow!("line {lineno}: parse v3: {e}"))?;
+            signet_core::verify_bilateral_with_options(&bilateral, &vk, &opts)
+                .map_err(|e| anyhow::anyhow!("line {lineno}: bilateral verify failed: {e}"))
         }
         v => bail!("line {lineno}: unsupported receipt version: {v}"),
     }

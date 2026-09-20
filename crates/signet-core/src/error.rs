@@ -21,6 +21,9 @@ pub enum SignetError {
     #[error("authority key mismatch: {0}")]
     AuthorityMismatch(String),
 
+    #[error("revoked artifact {artifact_id} (revoked at {at})")]
+    DelegationRevoked { artifact_id: String, at: String },
+
     #[error("authorization decision invalid: {0}")]
     DecisionInvalid(String),
 

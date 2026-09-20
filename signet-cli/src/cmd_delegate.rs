@@ -114,6 +114,12 @@ pub struct VerifyAuthArgs {
     /// Clock skew tolerance in seconds
     #[arg(long, default_value_t = 60)]
     pub clock_skew: u64,
+    /// Revocation records file (default: local ~/.signet/revocations.jsonl when present)
+    #[arg(long)]
+    pub revocations: Option<String>,
+    /// Fail when the revocation status is unknown (strict mode)
+    #[arg(long)]
+    pub require_revocation_known: bool,
 }
 
 fn parse_tools_targets(s: &str) -> Result<Vec<String>> {
@@ -270,6 +276,13 @@ fn sign(args: DelegateSignArgs) -> Result<()> {
 
     let principal = args.principal.as_deref().or(info.principal.as_deref());
 
+    // Fail-closed revocation gate: local records are consulted before signing.
+    let revocations = crate::cmd_revoke::load_local_revocations();
+    crate::cmd_revoke::ensure_not_revoked(
+        signet_core::check_revocation(&chain, &[], &revocations)?,
+        "delegation chain",
+    )?;
+
     let receipt = signet_core::sign_authorized_with_principal(
         &sk,
         &action,
@@ -344,6 +357,33 @@ fn verify_auth(args: VerifyAuthArgs) -> Result<()> {
         eprintln!("Signer principal: {signer_principal}");
     }
     // acting_for corroboration: the one machine-checkable claim match.
+    // Revocation status — explicit, two-valued. `revoked` fails; `unknown`
+    // never prints as authorized and fails only under --require-revocation-known.
+    let revocations = match args.revocations.as_deref() {
+        Some(p) => signet_core::fs_ops::load_revocations(std::path::Path::new(p))?,
+        None => crate::cmd_revoke::load_local_revocations(),
+    };
+    let decisions: Vec<signet_core::AuthorizationDecision> =
+        receipt.authz_decision.iter().cloned().collect();
+    match signet_core::check_revocation(&auth.chain, &decisions, &revocations)? {
+        signet_core::RevocationStatus::Revoked { at, by } => {
+            bail!("revocation: REVOKED at {at} by {by}");
+        }
+        signet_core::RevocationStatus::Unknown => {
+            eprintln!(
+                "revocation: unknown (no matching record{} — absence of a record is not validity)",
+                if revocations.is_empty() {
+                    ", no records consulted"
+                } else {
+                    ""
+                }
+            );
+            if args.require_revocation_known {
+                bail!("--require-revocation-known: revocation status is unknown");
+            }
+        }
+    }
+
     if let Some(ref acting_for) = receipt.signer.acting_for {
         let root_principal = auth
             .chain

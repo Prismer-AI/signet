@@ -15,6 +15,7 @@ mod cmd_identity;
 mod cmd_policy;
 mod cmd_proxy;
 mod cmd_quickstart;
+mod cmd_revoke;
 mod cmd_sign;
 mod cmd_trust;
 mod cmd_verify;
@@ -43,6 +44,13 @@ enum Commands {
     Sign(cmd_sign::SignArgs),
     /// Authority-side pre-authorization: produce a signed decision for one intent
     Authorize(cmd_authorize::AuthorizeArgs),
+    /// Revoke a delegation token or authorization decision (issuer-signed)
+    Revoke(cmd_revoke::RevokeArgs),
+    /// Validate / prune the local revocation file
+    Revocations {
+        #[command(subcommand)]
+        action: RevocationsAction,
+    },
     /// Verify an action receipt
     Verify(cmd_verify::VerifyArgs),
     /// Query and verify the audit log
@@ -75,6 +83,12 @@ enum Commands {
     Explore(cmd_explore::ExploreArgs),
     /// One-command setup: generate identity, sign test action, show audit
     Quickstart,
+}
+
+#[derive(Subcommand)]
+enum RevocationsAction {
+    /// Validate every record in the local revocation file
+    Check(cmd_revoke::RevocationsCheckArgs),
 }
 
 #[derive(Subcommand)]
@@ -168,6 +182,10 @@ fn run() -> Result<()> {
         },
         Commands::Sign(args) => cmd_sign::sign(args)?,
         Commands::Authorize(args) => cmd_authorize::authorize(args)?,
+        Commands::Revoke(args) => cmd_revoke::revoke(args)?,
+        Commands::Revocations { action } => match action {
+            RevocationsAction::Check(args) => cmd_revoke::revocations_check(args)?,
+        },
         Commands::Verify(args) => cmd_verify::verify(args)?,
         Commands::Audit(args) => cmd_audit::audit(args)?,
         Commands::Claude { action } => cmd_claude::run(action)?,

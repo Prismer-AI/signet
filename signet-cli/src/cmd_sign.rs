@@ -144,6 +144,17 @@ pub fn sign(args: SignArgs) -> Result<()> {
         None => None,
     };
 
+    // Fail-closed revocation gate: local records are consulted before signing.
+    let local_revocations = crate::cmd_revoke::load_local_revocations();
+    if let Some(ref cj) = chain_json {
+        let chain_tokens: Vec<signet_core::DelegationToken> =
+            serde_json::from_str(cj).map_err(|e| anyhow::anyhow!("invalid chain JSON: {e}"))?;
+        crate::cmd_revoke::ensure_not_revoked(
+            signet_core::check_revocation(&chain_tokens, &[], &local_revocations)?,
+            "delegation chain",
+        )?;
+    }
+
     let receipt = if let Some(ref decision_path) = args.decision {
         // Two-step flow: consume a pre-made authority decision.
         if args.policy.is_some() {
@@ -155,6 +166,14 @@ pub fn sign(args: SignArgs) -> Result<()> {
         let decision_str = fs::read_to_string(decision_path)
             .map_err(|e| anyhow::anyhow!("failed to read decision file '{decision_path}': {e}"))?;
         let decision: signet_core::AuthorizationDecision = serde_json::from_str(&decision_str)?;
+        crate::cmd_revoke::ensure_not_revoked(
+            signet_core::check_revocation(
+                &[],
+                std::slice::from_ref(&decision),
+                &local_revocations,
+            )?,
+            "authorization decision",
+        )?;
         let principal = principal.ok_or_else(|| {
             anyhow::anyhow!(
                 "--principal (or key metadata principal) is required with --decision: the decision subject must be corroborated"

@@ -337,6 +337,7 @@ fn build_bundle(
             "manifest.json",
             "hash-summary.txt",
             "trust-bundle.json",
+            "revocations.jsonl",
         ]
         .into_iter()
         .collect();
@@ -396,6 +397,18 @@ fn build_bundle(
 
     // 3) Optional trust bundle copy.
     let mut has_trust_bundle = false;
+    // 4) revocations.jsonl — copied when present, so an off-host auditor
+    //    can distinguish `revoked` from `unknown` instead of everything
+    //    collapsing to unknown.
+    let revocations_src = audit_dir.with_file_name("revocations.jsonl");
+    if revocations_src.exists() {
+        fs::copy(&revocations_src, out.join("revocations.jsonl"))?;
+        eprintln!(
+            "Included revocations.jsonl ({} bytes)",
+            fs::metadata(&revocations_src)?.len()
+        );
+    }
+
     if let Some(src) = include_trust_bundle {
         let src_path = std::path::Path::new(src);
         if !src_path.exists() {
@@ -499,6 +512,21 @@ fn restore_bundle(in_dir: &str, override_trust_bundle: Option<&str>) -> Result<(
         )?),
         None => None,
     };
+
+    // Bundled revocation records: verify each is well-formed JSON so an
+    // off-host auditor knows the revoked/unknown distinction is trustworthy.
+    let bundled_revocations = dir.join("revocations.jsonl");
+    if bundled_revocations.exists() {
+        let detailed = signet_core::fs_ops::load_revocations_detailed(&bundled_revocations)?;
+        let mut ok = 0usize;
+        for (_, res) in &detailed {
+            match res {
+                Ok(_) => ok += 1,
+                Err(e) => bail!("bundled revocations.jsonl: {e}"),
+            }
+        }
+        eprintln!("Revocations: {ok} record(s) included in the bundle");
+    }
 
     // Parse records and replay the hash chain. Recompute record_hash from
     // (prev_hash, receipt) so a forged record_hash field is detected.

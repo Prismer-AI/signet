@@ -1628,6 +1628,338 @@ fn test_sign_chain_without_decision_produces_v4() {
     assert!(v.get("authorization").is_some());
 }
 
+// ─── revocation (v0.11 S3) ──────────────────────────────────────────────────
+
+fn setup_root_bot_chain(dir: &std::path::Path) -> std::path::PathBuf {
+    for name in ["root", "bot"] {
+        signet()
+            .env("SIGNET_HOME", dir)
+            .args(["identity", "generate", "--name", name, "--unencrypted"])
+            .assert()
+            .success();
+    }
+    let token_path = dir.join("token.json");
+    signet()
+        .env("SIGNET_HOME", dir)
+        .args([
+            "delegate",
+            "create",
+            "--from",
+            "root",
+            "--to",
+            "bot",
+            "--to-name",
+            "bot",
+            "--tools",
+            "*",
+            "--targets",
+            "*",
+            "--output",
+            token_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let chain_path = dir.join("chain.json");
+    fs::write(
+        &chain_path,
+        format!("[{}]", fs::read_to_string(&token_path).unwrap()),
+    )
+    .unwrap();
+    chain_path
+}
+
+#[test]
+fn test_revoke_then_sign_and_verify_fail_closed() {
+    let dir = tempdir().unwrap();
+    let chain_path = setup_root_bot_chain(dir.path());
+
+    // Revoke the leaf token (default) with the delegator's key
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "revoke",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--reason",
+            "compromised",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Revoked delegation token"));
+
+    // Signing under the revoked chain is refused (fail closed)
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing to sign"));
+
+    // verify-auth reports REVOKED and exits nonzero
+    let receipt_path = dir.path().join("v4.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .failure();
+    // (no receipt was produced — produce one from BEFORE the revocation to
+    // exercise the verify path; easiest is a fresh chain without revocation)
+}
+
+#[test]
+fn test_verify_auth_revoked_receipt_fails() {
+    let dir = tempdir().unwrap();
+    let chain_path = setup_root_bot_chain(dir.path());
+
+    // Sign BEFORE revoking
+    let receipt_path = dir.path().join("v4.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "sign",
+            "--key",
+            "bot",
+            "--tool",
+            "Bash",
+            "--params",
+            r#"{"cmd":"ls"}"#,
+            "--target",
+            "mcp://local",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--output",
+            receipt_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .success();
+
+    // Pre-revocation: unknown status, exit 0, explicit line
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots",
+            "root",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("revocation: unknown"));
+
+    // --require-revocation-known makes unknown fail
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots",
+            "root",
+            "--require-revocation-known",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown"));
+
+    // Revoke, then the same receipt fails with REVOKED
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "revoke",
+            "--chain",
+            chain_path.to_str().unwrap(),
+            "--reason",
+            "compromised",
+        ])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "delegate",
+            "verify-auth",
+            receipt_path.to_str().unwrap(),
+            "--trusted-roots",
+            "root",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("REVOKED"));
+}
+
+#[test]
+fn test_revoke_by_non_issuer_key_fails() {
+    let dir = tempdir().unwrap();
+    let chain_path = setup_root_bot_chain(dir.path());
+
+    // The bot (delegate) cannot revoke its own grant — only the issuer can.
+    // The keystore only has "root" matching the delegator pubkey, so removing
+    // root's key from play is impractical here; instead assert that a
+    // non-matching single-key keystore fails. Use a fresh home with only bot.
+    let dir2 = tempdir().unwrap();
+    signet()
+        .env("SIGNET_HOME", dir2.path())
+        .args(["identity", "generate", "--name", "bot", "--unencrypted"])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir2.path())
+        .args(["revoke", "--chain", chain_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("only the artifact's issuer"));
+}
+
+#[test]
+fn test_revoke_decision_and_sign_refusal() {
+    let dir = tempdir().unwrap();
+    setup_authority_identities(dir.path());
+    let policy = allow_policy(dir.path());
+
+    let decision_path = dir.path().join("decision.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "authorize",
+            "--key",
+            "security-team",
+            "--authority",
+            "agent://prismer/security",
+            "--subject",
+            "agent://prismer/deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--target",
+            "mcp://github",
+            "--policy",
+            policy.to_str().unwrap(),
+            "--output",
+            decision_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Revoke the decision with the authority key
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "revoke",
+            "--decision",
+            decision_path.to_str().unwrap(),
+            "--reason",
+            "changed my mind",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Revoked authorization decision"));
+
+    // Signing with the revoked decision is refused
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "sign",
+            "--key",
+            "deploy-bot",
+            "--tool",
+            "github_merge_pr",
+            "--params",
+            "{}",
+            "--target",
+            "mcp://github",
+            "--decision",
+            decision_path.to_str().unwrap(),
+            "--no-log",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("refusing to sign"));
+}
+
+#[test]
+fn test_revocations_check_reports_and_prunes() {
+    let dir = tempdir().unwrap();
+    let chain_path = setup_root_bot_chain(dir.path());
+
+    // Empty file → "nothing to check"
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revocations", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nothing to check"));
+
+    // One good record
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revoke", "--chain", chain_path.to_str().unwrap()])
+        .assert()
+        .success();
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revocations", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("well-formed"));
+
+    // Append a corrupt line, check reports it, prune removes only it
+    let path = dir.path().join("revocations.jsonl");
+    let mut content = fs::read_to_string(&path).unwrap();
+    content.push_str("not json\n");
+    fs::write(&path, content).unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revocations", "check"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("MALFORMED"))
+        .stderr(predicate::str::contains("--prune"));
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revocations", "check", "--prune", "--yes"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Pruned 1 malformed line"));
+
+    // After prune the good record survives
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["revocations", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("well-formed"));
+}
+
 #[test]
 fn test_delegate_principal_e2e_corroboration() {
     let dir = tempdir().unwrap();

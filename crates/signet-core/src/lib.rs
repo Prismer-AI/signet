@@ -10,6 +10,7 @@ pub mod policy_eval;
 pub mod policy_load;
 pub mod principal;
 pub mod receipt;
+pub mod revocation;
 pub mod sign;
 pub mod sign_delegation;
 pub mod trust;
@@ -40,10 +41,17 @@ pub use policy_load::{parse_policy_json, parse_policy_yaml, validate_policy};
 #[cfg(not(target_arch = "wasm32"))]
 pub use policy_load::load_policy;
 pub use principal::{parse_principal, validate_principal, Principal};
+pub use revocation::{
+    check_revocation, sign_revocation, verify_revocation_record, ArtifactType, RevocationRecord,
+    RevocationStatus,
+};
+
 pub use receipt::{
     Action, BilateralReceipt, CompoundReceipt, Outcome, OutcomeStatus, Receipt, Response,
     ServerInfo, Signer,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use revocation::fs_ops;
 pub use sign::{
     sign, sign_bilateral, sign_bilateral_with_outcome, sign_compound, sign_with_decision,
     sign_with_expiration, sign_with_policy, sign_with_policy_authority,

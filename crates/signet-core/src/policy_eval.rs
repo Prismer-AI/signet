@@ -212,6 +212,16 @@ pub fn evaluate_policy(
     let policy_hash = compute_policy_hash(policy)?;
     let evaluated_at = crate::delegation::current_timestamp();
 
+    // Validate every rule's obligations up front — a policy with an
+    // unverifiable obligation contract must not produce signed evidence.
+    for rule in &policy.rules {
+        if let Some(obs) = &rule.obligations {
+            for ob in obs {
+                crate::obligation::validate_obligation(ob)?;
+            }
+        }
+    }
+
     let mut matched_rules: Vec<String> = Vec::new();
     let mut winning_rule: Option<String> = None;
     let mut max_action = RuleAction::Allow;
@@ -256,8 +266,13 @@ pub fn evaluate_policy(
             }
         }
 
+        let first_match = matched_rules.is_empty();
         matched_rules.push(rule.id.clone());
-        if rule.action > max_action {
+        // The first matched rule establishes the baseline decision (and is
+        // the winner until something raises severity); later rules win only
+        // by exceeding it. Without the first-match arm, an all-allow match
+        // left winning_rule = None and its obligations never flowed.
+        if first_match || rule.action > max_action {
             max_action = rule.action;
             winning_rule = Some(rule.id.clone());
             max_reason = rule.reason.clone();
@@ -273,6 +288,14 @@ pub fn evaluate_policy(
         (max_action, max_reason)
     };
 
+    // Obligations travel with the winning rule; the default-action path
+    // carries none.
+    let obligations = winning_rule
+        .as_ref()
+        .and_then(|id| policy.rules.iter().find(|r| &r.id == id))
+        .and_then(|r| r.obligations.clone())
+        .unwrap_or_default();
+
     Ok(PolicyEvalResult {
         decision,
         matched_rules,
@@ -281,6 +304,7 @@ pub fn evaluate_policy(
         evaluated_at,
         policy_name: policy.name.clone(),
         policy_hash,
+        obligations,
     })
 }
 
@@ -591,6 +615,7 @@ mod tests {
             action,
             reason: format!("rule {} triggered", id),
             rate_limit: None,
+            obligations: None,
         }
     }
 
@@ -666,6 +691,96 @@ mod tests {
             evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None).unwrap();
         assert!(result.policy_hash.starts_with("sha256:"));
         assert_eq!(result.policy_name, "test");
+    }
+
+    // ── Obligations ──
+
+    fn ob_map(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    fn rule_with_obligations(id: &str, tool: &str, action: RuleAction) -> Rule {
+        Rule {
+            obligations: Some(vec![
+                crate::obligation::Obligation::new(
+                    "require_approval",
+                    1,
+                    ob_map(json!({"approver": "user://prismer/alice"})),
+                ),
+                crate::obligation::Obligation::new("sandbox", 1, ob_map(json!({"required": true}))),
+            ]),
+            ..rule(id, tool, action)
+        }
+    }
+
+    #[test]
+    fn test_obligations_flow_from_winning_rule() {
+        let policy = simple_policy(vec![rule_with_obligations(
+            "conditional",
+            "Bash",
+            RuleAction::Allow,
+        )]);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
+        assert_eq!(result.decision, RuleAction::Allow);
+        assert_eq!(result.obligations.len(), 2);
+        assert_eq!(result.obligations[0].ob_type, "require_approval");
+        assert_eq!(result.obligations[1].ob_type, "sandbox");
+    }
+
+    #[test]
+    fn test_obligations_default_action_carries_none() {
+        let policy = simple_policy(vec![rule_with_obligations(
+            "conditional",
+            "Bash",
+            RuleAction::Allow,
+        )]);
+        let result =
+            evaluate_policy(&test_action("Read", json!({}), ""), "agent", &policy, None).unwrap();
+        assert!(result.matched_rules.is_empty());
+        assert!(result.obligations.is_empty());
+    }
+
+    #[test]
+    fn test_obligations_follow_max_severity_winner() {
+        let policy = simple_policy(vec![
+            rule_with_obligations("allow-with-conds", "Bash", RuleAction::Allow),
+            rule("hard-deny", "Bash", RuleAction::Deny),
+        ]);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
+        assert_eq!(result.winning_rule, Some("hard-deny".into()));
+        // The deny rule has no obligations — nothing to satisfy.
+        assert!(result.obligations.is_empty());
+    }
+
+    #[test]
+    fn test_obligations_flow_from_fail_closed_rate_limit_rule() {
+        let mut r = rate_limited_rule("limited", "Bash", RuleAction::Deny, 3);
+        r.obligations = Some(vec![crate::obligation::Obligation::new(
+            "sandbox",
+            1,
+            ob_map(json!({"required": true})),
+        )]);
+        let policy = simple_policy(vec![r]);
+        let result =
+            evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None).unwrap();
+        assert_eq!(result.decision, RuleAction::RequireApproval);
+        assert_eq!(result.obligations.len(), 1);
+    }
+
+    #[test]
+    fn test_evaluate_policy_rejects_invalid_obligations() {
+        let mut r = rule("bad-ob", "Bash", RuleAction::Allow);
+        r.obligations = Some(vec![crate::obligation::Obligation::new(
+            "sandbox",
+            1,
+            ob_map(json!({"required": "yes"})),
+        )]);
+        let policy = simple_policy(vec![r]);
+        let err = evaluate_policy(&test_action("Bash", json!({}), ""), "agent", &policy, None)
+            .unwrap_err();
+        assert!(matches!(err, SignetError::InvalidObligation(_)));
     }
 
     // ── Rate limiting ──

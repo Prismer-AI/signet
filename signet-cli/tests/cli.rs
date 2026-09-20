@@ -1666,6 +1666,96 @@ fn test_policy_validate() {
 }
 
 #[test]
+fn test_policy_check_prints_obligations() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        r#"version: 1
+name: obligations-policy
+rules:
+  - id: conditional-pay
+    match:
+      tool: payment
+    action: allow
+    obligations:
+      - type: require_approval
+        version: 1
+        parameters:
+          approver: "user://prismer/alice"
+          within: "10m"
+      - type: sandbox
+        version: 1
+        parameters:
+          required: true
+"#,
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "policy",
+            "check",
+            policy_path.to_str().unwrap(),
+            "--tool",
+            "payment",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ALLOW"))
+        .stderr(predicate::str::contains("Obligations (all must hold)"))
+        .stderr(predicate::str::contains("require_approval"))
+        .stderr(predicate::str::contains("user://prismer/alice"))
+        .stderr(predicate::str::contains("sandbox"));
+
+    // A tool that does not match → default allow with NO obligations.
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "policy",
+            "check",
+            policy_path.to_str().unwrap(),
+            "--tool",
+            "Read",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("ALLOW"))
+        .stdout(predicate::str::contains("obligations").not());
+}
+
+#[test]
+fn test_policy_validate_rejects_bad_obligation() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.yaml");
+    fs::write(
+        &policy_path,
+        r#"version: 1
+name: bad-obligation
+rules:
+  - id: r1
+    match:
+      tool: Bash
+    action: allow
+    obligations:
+      - type: sandbox
+        version: 1
+        parameters:
+          required: "yes"
+"#,
+    )
+    .unwrap();
+
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args(["policy", "validate", policy_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("obligation"));
+}
+
+#[test]
 fn test_policy_check_allowed() {
     let dir = tempdir().unwrap();
     let policy_path = dir.path().join("policy.yaml");
@@ -3449,6 +3539,7 @@ fn append_explore_policy_violation(dir: &std::path::Path) {
         evaluated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         policy_name: "payments-prod".to_string(),
         policy_hash: "sha256:feedface".to_string(),
+        obligations: Vec::new(),
     };
     signet_core::audit::append_violation(dir, &action, "policy-agent", &eval).unwrap();
 }

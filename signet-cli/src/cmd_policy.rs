@@ -82,6 +82,15 @@ fn check(args: CheckArgs) -> Result<()> {
         format!("rule \"{}\"", eval.matched_rules.join(", "))
     };
 
+    // Obligations from the winning rule — the "under what conditions" answer.
+    // Printed for every decision so reviewers see the conditions even on deny.
+    if !eval.obligations.is_empty() {
+        eprintln!("Obligations (all must hold):");
+        for ob in &eval.obligations {
+            eprintln!("  - {}", serde_json::to_string(ob)?);
+        }
+    }
+
     match eval.decision {
         signet_core::RuleAction::Allow => {
             eprintln!("{decision_str} ({rules_str})");

@@ -410,6 +410,13 @@ export function verifyAuthorized(
 
 // ─── Policy functions ───────────────────────────────────────────────────────
 
+/** Typed obligation — conditions attached to a policy rule (conjunctive). */
+export interface Obligation {
+  type: string; // well-known name or "x-..." namespace
+  version: number;
+  parameters: Record<string, unknown>;
+}
+
 export interface PolicyEvalResult {
   decision: 'allow' | 'deny' | 'require_approval';
   matched_rules: string[];
@@ -417,6 +424,8 @@ export interface PolicyEvalResult {
   reason: string;
   policy_name: string;
   policy_hash: string;
+  /** Obligations from the winning rule; empty when the default action decided. */
+  obligations: Obligation[];
 }
 
 export interface PolicyAttestation {
@@ -437,6 +446,8 @@ export interface Policy {
     match: Record<string, unknown>;
     action: 'allow' | 'deny' | 'require_approval';
     reason?: string;
+    /** Conditions under which the rule's action is granted (conjunctive). */
+    obligations?: Obligation[];
   }>;
 }
 

@@ -1,7 +1,9 @@
 pub mod canonical;
+pub mod constraint;
 pub mod delegation;
 pub mod error;
 pub mod identity;
+pub mod obligation;
 pub mod policy;
 pub mod policy_eval;
 pub mod policy_load;
@@ -19,11 +21,13 @@ pub mod keystore;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audit;
 
+pub use constraint::{decimal_lte, Constraint, Decimal};
 pub use delegation::{
     validate_scope_narrowing, Authorization, DelegationIdentity, DelegationToken, Scope,
 };
 pub use error::SignetError;
 pub use identity::generate_keypair;
+pub use obligation::{validate_obligation, Obligation, WELL_KNOWN_OBLIGATIONS};
 pub use policy::{compute_policy_hash, Policy, PolicyAttestation, PolicyEvalResult, RuleAction};
 pub use policy_eval::{evaluate_policy, RateLimitState};
 pub use policy_load::{parse_policy_json, parse_policy_yaml, validate_policy};

@@ -1,0 +1,34 @@
+version: 1
+name: full-features
+description: exercises every serialization-relevant field except obligations
+default_action: deny
+rules:
+  - id: allow-read
+    description: read-only tools
+    match:
+      tool:
+        one_of: ["Read", "Grep"]
+      target:
+        not_one_of: ["mcp://staging"]
+    action: allow
+    reason: read tools are safe
+  - id: deny-rm-rf
+    match:
+      tool: Bash
+      params:
+        command:
+          contains: "rm -rf"
+    action: deny
+    reason: destructive command
+  - id: limit-pay
+    match:
+      tool: payment
+      params:
+        amount:
+          gt: 1000
+    action: require_approval
+    reason: over 1k
+    rate_limit:
+      max_calls: 10
+      window_seconds: 60
+      scope: per_tool

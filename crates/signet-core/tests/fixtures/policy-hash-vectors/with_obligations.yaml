@@ -1,0 +1,17 @@
+version: 1
+name: with-obligations
+rules:
+  - id: conditional-pay
+    match:
+      tool: payment
+    action: allow
+    obligations:
+      - type: require_approval
+        version: 1
+        parameters:
+          approver: "user://prismer/alice"
+          within: "10m"
+      - type: sandbox
+        version: 1
+        parameters:
+          required: true

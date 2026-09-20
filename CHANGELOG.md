@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **signet-core**: Typed obligations — `Obligation { type, version, parameters }` on policy rules with a well-known registry (`require_approval`, `require_cosign`, `sandbox`, `audit`), strict version semantics (a future version of a known type fails validation), `x-` namespace for private extensions, and conjunctive multiplicity. `Rule.obligations` flows through `PolicyEvalResult.obligations` from the winning rule. Policies without obligations hash byte-identically to 0.10 — pinned by committed test vectors generated with the released v0.10 code (`tests/fixtures/policy-hash-vectors/`).
+- **signet-core**: `Constraint` types (`call_count`, `monetary` with ISO 4217 currency and arbitrary-precision decimal strings compared without float error). Types and validators land now; Scope/decision wiring follows in later v0.11 phases.
+- **signet-cli**: `policy check` prints the matched rule's obligations; `policy validate` rejects invalid obligation contracts.
+- **signet-wasm / @signet-auth/core**: evaluation results carry `obligations`; TS types updated.
+
+### Changed
+
+- **signet-core**: `PolicyEvalResult.winning_rule` is now set for all-allow matches (previously `None` because only severity-raising rules were recorded — an allow rule's obligations and reason never surfaced). The first matched rule establishes the baseline; later rules win by raising severity.
+- **signet-python**: new `InvalidObligationError`, `InvalidConstraintError` exception mappings.
+
+### Fixed
+
 - **signet-core**: Canonical principal URIs (`agent://prismer/deploy-bot`) with mandatory trust-domain scoping — `Signer.principal` / `Signer.acting_for`, `DelegationIdentity.principal`, all inside the signature scope. New APIs: `parse_principal`/`validate_principal`, `sign_with_principal`, `sign_with_policy_with_principal`, `sign_delegation_with_principals`, `sign_authorized_with_principal`, `generate_and_save_with_principal`. Receipts and tokens without principals are byte-identical to 0.10; receipts carrying the new fields verify only on signet-core ≥ 0.11 (same tradeoff as `exp` in 0.9.1).
 - **signet-core**: `sign_authorized_with_principal` auto-fills `acting_for` from the chain root principal when omitted — the one machine-corroborated claim.
 - **signet-cli**: `sign --principal/--acting-for`, `identity generate --principal` (stored in key metadata, auto-attached on sign), `delegate create --from-principal/--to-principal`, `delegate sign --principal/--acting-for`; `delegate verify-auth` prints principal corroboration status.

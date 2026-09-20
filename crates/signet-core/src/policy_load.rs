@@ -37,6 +37,13 @@ pub fn validate_policy(policy: &Policy) -> Result<(), SignetError> {
                 rule.id
             )));
         }
+        if let Some(obs) = &rule.obligations {
+            for ob in obs {
+                crate::obligation::validate_obligation(ob).map_err(|e| {
+                    SignetError::PolicyParseError(format!("rule '{}': {e}", rule.id))
+                })?;
+            }
+        }
     }
 
     Ok(())

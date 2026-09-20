@@ -368,6 +368,7 @@ mod tests {
             evaluated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             policy_name: "payments-prod".to_string(),
             policy_hash: "sha256:feedface".to_string(),
+            obligations: Vec::new(),
         };
         signet_core::audit::append_violation(dir, &action, "agent", &eval).unwrap();
     }

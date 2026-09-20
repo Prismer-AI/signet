@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::canonical;
 use crate::error::SignetError;
+use crate::obligation::Obligation;
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,10 @@ pub struct Rule {
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimit>,
+    /// Conditions under which the rule's action is granted. Conjunctive;
+    /// carried into signed policy evidence. Absent → policy hash unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obligations: Option<Vec<Obligation>>,
 }
 
 /// Deny=2 > RequireApproval=1 > Allow=0 for max-severity evaluation.
@@ -176,6 +181,10 @@ pub struct PolicyEvalResult {
     pub evaluated_at: String,
     pub policy_name: String,
     pub policy_hash: String,
+    /// Obligations from the winning rule (conjunctive). Empty when the
+    /// default action decided. They attach to the authorization decision,
+    /// not to the PolicyAttestation (which keeps its 0.10 shape).
+    pub obligations: Vec<Obligation>,
 }
 
 // ─── Policy Hash ────────────────────────────────────────────────────────────

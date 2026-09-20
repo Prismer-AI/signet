@@ -12,6 +12,12 @@ pub enum SignetError {
     #[error("invalid principal URI: {0}")]
     InvalidPrincipal(String),
 
+    #[error("invalid obligation: {0}")]
+    InvalidObligation(String),
+
+    #[error("invalid constraint: {0}")]
+    InvalidConstraint(String),
+
     #[error("invalid receipt: {0}")]
     InvalidReceipt(String),
 

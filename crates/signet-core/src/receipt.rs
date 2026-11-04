@@ -271,3 +271,16 @@ pub(crate) fn build_receipt_signable(
     }
     Ok(signable)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verified_outcome_has_no_reason_or_error() {
+        let outcome = Outcome::verified();
+        assert_eq!(outcome.status, OutcomeStatus::Verified);
+        assert!(outcome.reason.is_none());
+        assert!(outcome.error.is_none());
+    }
+}

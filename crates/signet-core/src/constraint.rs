@@ -503,6 +503,12 @@ mod tests {
         let back: Constraint = serde_json::from_str(&json).unwrap();
         assert_eq!(back, m);
     }
+
+    #[test]
+    fn test_budget_usage_is_empty_only_without_counts() {
+        assert!(BudgetUsage::from_pairs(vec![]).is_empty());
+        assert!(!BudgetUsage::from_pairs(vec![("refunds".to_string(), 1)]).is_empty());
+    }
 }
 
 // ─── Usage counting and enforcement (spec §6.2) ─────────────────────────────

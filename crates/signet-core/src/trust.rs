@@ -743,4 +743,38 @@ servers: []
         assert_eq!(restored.bundle_id, "tb_dev");
         assert_eq!(restored.env, "dev");
     }
+
+    #[test]
+    fn test_active_root_entry_matches_only_an_active_root() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 25, 12, 0, 0).unwrap();
+        let entry = |status| TrustKeyEntry {
+            id: "root1".to_string(),
+            name: "root1".to_string(),
+            owner: "platform".to_string(),
+            pubkey: TEST_PUBKEY_A.to_string(),
+            status,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            expires_at: None,
+            disabled_at: None,
+            revoked_at: None,
+            comment: None,
+        };
+        let bundle = |status| TrustBundle {
+            version: 1,
+            bundle_id: "tb_dev".to_string(),
+            org: "signet".to_string(),
+            env: "dev".to_string(),
+            generated_at: "2026-04-25T10:30:00Z".to_string(),
+            description: None,
+            source: None,
+            roots: vec![entry(status)],
+            agents: vec![],
+            servers: vec![],
+        };
+        let active = bundle(TrustKeyStatus::Active);
+        assert!(active.active_root_entry(TEST_PUBKEY_A, now).is_some());
+        assert!(active.active_root_entry(TEST_PUBKEY_B, now).is_none());
+        let disabled = bundle(TrustKeyStatus::Disabled);
+        assert!(disabled.active_root_entry(TEST_PUBKEY_A, now).is_none());
+    }
 }

@@ -1626,4 +1626,17 @@ mod tests {
         let tampered_str = serde_json::to_string(&tampered).unwrap();
         assert!(verify_any_allow_expired(&tampered_str, &vk).is_err());
     }
+
+    #[test]
+    fn test_with_nonce_checker_installs_a_checker() {
+        let options = BilateralVerifyOptions::insecure_no_replay_check()
+            .with_nonce_checker(Box::new(InMemoryNonceChecker::new(16, 60)));
+        assert!(options.nonce_checker.is_some());
+    }
+
+    #[test]
+    fn test_only_agent_trusted_outcome_reports_trusted() {
+        assert!(BilateralVerifyOutcome::AgentTrusted.is_agent_trusted());
+        assert!(!BilateralVerifyOutcome::AgentSelfConsistent.is_agent_trusted());
+    }
 }

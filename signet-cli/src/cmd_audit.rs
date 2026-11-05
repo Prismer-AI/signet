@@ -3,6 +3,7 @@ use std::fs;
 use anyhow::{bail, Result};
 use clap::Args;
 use serde::Serialize;
+use signet_core::anchor;
 use signet_core::audit::{self, AuditFilter};
 
 use crate::audit_helpers::materialize_receipt_for_output;
@@ -80,6 +81,62 @@ pub struct AuditArgs {
     /// against the trust bundle's active agent / server / root keys.
     #[arg(long, value_name = "DIR", conflicts_with_all = &["export", "bundle", "verify"])]
     pub restore: Option<String>,
+
+    /// Verify off-host anchors of the audit chain, offline.
+    ///
+    /// Recomputes every commitment from the local log, validates the exact
+    /// sealed bytes, and checks the stored proofs itself. Only `verified`
+    /// exits 0; `pending`, `unavailable`, `missing` and `invalid` exit 1.
+    #[arg(long, conflicts_with_all = &["export", "bundle", "verify", "restore"])]
+    pub verify_anchors: bool,
+
+    /// Anchor record the auditor retained outside this host (JSON, as written
+    /// by --export-checkpoint). This is what makes deletion and rollback of the
+    /// log together with its anchors detectable.
+    #[arg(long, value_name = "FILE", requires = "verify_anchors")]
+    pub checkpoint: Option<String>,
+
+    /// With --verify-anchors: report `missing` when more than N records follow
+    /// the latest verified anchor.
+    #[arg(long, value_name = "N", requires = "verify_anchors")]
+    pub max_unanchored: Option<u64>,
+
+    /// Write the latest anchor record to FILE, for an auditor to retain.
+    #[arg(long, value_name = "FILE")]
+    pub export_checkpoint: Option<String>,
+
+    /// Submit a commitment to the current chain tip to an anchoring sink
+    /// (`deusproof`). Opt-in: nothing else in Signet uses the network.
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "SINK", conflicts_with_all = &["verify_anchors", "export", "bundle", "verify", "restore"])]
+    pub anchor: Option<String>,
+
+    /// Base URL of the sink.
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "URL", default_value = "https://deusproof.com")]
+    pub anchor_url: String,
+
+    /// File anchors at the sink under this public name, so they can be listed
+    /// by it. Identity-linked and opt-in; without it no name is sent.
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "NAME", requires = "anchor")]
+    pub anchor_handle: Option<String>,
+
+    /// Fetch current proofs (e.g. upgraded OpenTimestamps) for stored anchors.
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "SINK", conflicts_with_all = &["anchor", "verify_anchors"])]
+    pub refresh_anchors: Option<String>,
+
+    /// JSON-RPC URL of your own validating Bitcoin Core node, used to check
+    /// Bitcoin attestations (e.g. http://127.0.0.1:8332).
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "URL", requires = "verify_anchors")]
+    pub bitcoin_rpc: Option<String>,
+
+    /// Bitcoin Core cookie file. Without it, SIGNET_BITCOIN_RPC_AUTH=user:password is used.
+    #[cfg(feature = "anchoring")]
+    #[arg(long, value_name = "PATH", requires = "bitcoin_rpc")]
+    pub bitcoin_rpc_cookie: Option<String>,
 }
 
 pub fn audit(args: AuditArgs) -> Result<()> {
@@ -100,6 +157,48 @@ pub fn audit(args: AuditArgs) -> Result<()> {
 
     if let Some(restore_path) = args.restore.as_deref() {
         return restore_bundle(restore_path, args.trust_bundle.as_deref());
+    }
+
+    #[cfg(feature = "anchoring")]
+    {
+        if let Some(sink) = args.anchor.as_deref() {
+            return crate::anchor_net::anchor_cmd(
+                &dir,
+                sink,
+                &args.anchor_url,
+                args.anchor_handle.as_deref(),
+            );
+        }
+        if let Some(sink) = args.refresh_anchors.as_deref() {
+            return crate::anchor_net::refresh_cmd(&dir, sink, &args.anchor_url);
+        }
+    }
+
+    if args.verify_anchors {
+        #[cfg(feature = "anchoring")]
+        let node = match args.bitcoin_rpc.as_deref() {
+            Some(url) => Some(crate::anchor_net::BitcoinRpc::new(
+                url,
+                args.bitcoin_rpc_cookie.as_deref(),
+            )?),
+            None => None,
+        };
+        #[cfg(feature = "anchoring")]
+        let bitcoin = node
+            .as_ref()
+            .map(|n| n as &dyn signet_core::anchor::BitcoinHeaderSource);
+        #[cfg(not(feature = "anchoring"))]
+        let bitcoin: Option<&dyn signet_core::anchor::BitcoinHeaderSource> = None;
+        return verify_anchors(
+            &dir,
+            bitcoin,
+            args.checkpoint.as_deref(),
+            args.max_unanchored,
+        );
+    }
+
+    if let Some(path) = args.export_checkpoint.as_deref() {
+        return export_checkpoint(&dir, path);
     }
 
     let filter = AuditFilter {
@@ -137,6 +236,133 @@ pub fn audit(args: AuditArgs) -> Result<()> {
 
     // Default: list records as table
     list_records(&dir, &filter)
+}
+
+fn verify_anchors(
+    dir: &std::path::Path,
+    bitcoin: Option<&dyn anchor::BitcoinHeaderSource>,
+    checkpoint_path: Option<&str>,
+    max_unanchored: Option<u64>,
+) -> Result<()> {
+    let checkpoint = match checkpoint_path {
+        Some(path) => Some(load_checkpoint(path)?),
+        None => None,
+    };
+    let opts = anchor::AnchorVerifyOptions {
+        bitcoin,
+        checkpoint: checkpoint.as_ref(),
+        max_unanchored,
+    };
+    let report = anchor::verify_anchors(dir, &opts)?;
+    print_anchor_report(&report, bitcoin.is_some());
+    if report.verdict != anchor::Verdict::Verified {
+        bail!(
+            "anchor verification failed: {}",
+            verdict_word(report.verdict)
+        );
+    }
+    Ok(())
+}
+
+fn load_checkpoint(path: &str) -> Result<anchor::AnchorRecord> {
+    let content = fs::read_to_string(path)?;
+    serde_json::from_str(content.trim())
+        .map_err(|e| anyhow::anyhow!("{path} is not an anchor record: {e}"))
+}
+
+fn export_checkpoint(dir: &std::path::Path, path: &str) -> Result<()> {
+    let anchors = anchor::read_anchors(dir)?;
+    let Some(last) = anchors.last() else {
+        bail!("no anchors to export");
+    };
+    fs::write(path, serde_json::to_string_pretty(last)? + "\n")?;
+    println!(
+        "Wrote anchor #{} (covers {} records, {}) to {path}",
+        anchors.len(),
+        last.count,
+        last.commitment
+    );
+    Ok(())
+}
+
+fn verdict_word(v: anchor::Verdict) -> &'static str {
+    match v {
+        anchor::Verdict::Verified => "verified",
+        anchor::Verdict::Pending => "pending",
+        anchor::Verdict::Unavailable => "unavailable",
+        anchor::Verdict::Missing => "missing",
+        anchor::Verdict::Invalid => "invalid",
+    }
+}
+
+fn status_word(s: anchor::AnchorStatus) -> &'static str {
+    match s {
+        anchor::AnchorStatus::Verified => "verified",
+        anchor::AnchorStatus::Pending => "pending",
+        anchor::AnchorStatus::Unavailable => "unavailable",
+        anchor::AnchorStatus::Invalid => "INVALID",
+    }
+}
+
+fn print_anchor_report(report: &anchor::AnchorReport, has_node: bool) {
+    println!(
+        "Audit chain: {} records, {}",
+        report.chain_records,
+        if report.chain_valid {
+            "valid"
+        } else {
+            "BROKEN"
+        }
+    );
+    println!("Anchors: {}", report.anchors.len());
+    for a in &report.anchors {
+        let block = match (a.bitcoin_height, a.bitcoin_time) {
+            (Some(h), Some(t)) => {
+                let when = chrono::DateTime::from_timestamp(t as i64, 0)
+                    .map(|d| d.to_rfc3339())
+                    .unwrap_or_default();
+                format!("  Bitcoin block {h} ({when})")
+            }
+            _ => String::new(),
+        };
+        println!(
+            "  #{:<3} records 1-{:<6} {}{}",
+            a.index,
+            a.count,
+            status_word(a.status),
+            block
+        );
+        for n in &a.notes {
+            println!("        {n}");
+        }
+    }
+    if let Some(cp) = &report.checkpoint {
+        let outcome = match &cp.outcome {
+            anchor::CheckpointOutcome::Consistent => "consistent".to_string(),
+            other => format!("{other:?}"),
+        };
+        println!(
+            "Auditor checkpoint (records 1-{}): {outcome}; its proof: {}",
+            cp.count,
+            status_word(cp.proof_status)
+        );
+    }
+    println!(
+        "Records after the latest verified anchor: {}",
+        report.unanchored_records
+    );
+    println!(
+        "Bitcoin headers: {}",
+        if has_node {
+            "your own node (--bitcoin-rpc)"
+        } else {
+            "none configured"
+        }
+    );
+    println!("Result: {}", verdict_word(report.verdict).to_uppercase());
+    for r in &report.reasons {
+        println!("  - {r}");
+    }
 }
 
 fn list_records(dir: &std::path::Path, filter: &AuditFilter) -> Result<()> {

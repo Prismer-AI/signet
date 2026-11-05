@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **signet-core**: Optional off-host anchoring (draft, #13). `anchor` module: a commitment over the chain tip, record count and previous anchor; a provider-neutral `AnchorSink` trait; anchors stored in `anchors/anchors.jsonl`, outside the audit directory; offline `verify_anchors` that recomputes every commitment, validates the exact sealed bytes and derives proof status itself, with an auditor-supplied checkpoint to detect truncation, replacement and rollback. `ots` module: a dependency-free reader for detached OpenTimestamps proofs. `audit::chain_record_hashes`.
+- **signet-cli**: `signet audit --verify-anchors [--checkpoint FILE] [--max-unanchored N]` and `--export-checkpoint FILE`. With `--features anchoring` (off by default): `--anchor deusproof [--anchor-url URL] [--anchor-handle NAME]`, `--refresh-anchors deusproof`, and `--bitcoin-rpc URL [--bitcoin-rpc-cookie PATH]` to check Bitcoin attestations against your own node. See `docs/guides/off-host-anchoring.md`.
+
 ## [0.11.0] - 2026-09-20
 
 ### Added

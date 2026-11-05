@@ -727,9 +727,21 @@ fn query_with_locations(
 }
 
 pub fn verify_chain(dir: &Path) -> Result<ChainStatus, SignetError> {
+    walk_chain(dir).map(|(status, _)| status)
+}
+
+/// Validate the local hash chain and return every `record_hash` in chain
+/// order (oldest first). The hashes are only meaningful when the returned
+/// status is valid; on a break they stop at the last good record.
+pub fn chain_record_hashes(dir: &Path) -> Result<(ChainStatus, Vec<String>), SignetError> {
+    walk_chain(dir)
+}
+
+fn walk_chain(dir: &Path) -> Result<(ChainStatus, Vec<String>), SignetError> {
     let files = sorted_audit_files(dir, true)?; // oldest first
     let mut expected_prev = GENESIS_HASH.to_string();
     let mut total = 0usize;
+    let mut hashes: Vec<String> = Vec::new();
 
     for file in &files {
         let content = fs::read_to_string(file)?;
@@ -749,42 +761,52 @@ pub fn verify_chain(dir: &Path) -> Result<ChainStatus, SignetError> {
 
             // Check prev_hash links
             if record.prev_hash != expected_prev {
-                return Ok(ChainStatus {
-                    total_records: total,
-                    valid: false,
-                    break_point: Some(ChainBreak {
-                        file: fname,
-                        line: i + 1,
-                        expected_hash: expected_prev,
-                        actual_hash: record.prev_hash,
-                    }),
-                });
+                return Ok((
+                    ChainStatus {
+                        total_records: total,
+                        valid: false,
+                        break_point: Some(ChainBreak {
+                            file: fname,
+                            line: i + 1,
+                            expected_hash: expected_prev,
+                            actual_hash: record.prev_hash,
+                        }),
+                    },
+                    hashes,
+                ));
             }
 
             // Recompute and check record_hash
             let recomputed = compute_record_hash(&record.receipt, &record.prev_hash)?;
             if recomputed != record.record_hash {
-                return Ok(ChainStatus {
-                    total_records: total,
-                    valid: false,
-                    break_point: Some(ChainBreak {
-                        file: fname,
-                        line: i + 1,
-                        expected_hash: recomputed,
-                        actual_hash: record.record_hash,
-                    }),
-                });
+                return Ok((
+                    ChainStatus {
+                        total_records: total,
+                        valid: false,
+                        break_point: Some(ChainBreak {
+                            file: fname,
+                            line: i + 1,
+                            expected_hash: recomputed,
+                            actual_hash: record.record_hash,
+                        }),
+                    },
+                    hashes,
+                ));
             }
 
+            hashes.push(record.record_hash.clone());
             expected_prev = record.record_hash;
         }
     }
 
-    Ok(ChainStatus {
-        total_records: total,
-        valid: true,
-        break_point: None,
-    })
+    Ok((
+        ChainStatus {
+            total_records: total,
+            valid: true,
+            break_point: None,
+        },
+        hashes,
+    ))
 }
 
 pub fn verify_signatures(dir: &Path, filter: &AuditFilter) -> Result<VerifyResult, SignetError> {

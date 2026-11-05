@@ -132,12 +132,13 @@ impl<'a> Reader<'a> {
         let mut shift = 0u32;
         loop {
             let b = self.byte()?;
-            if shift > 63 {
+            let bits = u64::from(b & 0x7f);
+            // Reject anything that does not fit in 64 bits instead of
+            // silently dropping high bits (at shift 63 only one bit fits).
+            if shift > 63 || (shift == 63 && bits > 1) {
                 return Err(OtsError::OutOfRange("varuint"));
             }
-            value |= u64::from(b & 0x7f)
-                .checked_shl(shift)
-                .ok_or(OtsError::OutOfRange("varuint"))?;
+            value |= bits << shift;
             if b & 0x80 == 0 {
                 return Ok(value);
             }
@@ -366,6 +367,59 @@ mod tests {
             parse_detached(&proof),
             Err(OtsError::UnsupportedOp(OP_RIPEMD160))
         );
+    }
+
+    #[test]
+    fn rejects_overflowing_varuint() {
+        let mut r = Reader {
+            buf: &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f],
+            pos: 0,
+        };
+        assert_eq!(r.varuint(), Err(OtsError::OutOfRange("varuint")));
+        let mut r = Reader {
+            buf: &[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01],
+            pos: 0,
+        };
+        assert_eq!(r.varuint(), Ok(u64::MAX));
+    }
+
+    /// Corrupted variants of a real proof must be rejected or parsed, never
+    /// panic, and a parsed variant must still be internally consistent.
+    #[test]
+    fn mutations_of_a_real_proof_never_panic() {
+        let real = include_bytes!(
+            "../tests/fixtures/anchor/deusproof-0baa3414-c57b-4fe5-bebf-15226f7cdd1d.ots"
+        );
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..20_000 {
+            let mut v = real.to_vec();
+            match next() % 3 {
+                0 => {
+                    let i = (next() as usize) % v.len();
+                    v[i] = next() as u8;
+                }
+                1 => {
+                    let cut = (next() as usize) % v.len();
+                    v.truncate(cut);
+                }
+                _ => {
+                    let i = (next() as usize) % v.len();
+                    v.insert(i, next() as u8);
+                }
+            }
+            if let Ok(p) = parse_detached(&v) {
+                assert!(p
+                    .attestations
+                    .iter()
+                    .all(|a| a.message.len() <= MAX_RESULT_LENGTH));
+            }
+        }
     }
 
     #[test]

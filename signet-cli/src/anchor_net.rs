@@ -120,6 +120,8 @@ impl AnchorSink for DeusproofSink {
             .ok_or("response has no record id")?
             .to_string();
         let sealed = anchor::deusproof_sealed_bytes(commitment, &id);
+        // Validate the id (and so the whole layout) before using it in any URL.
+        anchor::sealed_commitment(anchor::SEALED_DEUSPROOF_SEED_V1, &sealed, &id)?;
         // If the sink already serves the sealed bytes, they must be exactly
         // the documented layout. (It serves them once a proof exists.)
         if let Some(served) = self.get_bytes(&format!("/api/anchors/seed/{id}"))? {

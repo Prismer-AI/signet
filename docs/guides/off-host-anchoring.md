@@ -21,6 +21,7 @@ cargo install --path signet-cli --features anchoring
 signet audit --anchor deusproof              # submit a commitment to the current tip
 signet audit --refresh-anchors deusproof     # later: fetch the upgraded Bitcoin proof
 signet audit --export-checkpoint anchor.json # hand this to whoever audits you
+# or both at once: signet audit --anchor deusproof --export-checkpoint anchor.json
 
 # The auditor, on their own machine, with their own Bitcoin node:
 signet audit --verify-anchors \
@@ -90,8 +91,19 @@ every `.jsonl` in its directory) is unaffected. One JSON object per line; unknow
  "proofs":[{"kind":"opentimestamps","data_b64":"…"},{"kind":"rfc3161","data_b64":"…"}]}
 ```
 
-`submitted_at` is informational. `--refresh-anchors` only ever changes `proofs`, and never replaces
-a Bitcoin-attested OpenTimestamps proof with one that has lost its attestation.
+`submitted_at` is informational. `--refresh-anchors` only ever changes `proofs`, and never trades
+existing evidence for an unverified candidate:
+
+- an OpenTimestamps proof that already carries a Bitcoin attestation is kept. It is replaced only when
+  `--bitcoin-rpc` is given, the stored proof fails against your node, and the candidate verifies;
+- a pending proof is upgraded by a candidate that parses and covers the same bytes. With
+  `--bitcoin-rpc`, a candidate's Bitcoin attestation must also verify;
+- rejected candidates and sink failures are listed, partial updates are kept, and the command exits
+  non-zero if anything failed.
+
+`--export-checkpoint FILE` can be combined with `--anchor` or `--refresh-anchors`: the file is written
+after that operation succeeds, and the command fails if it cannot be written. It cannot be combined with
+`--verify-anchors`.
 
 ## Results
 

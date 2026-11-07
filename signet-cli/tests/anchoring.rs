@@ -84,6 +84,25 @@ fn existing_audit_flags_are_unchanged() {
         .success();
 }
 
+#[test]
+fn export_checkpoint_cannot_be_silently_skipped_by_another_operation() {
+    let dir = tempdir().unwrap();
+    log_with_records(dir.path(), 1);
+    let out = dir.path().join("cp.json");
+    signet()
+        .env("SIGNET_HOME", dir.path())
+        .args([
+            "audit",
+            "--verify-anchors",
+            "--export-checkpoint",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("cannot be used with"));
+    assert!(!out.exists());
+}
+
 #[cfg(feature = "anchoring")]
 mod with_network_feature {
     use super::*;
@@ -324,5 +343,158 @@ mod with_network_feature {
             .stderr(predicate::str::contains("HTTP 500"));
         assert_eq!(snapshot(&audit_dir), before);
         assert!(!dir.path().join("anchors").join("anchors.jsonl").exists());
+    }
+
+    /// Mock register that hands out a new record id per submission and can
+    /// fail the proof download for chosen record numbers (1-based).
+    fn mock_deusproof_sequential(fail_ots_for: Vec<usize>) -> String {
+        let estado: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        serve(Arc::new(move |method: &str, path: &str, body: &[u8]| {
+            let mut hashes = estado.lock().unwrap();
+            if method == "POST" && path == "/api/certifications/hash" {
+                let v: serde_json::Value = serde_json::from_slice(body).unwrap();
+                hashes.push(v["output_hash"].as_str().unwrap().to_string());
+                let id = format!("00000000-0000-4000-8000-{:012x}", hashes.len());
+                return (201, format!(r#"{{"id":"{id}"}}"#).into_bytes());
+            }
+            for (i, hash) in hashes.iter().enumerate() {
+                let id = format!("00000000-0000-4000-8000-{:012x}", i + 1);
+                if path == format!("/api/anchors/ots/{id}") {
+                    if fail_ots_for.contains(&(i + 1)) {
+                        return (500, b"internal error".to_vec());
+                    }
+                    let seed = format!(":{hash}:{id}");
+                    let digest: [u8; 32] = Sha256::digest(seed.as_bytes()).into();
+                    return (200, ots_proof(&digest, None));
+                }
+            }
+            (404, b"not found".to_vec())
+        }))
+    }
+
+    #[test]
+    fn anchor_and_export_checkpoint_in_one_call_writes_the_checkpoint() {
+        let dir = tempdir().unwrap();
+        log_with_records(dir.path(), 1);
+        let url = mock_deusproof_sequential(vec![]);
+        let cp = dir.path().join("checkpoint.json");
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "audit",
+                "--anchor",
+                "deusproof",
+                "--anchor-url",
+                &url,
+                "--export-checkpoint",
+                cp.to_str().unwrap(),
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Anchored 1 records"))
+            .stdout(predicate::str::contains("Wrote anchor #1"));
+        let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&cp).unwrap()).unwrap();
+        assert_eq!(v["count"], 1);
+    }
+
+    #[test]
+    fn refresh_with_an_http_failure_exits_non_zero() {
+        let dir = tempdir().unwrap();
+        log_with_records(dir.path(), 1);
+        let url = mock_deusproof_sequential(vec![1]);
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["audit", "--anchor", "deusproof", "--anchor-url", &url])
+            .assert()
+            .success();
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "audit",
+                "--refresh-anchors",
+                "deusproof",
+                "--anchor-url",
+                &url,
+            ])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains(
+                "0 of 1 anchor(s) updated, 1 failed",
+            ))
+            .stderr(predicate::str::contains("HTTP 500"));
+    }
+
+    #[test]
+    fn refresh_partial_success_keeps_the_update_and_exits_non_zero() {
+        let dir = tempdir().unwrap();
+        log_with_records(dir.path(), 1);
+        // Record 1 cannot serve its proof at anchor time or refresh time;
+        // record 2 serves it at refresh time only.
+        let url = mock_deusproof_sequential(vec![1]);
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["audit", "--anchor", "deusproof", "--anchor-url", &url])
+            .assert()
+            .success();
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "sign",
+                "--key",
+                "anchorkey",
+                "--tool",
+                "bash",
+                "--params",
+                r#"{"cmd":"more"}"#,
+                "--target",
+                "mcp://local",
+            ])
+            .assert()
+            .success();
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args(["audit", "--anchor", "deusproof", "--anchor-url", &url])
+            .assert()
+            .success();
+        // Drop the proof the second anchor got at submission time, so the
+        // refresh has something to add.
+        let path = dir.path().join("anchors").join("anchors.jsonl");
+        let lines: Vec<serde_json::Value> = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let mut rewritten = String::new();
+        for (i, mut v) in lines.into_iter().enumerate() {
+            if i == 1 {
+                v["proofs"] = serde_json::json!([]);
+            }
+            rewritten.push_str(&v.to_string());
+            rewritten.push('\n');
+        }
+        fs::write(&path, rewritten).unwrap();
+
+        signet()
+            .env("SIGNET_HOME", dir.path())
+            .args([
+                "audit",
+                "--refresh-anchors",
+                "deusproof",
+                "--anchor-url",
+                &url,
+            ])
+            .assert()
+            .failure()
+            .stdout(predicate::str::contains(
+                "1 of 2 anchor(s) updated, 1 failed",
+            ));
+        let second: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&path).unwrap().lines().nth(1).unwrap())
+                .unwrap();
+        assert_eq!(
+            second["proofs"].as_array().unwrap().len(),
+            1,
+            "the partial update is kept"
+        );
     }
 }

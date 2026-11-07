@@ -387,33 +387,59 @@ pub fn anchor_now(base: &Path, sink: &dyn AnchorSink) -> Result<AnchorRecord, An
     result
 }
 
+/// What a refresh did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RefreshReport {
+    /// Anchors held by this sink.
+    pub considered: usize,
+    /// Anchors whose stored proofs changed.
+    pub updated: usize,
+    /// Per-anchor failures: the sink could not answer, or a candidate proof
+    /// was rejected. A non-empty list means the refresh did not fully succeed.
+    pub errors: Vec<String>,
+}
+
 /// Ask `sink` for current proofs of every anchor it holds.
 ///
-/// Only `proofs` is ever changed. A refreshed OpenTimestamps proof replaces
-/// the stored one only if it parses, covers the same bytes, and does not lose
-/// a Bitcoin attestation the stored one had. Returns (updated, errors).
+/// Only `proofs` is ever changed, and existing evidence is never traded for
+/// an unverified candidate:
+///
+/// * an OpenTimestamps proof that already carries a Bitcoin attestation is
+///   kept. It is replaced only when `bitcoin` is given, the stored proof does
+///   not verify against it, and the candidate does;
+/// * a pending (or missing) proof is replaced by a candidate that parses and
+///   covers the same bytes. When `bitcoin` is given and the candidate carries
+///   a Bitcoin attestation, the candidate must also verify;
+/// * other proof kinds are only added when none is stored.
+///
+/// Rejected candidates are reported in [`RefreshReport::errors`].
 pub fn refresh_anchors(
     base: &Path,
     sink: &dyn AnchorSink,
-) -> Result<(usize, Vec<String>), AnchorError> {
+    bitcoin: Option<&dyn BitcoinHeaderSource>,
+) -> Result<RefreshReport, AnchorError> {
     let lock = lock_anchors(base)?;
-    let result = (|| -> Result<(usize, Vec<String>), AnchorError> {
+    let result = (|| -> Result<RefreshReport, AnchorError> {
         let mut records = read_anchors(base)?;
-        let mut updated = 0usize;
-        let mut errors = Vec::new();
+        let mut report = RefreshReport::default();
         for record in records.iter_mut().filter(|r| r.sink == sink.id()) {
+            report.considered += 1;
             let fresh = match sink.refresh(record) {
                 Ok(p) => p,
                 Err(e) => {
-                    errors.push(format!("{}: {e}", record.commitment));
+                    report.errors.push(format!("{}: {e}", record.commitment));
                     continue;
                 }
             };
-            if merge_proofs(record, fresh) {
-                updated += 1;
+            let (changed, rejected) = merge_proofs(record, fresh, bitcoin);
+            if changed {
+                report.updated += 1;
+            }
+            for r in rejected {
+                report.errors.push(format!("{}: {r}", record.commitment));
             }
         }
-        if updated > 0 {
+        if report.updated > 0 {
             let path = anchors_path(base);
             let tmp = path.with_extension("jsonl.tmp");
             {
@@ -429,59 +455,99 @@ pub fn refresh_anchors(
             }
             fs::rename(&tmp, &path)?;
         }
-        Ok((updated, errors))
+        Ok(report)
     })();
     let _ = lock.unlock();
     result
 }
 
-fn merge_proofs(record: &mut AnchorRecord, fresh: Vec<AnchorProof>) -> bool {
-    let digest = match B64.decode(&record.sealed_bytes_b64) {
-        Ok(sealed) => <[u8; 32]>::from(Sha256::digest(&sealed)),
-        Err(_) => return false,
-    };
-    let mut changed = false;
-    for proof in fresh {
-        let existing = record.proofs.iter().position(|p| p.kind == proof.kind);
-        match proof.kind.as_str() {
-            PROOF_OPENTIMESTAMPS => {
-                let Some(new) = B64
-                    .decode(&proof.data_b64)
-                    .ok()
-                    .and_then(|b| ots::parse_detached(&b).ok())
-                    .filter(|p| p.digest == digest)
-                else {
-                    continue;
-                };
-                match existing {
-                    None => {
-                        record.proofs.push(proof);
-                        changed = true;
-                    }
-                    Some(i) if record.proofs[i].data_b64 != proof.data_b64 => {
-                        let old_has_btc = B64
-                            .decode(&record.proofs[i].data_b64)
-                            .ok()
-                            .and_then(|b| ots::parse_detached(&b).ok())
-                            .map(|p| p.bitcoin().next().is_some())
-                            .unwrap_or(false);
-                        if new.bitcoin().next().is_some() || !old_has_btc {
-                            record.proofs[i] = proof;
-                            changed = true;
-                        }
-                    }
-                    Some(_) => {}
-                }
-            }
-            _ => {
-                if existing.is_none() {
-                    record.proofs.push(proof);
-                    changed = true;
-                }
-            }
+fn parse_ots_proof(p: &AnchorProof) -> Option<ots::OtsProof> {
+    B64.decode(&p.data_b64)
+        .ok()
+        .and_then(|b| ots::parse_detached(&b).ok())
+}
+
+/// `Some(true)` if every Bitcoin attestation matches the header at its
+/// height (and there is at least one), `Some(false)` on any mismatch, `None`
+/// if the source could not answer.
+fn bitcoin_attestations_verify(
+    proof: &ots::OtsProof,
+    source: &dyn BitcoinHeaderSource,
+) -> Option<bool> {
+    let mut seen = false;
+    for (height, message) in proof.bitcoin() {
+        seen = true;
+        match source.header_at(height) {
+            Ok(h) if message == h.merkle_root.as_slice() => {}
+            Ok(_) => return Some(false),
+            Err(_) => return None,
         }
     }
-    changed
+    Some(seen)
+}
+
+/// Returns (changed, rejected candidates).
+fn merge_proofs(
+    record: &mut AnchorRecord,
+    fresh: Vec<AnchorProof>,
+    bitcoin: Option<&dyn BitcoinHeaderSource>,
+) -> (bool, Vec<String>) {
+    let digest = match B64.decode(&record.sealed_bytes_b64) {
+        Ok(sealed) => <[u8; 32]>::from(Sha256::digest(&sealed)),
+        Err(_) => return (false, vec!["sealed_bytes_b64 is not base64".into()]),
+    };
+    let mut changed = false;
+    let mut rejected = Vec::new();
+    for proof in fresh {
+        let existing = record.proofs.iter().position(|p| p.kind == proof.kind);
+        if proof.kind != PROOF_OPENTIMESTAMPS {
+            if existing.is_none() {
+                record.proofs.push(proof);
+                changed = true;
+            }
+            continue;
+        }
+        let Some(new) = parse_ots_proof(&proof).filter(|p| p.digest == digest) else {
+            rejected
+                .push("candidate opentimestamps proof is malformed or covers other bytes".into());
+            continue;
+        };
+        let new_has_btc = new.bitcoin().next().is_some();
+        let new_verifies = bitcoin.and_then(|src| bitcoin_attestations_verify(&new, src));
+        if new_has_btc && new_verifies == Some(false) {
+            rejected.push(
+                "candidate opentimestamps proof does not match the Bitcoin headers of your node"
+                    .into(),
+            );
+            continue;
+        }
+        let Some(i) = existing else {
+            record.proofs.push(proof);
+            changed = true;
+            continue;
+        };
+        if record.proofs[i].data_b64 == proof.data_b64 {
+            continue;
+        }
+        let old = parse_ots_proof(&record.proofs[i]);
+        let old_has_btc = old.as_ref().is_some_and(|p| p.bitcoin().next().is_some());
+        let replace = if old_has_btc {
+            // Existing evidence: swap only for a candidate that verifies when
+            // the stored proof does not.
+            let old_verifies = match (old.as_ref(), bitcoin) {
+                (Some(o), Some(src)) => bitcoin_attestations_verify(o, src),
+                _ => None,
+            };
+            old_verifies == Some(false) && new_verifies == Some(true)
+        } else {
+            true
+        };
+        if replace {
+            record.proofs[i] = proof;
+            changed = true;
+        }
+    }
+    (changed, rejected)
 }
 
 // ---------------------------------------------------------------------------
@@ -1606,13 +1672,108 @@ mod tests {
         pending_sink.confirmed = false;
         anchor_now(dir.path(), &pending_sink).unwrap();
 
-        let (updated, errors) = refresh_anchors(dir.path(), &Upgrader { confirmed: true }).unwrap();
-        assert_eq!((updated, errors.len()), (1, 0));
+        let report = refresh_anchors(dir.path(), &Upgrader { confirmed: true }, None).unwrap();
+        assert_eq!(
+            (report.considered, report.updated, report.errors.len()),
+            (1, 1, 0)
+        );
         let after_upgrade = fs::read(anchors_path(dir.path())).unwrap();
 
         // A later refresh that only has a pending proof must not replace it.
-        let (updated, _) = refresh_anchors(dir.path(), &Upgrader { confirmed: false }).unwrap();
-        assert_eq!(updated, 0);
+        let report = refresh_anchors(dir.path(), &Upgrader { confirmed: false }, None).unwrap();
+        assert_eq!(report.updated, 0);
         assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), after_upgrade);
+    }
+
+    /// A sink that answers refresh with a parseable proof over the right bytes
+    /// whose Bitcoin attestation points at a block that does not commit to it.
+    struct BogusUpgrader {
+        height: u64,
+    }
+
+    impl AnchorSink for BogusUpgrader {
+        fn id(&self) -> &str {
+            "fake"
+        }
+        fn submit(&self, _c: &[u8; 32]) -> Result<SinkSubmission, String> {
+            Err("unused".into())
+        }
+        fn refresh(&self, r: &AnchorRecord) -> Result<Vec<AnchorProof>, String> {
+            let sealed = B64.decode(&r.sealed_bytes_b64).unwrap();
+            let digest: [u8; 32] = Sha256::digest(&sealed).into();
+            let (ots, _) = ots_proof(&digest, Some(self.height));
+            Ok(vec![AnchorProof {
+                kind: PROOF_OPENTIMESTAMPS.into(),
+                data_b64: B64.encode(ots),
+            }])
+        }
+    }
+
+    #[test]
+    fn refresh_never_trades_a_valid_bitcoin_proof_for_an_unverified_one() {
+        let dir = log_with(1);
+        let sink = FakeSink::new();
+        anchor_now(dir.path(), &sink).unwrap();
+        assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Verified);
+        let before = fs::read(anchors_path(dir.path())).unwrap();
+
+        // Same digest, parses, has a Bitcoin attestation, but the block at
+        // that height does not commit to it.
+        sink.roots.borrow_mut().insert(901_234, [7u8; 32]);
+        let node = FakeNode(&sink);
+        let bogus = BogusUpgrader { height: 901_234 };
+
+        // Without a node: the stored Bitcoin proof is kept.
+        let report = refresh_anchors(dir.path(), &bogus, None).unwrap();
+        assert_eq!(report.updated, 0);
+        assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
+
+        // With a node: the candidate is rejected and reported.
+        let report = refresh_anchors(dir.path(), &bogus, Some(&node)).unwrap();
+        assert_eq!(report.updated, 0);
+        assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
+        assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
+        assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Verified);
+    }
+
+    #[test]
+    fn refresh_with_a_node_rejects_an_unverifiable_upgrade_of_a_pending_proof() {
+        let dir = log_with(1);
+        let mut sink = FakeSink::new();
+        sink.confirmed = false;
+        anchor_now(dir.path(), &sink).unwrap();
+        let before = fs::read(anchors_path(dir.path())).unwrap();
+
+        sink.roots.borrow_mut().insert(905_000, [9u8; 32]);
+        let node = FakeNode(&sink);
+        let report =
+            refresh_anchors(dir.path(), &BogusUpgrader { height: 905_000 }, Some(&node)).unwrap();
+        assert_eq!(
+            (report.considered, report.updated, report.errors.len()),
+            (1, 0, 1)
+        );
+        assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
+        assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Pending);
+    }
+
+    #[test]
+    fn refresh_reports_sink_failures() {
+        struct Down;
+        impl AnchorSink for Down {
+            fn id(&self) -> &str {
+                "fake"
+            }
+            fn submit(&self, _c: &[u8; 32]) -> Result<SinkSubmission, String> {
+                Err("unused".into())
+            }
+            fn refresh(&self, _r: &AnchorRecord) -> Result<Vec<AnchorProof>, String> {
+                Err("HTTP 503".into())
+            }
+        }
+        let dir = log_with(1);
+        anchor_now(dir.path(), &FakeSink::new()).unwrap();
+        let report = refresh_anchors(dir.path(), &Down, None).unwrap();
+        assert_eq!((report.considered, report.updated), (1, 0));
+        assert!(report.errors[0].contains("HTTP 503"));
     }
 }

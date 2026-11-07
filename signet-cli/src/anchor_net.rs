@@ -271,12 +271,31 @@ pub fn anchor_cmd(dir: &Path, sink: &str, url: &str, handle: Option<&str>) -> Re
     Ok(())
 }
 
-pub fn refresh_cmd(dir: &Path, sink: &str, url: &str) -> Result<()> {
+pub fn refresh_cmd(
+    dir: &Path,
+    sink: &str,
+    url: &str,
+    bitcoin: Option<&dyn BitcoinHeaderSource>,
+) -> Result<()> {
     let sink = make_sink(sink, url, None)?;
-    let (updated, errors) = anchor::refresh_anchors(dir, &sink)?;
-    println!("{updated} anchor(s) updated");
-    for e in &errors {
+    let report = anchor::refresh_anchors(dir, &sink, bitcoin)?;
+    println!(
+        "{} of {} anchor(s) updated, {} failed",
+        report.updated,
+        report.considered,
+        report.errors.len()
+    );
+    for e in &report.errors {
         eprintln!("  {e}");
+    }
+    // Partial updates are kept on disk; the exit status still says the
+    // refresh did not fully succeed, so a script can tell.
+    if !report.errors.is_empty() {
+        bail!(
+            "anchor refresh failed for {} of {} anchor(s)",
+            report.errors.len(),
+            report.considered
+        );
     }
     Ok(())
 }

@@ -102,7 +102,9 @@ pub struct AuditArgs {
     pub max_unanchored: Option<u64>,
 
     /// Write the latest anchor record to FILE, for an auditor to retain.
-    #[arg(long, value_name = "FILE")]
+    /// With --anchor or --refresh-anchors it is written after that operation
+    /// succeeds (and not at all if it fails).
+    #[arg(long, value_name = "FILE", conflicts_with_all = &["verify_anchors", "export", "bundle", "verify", "restore"])]
     pub export_checkpoint: Option<String>,
 
     /// Submit a commitment to the current chain tip to an anchoring sink
@@ -128,9 +130,11 @@ pub struct AuditArgs {
     pub refresh_anchors: Option<String>,
 
     /// JSON-RPC URL of your own validating Bitcoin Core node, used to check
-    /// Bitcoin attestations (e.g. http://127.0.0.1:8332).
+    /// Bitcoin attestations (e.g. http://127.0.0.1:8332). Works with
+    /// --verify-anchors, and with --refresh-anchors so that a refreshed proof
+    /// is only accepted if it verifies.
     #[cfg(feature = "anchoring")]
-    #[arg(long, value_name = "URL", requires = "verify_anchors")]
+    #[arg(long, value_name = "URL")]
     pub bitcoin_rpc: Option<String>,
 
     /// Bitcoin Core cookie file. Without it, SIGNET_BITCOIN_RPC_AUTH=user:password is used.
@@ -160,35 +164,50 @@ pub fn audit(args: AuditArgs) -> Result<()> {
     }
 
     #[cfg(feature = "anchoring")]
+    let node = match args.bitcoin_rpc.as_deref() {
+        Some(_) if !args.verify_anchors && args.refresh_anchors.is_none() => {
+            bail!("--bitcoin-rpc is used with --verify-anchors or --refresh-anchors")
+        }
+        Some(url) => Some(crate::anchor_net::BitcoinRpc::new(
+            url,
+            args.bitcoin_rpc_cookie.as_deref(),
+        )?),
+        None => None,
+    };
+    #[cfg(feature = "anchoring")]
+    let bitcoin = node
+        .as_ref()
+        .map(|n| n as &dyn signet_core::anchor::BitcoinHeaderSource);
+    #[cfg(not(feature = "anchoring"))]
+    let bitcoin: Option<&dyn signet_core::anchor::BitcoinHeaderSource> = None;
+
+    #[cfg(feature = "anchoring")]
     {
+        // The checkpoint is what makes rollback detectable, so a requested
+        // export is never skipped silently: it runs after the operation
+        // succeeds, and an export failure fails the command.
         if let Some(sink) = args.anchor.as_deref() {
-            return crate::anchor_net::anchor_cmd(
+            crate::anchor_net::anchor_cmd(
                 &dir,
                 sink,
                 &args.anchor_url,
                 args.anchor_handle.as_deref(),
-            );
+            )?;
+            if let Some(path) = args.export_checkpoint.as_deref() {
+                export_checkpoint(&dir, path)?;
+            }
+            return Ok(());
         }
         if let Some(sink) = args.refresh_anchors.as_deref() {
-            return crate::anchor_net::refresh_cmd(&dir, sink, &args.anchor_url);
+            crate::anchor_net::refresh_cmd(&dir, sink, &args.anchor_url, bitcoin)?;
+            if let Some(path) = args.export_checkpoint.as_deref() {
+                export_checkpoint(&dir, path)?;
+            }
+            return Ok(());
         }
     }
 
     if args.verify_anchors {
-        #[cfg(feature = "anchoring")]
-        let node = match args.bitcoin_rpc.as_deref() {
-            Some(url) => Some(crate::anchor_net::BitcoinRpc::new(
-                url,
-                args.bitcoin_rpc_cookie.as_deref(),
-            )?),
-            None => None,
-        };
-        #[cfg(feature = "anchoring")]
-        let bitcoin = node
-            .as_ref()
-            .map(|n| n as &dyn signet_core::anchor::BitcoinHeaderSource);
-        #[cfg(not(feature = "anchoring"))]
-        let bitcoin: Option<&dyn signet_core::anchor::BitcoinHeaderSource> = None;
         return verify_anchors(
             &dir,
             bitcoin,

@@ -4,6 +4,8 @@ use std::process;
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
+#[cfg(feature = "anchoring")]
+mod anchor_net;
 mod audit_helpers;
 mod cmd_audit;
 mod cmd_authorize;
@@ -215,7 +217,10 @@ fn main() {
         Ok(()) => {}
         Err(e) => {
             let msg = format!("{e}");
-            if msg.contains("signature verification failed") || msg.contains("policy violation") {
+            if msg.contains("signature verification failed")
+                || msg.contains("policy violation")
+                || msg.contains("anchor verification failed")
+            {
                 eprintln!("Invalid: {e}");
                 process::exit(exit_codes::VERIFICATION_FAILED);
             } else if msg.contains("requires approval") {

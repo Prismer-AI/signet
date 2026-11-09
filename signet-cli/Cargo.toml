@@ -12,6 +12,11 @@ categories = ["command-line-utilities", "cryptography"]
 name = "signet"
 path = "src/main.rs"
 
+[features]
+default = []
+# Off-host anchoring: the DEUSPROOF sink and Bitcoin Core RPC. Off by default.
+anchoring = ["dep:ureq"]
+
 [dependencies]
 signet-core = { version = "0.11.0", path = "../crates/signet-core" }
 clap = { version = "4", features = ["derive"] }
@@ -28,6 +33,7 @@ serde = { version = "1", features = ["derive"] }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "process", "io-util", "io-std"] }
 open = "5"
+ureq = { version = "2.12", optional = true, default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 assert_cmd = "2"

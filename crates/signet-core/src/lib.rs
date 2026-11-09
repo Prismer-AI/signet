@@ -5,6 +5,7 @@ pub mod delegation;
 pub mod error;
 pub mod identity;
 pub mod obligation;
+pub mod ots;
 pub mod policy;
 pub mod policy_eval;
 pub mod policy_load;
@@ -22,6 +23,9 @@ pub mod keystore;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audit;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod anchor;
 
 pub use authorization::{
     authorize, intent_hash, verify_decision, verify_decision_for_action, verify_decision_trusted,

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **signet-core**: `refresh_anchors` with a configured Bitcoin node now accepts a Bitcoin-attested candidate only when the node confirms it. An unreachable node or a failed header lookup rejects the candidate, keeps the stored proof and is reported as a refresh failure (review of #14). A candidate identical to the stored proof is skipped without a node lookup.
+
 ### Added
 
 - **signet-core**: Optional off-host anchoring (draft, #13). `anchor` module: a commitment over the chain tip, record count and previous anchor; a provider-neutral `AnchorSink` trait; anchors stored in `anchors/anchors.jsonl`, outside the audit directory; offline `verify_anchors` that recomputes every commitment, validates the exact sealed bytes and derives proof status itself, with an auditor-supplied checkpoint to detect truncation, replacement and rollback. `ots` module: a dependency-free reader for detached OpenTimestamps proofs. `audit::chain_record_hashes`.

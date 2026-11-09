@@ -97,7 +97,9 @@ existing evidence for an unverified candidate:
 - an OpenTimestamps proof that already carries a Bitcoin attestation is kept. It is replaced only when
   `--bitcoin-rpc` is given, the stored proof fails against your node, and the candidate verifies;
 - a pending proof is upgraded by a candidate that parses and covers the same bytes. With
-  `--bitcoin-rpc`, a candidate's Bitcoin attestation must also verify;
+  `--bitcoin-rpc`, a candidate's Bitcoin attestation must also verify; if your node cannot
+  answer (unreachable, or a header lookup fails), the candidate is rejected and the stored
+  proof is kept;
 - rejected candidates and sink failures are listed, partial updates are kept, and the command exits
   non-zero if anything failed.
 

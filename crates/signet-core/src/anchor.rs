@@ -512,23 +512,40 @@ fn merge_proofs(
                 .push("candidate opentimestamps proof is malformed or covers other bytes".into());
             continue;
         };
-        let new_has_btc = new.bitcoin().next().is_some();
-        let new_verifies = bitcoin.and_then(|src| bitcoin_attestations_verify(&new, src));
-        if new_has_btc && new_verifies == Some(false) {
-            rejected.push(
-                "candidate opentimestamps proof does not match the Bitcoin headers of your node"
-                    .into(),
-            );
+        // Nothing to merge: the sink returned what is already stored.
+        if existing.is_some_and(|i| record.proofs[i].data_b64 == proof.data_b64) {
             continue;
         }
+        let new_has_btc = new.bitcoin().next().is_some();
+        // With a node configured, a candidate that carries a Bitcoin attestation
+        // is accepted only when the node confirms it. A mismatch and an
+        // unanswered lookup are both rejected (and reported), so the stored
+        // proof is kept and the refresh fails instead of trusting the sink.
+        let new_verifies = match bitcoin {
+            Some(src) if new_has_btc => match bitcoin_attestations_verify(&new, src) {
+                Some(true) => true,
+                Some(false) => {
+                    rejected.push(
+                        "candidate opentimestamps proof does not match the Bitcoin headers of your node"
+                            .into(),
+                    );
+                    continue;
+                }
+                None => {
+                    rejected.push(
+                        "your Bitcoin node could not answer for the candidate's attestation; the stored proof was kept"
+                            .into(),
+                    );
+                    continue;
+                }
+            },
+            _ => false,
+        };
         let Some(i) = existing else {
             record.proofs.push(proof);
             changed = true;
             continue;
         };
-        if record.proofs[i].data_b64 == proof.data_b64 {
-            continue;
-        }
         let old = parse_ots_proof(&record.proofs[i]);
         let old_has_btc = old.as_ref().is_some_and(|p| p.bitcoin().next().is_some());
         let replace = if old_has_btc {
@@ -538,7 +555,7 @@ fn merge_proofs(
                 (Some(o), Some(src)) => bitcoin_attestations_verify(o, src),
                 _ => None,
             };
-            old_verifies == Some(false) && new_verifies == Some(true)
+            old_verifies == Some(false) && new_verifies
         } else {
             true
         };
@@ -1754,6 +1771,85 @@ mod tests {
         );
         assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
         assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Pending);
+    }
+
+    /// A configured node that cannot answer (unreachable, or the header lookup
+    /// fails). Review of #14: such a node must not let an unverified
+    /// Bitcoin-attested candidate through.
+    struct NodeDown;
+
+    impl BitcoinHeaderSource for NodeDown {
+        fn header_at(&self, _height: u64) -> Result<BlockHeader, String> {
+            Err("connection refused".into())
+        }
+    }
+
+    #[test]
+    fn refresh_with_an_unreachable_node_keeps_a_pending_proof_and_fails() {
+        let dir = log_with(1);
+        let mut sink = FakeSink::new();
+        sink.confirmed = false;
+        anchor_now(dir.path(), &sink).unwrap();
+        let before = fs::read(anchors_path(dir.path())).unwrap();
+
+        let report = refresh_anchors(
+            dir.path(),
+            &BogusUpgrader { height: 905_001 },
+            Some(&NodeDown),
+        )
+        .unwrap();
+        assert_eq!(
+            (report.considered, report.updated, report.errors.len()),
+            (1, 0, 1),
+            "{:?}",
+            report.errors
+        );
+        assert!(report.errors[0].contains("could not answer"));
+        assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
+        assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Pending);
+    }
+
+    #[test]
+    fn refresh_with_an_unreachable_node_keeps_a_valid_bitcoin_proof_and_fails() {
+        let dir = log_with(1);
+        let sink = FakeSink::new();
+        anchor_now(dir.path(), &sink).unwrap();
+        let before = fs::read(anchors_path(dir.path())).unwrap();
+
+        let report = refresh_anchors(
+            dir.path(),
+            &BogusUpgrader { height: 905_002 },
+            Some(&NodeDown),
+        )
+        .unwrap();
+        assert_eq!((report.updated, report.errors.len()), (0, 1));
+        assert_eq!(fs::read(anchors_path(dir.path())).unwrap(), before);
+        assert_eq!(verify(dir.path(), &sink, None).verdict, Verdict::Verified);
+    }
+
+    #[test]
+    fn refresh_with_an_unreachable_node_ignores_an_unchanged_proof() {
+        // The sink answers with exactly what is stored: nothing to verify,
+        // nothing to report.
+        struct Same;
+        impl AnchorSink for Same {
+            fn id(&self) -> &str {
+                "fake"
+            }
+            fn submit(&self, _c: &[u8; 32]) -> Result<SinkSubmission, String> {
+                Err("unused".into())
+            }
+            fn refresh(&self, r: &AnchorRecord) -> Result<Vec<AnchorProof>, String> {
+                Ok(r.proofs.clone())
+            }
+        }
+        let dir = log_with(1);
+        anchor_now(dir.path(), &FakeSink::new()).unwrap();
+        let report = refresh_anchors(dir.path(), &Same, Some(&NodeDown)).unwrap();
+        assert_eq!(
+            (report.considered, report.updated, report.errors.len()),
+            (1, 0, 0)
+        );
     }
 
     #[test]
